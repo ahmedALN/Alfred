@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+import sounddevice as sd
 from google import genai
 from google.genai import types
 
@@ -13,18 +14,25 @@ from src.tools.registry import ToolRegistry
 class AlfredLiveSession:
     """Persistent Gemini Live session for Alfred."""
 
+    OUTPUT_SAMPLE_RATE = 24000
+    OUTPUT_CHANNELS = 1
+
     def __init__(self, registry: ToolRegistry) -> None:
         settings = load_settings()
 
-        self.client = genai.Client(api_key=settings.gemini_api_key)
+        self.client = genai.Client(
+            api_key=settings.gemini_api_key
+        )
+
         self.model = settings.gemini_live_model
         self.registry = registry
 
         self.session: Any = None
         self._connection: Any = None
+        self._audio_stream: sd.RawOutputStream | None = None
 
     def _tool_declarations(self) -> list[dict[str, Any]]:
-        """Build Gemini function declarations from Alfred's tools."""
+        """Build Gemini function declarations."""
 
         declarations: list[dict[str, Any]] = []
 
@@ -47,7 +55,8 @@ class AlfredLiveSession:
                                 "timeout": {
                                     "type": "number",
                                     "description": (
-                                        "Maximum execution time in seconds."
+                                        "Maximum execution time "
+                                        "in seconds."
                                     ),
                                 },
                             },
@@ -59,7 +68,7 @@ class AlfredLiveSession:
         return declarations
 
     def _config(self) -> types.LiveConnectConfig:
-        """Build the Gemini Live session configuration."""
+        """Build Gemini Live configuration."""
 
         declarations = self._tool_declarations()
 
@@ -76,6 +85,43 @@ class AlfredLiveSession:
             ),
         )
 
+    def _start_audio_output(self) -> None:
+        """Open the default Windows output device."""
+
+        if self._audio_stream is not None:
+            return
+
+        self._audio_stream = sd.RawOutputStream(
+            samplerate=self.OUTPUT_SAMPLE_RATE,
+            channels=self.OUTPUT_CHANNELS,
+            dtype="int16",
+        )
+
+        self._audio_stream.start()
+
+    def _stop_audio_output(self) -> None:
+        """Close the Windows audio output device."""
+
+        if self._audio_stream is None:
+            return
+
+        try:
+            self._audio_stream.stop()
+        finally:
+            self._audio_stream.close()
+            self._audio_stream = None
+
+    def _play_audio(self, audio_data: bytes) -> None:
+        """Write a PCM chunk to the output device."""
+
+        if not audio_data:
+            return
+
+        if self._audio_stream is None:
+            raise RuntimeError("Audio output is not initialized.")
+
+        self._audio_stream.write(audio_data)
+
     async def connect(self) -> None:
         """Open and enter the persistent Gemini Live connection."""
 
@@ -84,15 +130,22 @@ class AlfredLiveSession:
                 "Alfred Live session is already connected."
             )
 
+        self._start_audio_output()
+
         self._connection = self.client.aio.live.connect(
             model=self.model,
             config=self._config(),
         )
 
-        self.session = await self._connection.__aenter__()
+        try:
+            self.session = await self._connection.__aenter__()
+        except Exception:
+            self._connection = None
+            self._stop_audio_output()
+            raise
 
     async def ask(self, prompt: str) -> str:
-        """Send text to the Live session and return its transcript."""
+        """Send a text prompt and stream the spoken response."""
 
         if self.session is None:
             raise RuntimeError(
@@ -109,16 +162,17 @@ class AlfredLiveSession:
         return await self._receive_until_complete()
 
     async def _receive_until_complete(self) -> str:
-        """Receive one model turn, handling tool calls."""
+        """Receive one model turn and stream its audio."""
 
         transcript_parts: list[str] = []
 
         while True:
             async for response in self.session.receive():
-                # Live API function calling is manual: Alfred must execute
-                # the requested function and send the response back.
+                # Handle tool calls before normal model output.
                 if response.tool_call:
-                    await self._handle_tool_call(response.tool_call)
+                    await self._handle_tool_call(
+                        response.tool_call
+                    )
                     continue
 
                 server_content = response.server_content
@@ -126,16 +180,21 @@ class AlfredLiveSession:
                 if server_content is None:
                     continue
 
-                # Gemini 3.1 Live can send multiple model-turn parts in
-                # a single server event, so inspect every part.
                 model_turn = server_content.model_turn
 
                 if model_turn is not None:
                     for part in model_turn.parts:
+                        # Gemini Live audio output arrives as raw PCM.
+                        if part.inline_data:
+                            audio_data = part.inline_data.data
+
+                            if isinstance(audio_data, bytes):
+                                self._play_audio(audio_data)
+
+                        # Some responses can also contain text.
                         if part.text:
                             transcript_parts.append(part.text)
 
-                # Output transcription contains the spoken response text.
                 output_transcription = (
                     server_content.output_transcription
                 )
@@ -147,14 +206,21 @@ class AlfredLiveSession:
                         )
 
                 if server_content.turn_complete:
-                    return "".join(transcript_parts).strip()
+                    return "".join(
+                        transcript_parts
+                    ).strip()
 
             await asyncio.sleep(0)
 
-    async def _handle_tool_call(self, tool_call: Any) -> None:
-        """Execute requested Alfred tools and return their results."""
+    async def _handle_tool_call(
+        self,
+        tool_call: Any,
+    ) -> None:
+        """Execute requested tools and return their results."""
 
-        function_responses: list[types.FunctionResponse] = []
+        function_responses: list[
+            types.FunctionResponse
+        ] = []
 
         for call in tool_call.function_calls:
             if not call.name:
@@ -182,17 +248,16 @@ class AlfredLiveSession:
         )
 
     async def close(self) -> None:
-        """Close the persistent Live connection."""
-
-        if self._connection is None:
-            return
+        """Close the Live connection and audio device."""
 
         try:
-            await self._connection.__aexit__(
-                None,
-                None,
-                None,
-            )
+            if self._connection is not None:
+                await self._connection.__aexit__(
+                    None,
+                    None,
+                    None,
+                )
         finally:
             self.session = None
             self._connection = None
+            self._stop_audio_output()
