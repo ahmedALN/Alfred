@@ -34,12 +34,16 @@ def main() -> None:
     )
 
     print(
-        f"Bytes: {len(image_bytes)}"
+        f"PNG bytes: {len(image_bytes)}"
     )
 
-    image_base64 = base64.b64encode(
+    encoded_image = base64.b64encode(
         image_bytes
     ).decode("ascii")
+
+    print(
+        f"Base64 characters: {len(encoded_image)}"
+    )
 
     print(
         "Creating Gemini client..."
@@ -55,27 +59,32 @@ def main() -> None:
 
     started = time.perf_counter()
 
-    interaction = client.interactions.create(
-        model="gemini-3.5-flash-lite",
-        input=[
-            {
-                "type": "text",
-                "text": (
-                    "Inspect this exact screenshot carefully. "
-                    "Describe only what is visibly present. "
-                    "Identify the foreground application window, "
-                    "any other visible application windows, and "
-                    "the applications visible on the taskbar. "
-                    "Do not infer hidden windows or previous state."
-                ),
-            },
-            {
-                "type": "image",
-                "data": image_base64,
-                "mime_type": "image/png",
-            },
-        ],
-        timeout=30,
+    interaction = (
+        client.interactions.create(
+            model="gemini-3.5-flash-lite",
+            input=[
+                {
+                    "type": "image",
+                    "data": encoded_image,
+                    "mime_type": "image/png",
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        "Inspect this exact screenshot carefully. "
+                        "Do not guess or rely on previous context. "
+                        "Describe only what is visibly present. "
+                        "Identify the foreground application, "
+                        "any other visible application windows, "
+                        "and the applications visible on the taskbar. "
+                        "Pay particular attention to whether "
+                        "PowerShell and Notepad are visible. "
+                        "State their approximate positions if "
+                        "they are visible."
+                    ),
+                },
+            ],
+        )
     )
 
     elapsed = (
@@ -88,8 +97,13 @@ def main() -> None:
     )
 
     print()
-    print("MODEL RESPONSE")
-    print("==============")
+    print(
+        "MODEL RESPONSE"
+    )
+
+    print(
+        "=============="
+    )
 
     print(
         interaction.output_text

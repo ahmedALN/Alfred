@@ -26,3 +26,30 @@ src/windows/native/ChildScreenCapture/child-capture.png
 src/windows/native/ChildScreenCapture/child-desktop.png
 src/windows/native/ChildScreenCapture/child-monitor-*.png
 debug-child-desktop.png
+
+
+
+
+**/bin/
+**/obj/
+
+
+# .NET build output
+**/bin/
+**/obj/
+
+# Alfred screenshot diagnostics
+debug-child-desktop.png
+src/windows/native/ChildScreenCapture/child-capture.png
+src/windows/native/ChildScreenCapture/child-desktop.png
+src/windows/native/ChildScreenCapture/child-monitor-*.png
+
+# .NET build output
+bin/
+obj/
+
+# Alfred screenshot diagnostics
+debug-child-desktop.png
+src/windows/native/ChildScreenCapture/child-capture.png
+src/windows/native/ChildScreenCapture/child-desktop.png
+src/windows/native/ChildScreenCapture/child-monitor-*.png

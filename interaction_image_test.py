@@ -29,11 +29,9 @@ def main() -> None:
             "Screenshot file is empty."
         )
 
-    image_base64 = (
-        base64.b64encode(
-            image_bytes
-        ).decode("utf-8")
-    )
+    image_b64 = base64.b64encode(
+        image_bytes
+    ).decode("utf-8")
 
     print(
         f"Image: {image_path}"
@@ -61,31 +59,27 @@ def main() -> None:
         model="gemini-3.5-flash-lite",
         input=[
             {
-                "type": "image",
-                "data": image_base64,
-                "mime_type": "image/png",
-            },
-            {
                 "type": "text",
                 "text": (
-                    "Look only at the screenshot supplied with "
-                    "this request. "
-                    "Describe exactly what is visible. "
-                    "State the foreground application window "
-                    "first. "
-                    "Then state any other visible application "
-                    "windows. "
-                    "Then state which application icons are "
-                    "visible on the taskbar. "
-                    "Do not infer hidden windows, previous "
-                    "state, or applications that are not "
-                    "visibly present."
+                    "Inspect this exact screenshot carefully. "
+                    "Only report things that are actually "
+                    "visible in the image. "
+                    "Identify the application window currently "
+                    "in the foreground, any other visible "
+                    "application windows, and what applications "
+                    "are visible on the taskbar. "
+                    "Pay particular attention to PowerShell "
+                    "and Notepad if they are visible. "
+                    "Do not infer hidden windows or previous "
+                    "desktop state."
                 ),
             },
+            {
+                "type": "image",
+                "data": image_b64,
+                "mime_type": "image/png",
+            },
         ],
-        generation_config={
-            "thinking_level": "minimal",
-        },
         timeout=30,
     )
 

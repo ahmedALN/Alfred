@@ -26,46 +26,35 @@ def main() -> None:
 
     if not image_bytes:
         raise RuntimeError(
-            "Screenshot is empty."
+            "Screenshot file is empty."
         )
-
-    print(
-        "Testing Interactions API with screenshot..."
-    )
-
-    print(
-        f"Image: {image_path}"
-    )
-
-    print(
-        f"Image bytes: {len(image_bytes)}"
-    )
 
     image_base64 = base64.b64encode(
         image_bytes
     ).decode("ascii")
 
     print(
+        f"Image: {image_path}"
+    )
+
+    print(
+        f"Bytes: {len(image_bytes)}"
+    )
+
+    print(
         f"Base64 characters: {len(image_base64)}"
+    )
+
+    print(
+        "Creating Gemini client..."
     )
 
     client = genai.Client(
         api_key=settings.gemini_api_key
     )
 
-    prompt = (
-        "Inspect this exact screenshot carefully. "
-        "Only describe what is visibly present. "
-        "Identify the application in the foreground, "
-        "any other visible application windows, and "
-        "what applications are visible on the taskbar. "
-        "Pay particular attention to PowerShell and "
-        "Notepad if they are visible. "
-        "Do not infer hidden windows or previous state."
-    )
-
     print(
-        "Sending image to gemini-3.5-flash-lite..."
+        "Sending Interactions API image request..."
     )
 
     started = time.perf_counter()
@@ -74,18 +63,28 @@ def main() -> None:
         model="gemini-3.5-flash-lite",
         input=[
             {
-                "type": "text",
-                "text": prompt,
-            },
-            {
                 "type": "image",
                 "data": image_base64,
                 "mime_type": "image/png",
             },
+            {
+                "type": "text",
+                "text": (
+                    "Inspect this exact screenshot carefully. "
+                    "Only describe what is actually visible. "
+                    "Identify the application window currently "
+                    "in the foreground. "
+                    "Identify any other visible application "
+                    "windows. "
+                    "Also describe the applications visible "
+                    "on the taskbar. "
+                    "Pay particular attention to whether "
+                    "PowerShell and Notepad are visible. "
+                    "Do not infer hidden windows or previous "
+                    "desktop state."
+                ),
+            },
         ],
-        generation_config={
-            "thinking_level": "minimal",
-        },
     )
 
     elapsed = (
@@ -98,13 +97,8 @@ def main() -> None:
     )
 
     print()
-    print(
-        "MODEL RESPONSE"
-    )
-
-    print(
-        "=============="
-    )
+    print("MODEL RESPONSE")
+    print("==============")
 
     print(
         interaction.output_text

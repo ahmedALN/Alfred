@@ -31,48 +31,51 @@ def main() -> None:
 
     image_base64 = base64.b64encode(
         image_bytes
-    ).decode("utf-8")
+    ).decode("ascii")
 
-    print(f"Image: {image_path}")
-    print(f"Bytes: {len(image_bytes)}")
-    print("Creating Gemini client...")
-
-    client = genai.Client(
-        api_key=settings.gemini_api_key,
+    print(
+        f"Image: {image_path}"
     )
 
     print(
-        "Sending Computer Use interaction "
-        "to gemini-3.7-flash..."
+        f"Bytes: {len(image_bytes)}"
+    )
+
+    print(
+        "Creating Gemini client..."
+    )
+
+    client = genai.Client(
+        api_key=settings.gemini_api_key
+    )
+
+    print(
+        "Sending Interactions API image request..."
     )
 
     started = time.perf_counter()
 
     interaction = client.interactions.create(
-        model="gemini-3.7-flash",
+        model="gemini-3.5-flash-lite",
         input=[
-            {
-                "type": "text",
-                "text": (
-                    "Inspect this exact Windows desktop screenshot. "
-                    "Do not perform any action. "
-                    "Identify the foreground application and "
-                    "any clearly visible background application "
-                    "windows."
-                ),
-            },
             {
                 "type": "image",
                 "data": image_base64,
                 "mime_type": "image/png",
             },
-        ],
-        tools=[
             {
-                "type": "computer_use",
-                "environment": "desktop",
-                "enable_prompt_injection_detection": True,
-            }
+                "type": "text",
+                "text": (
+                    "Inspect this exact screenshot carefully. "
+                    "Only report what is visibly present. "
+                    "Identify the foreground application window, "
+                    "any other visible application windows, and "
+                    "the applications visible on the taskbar. "
+                    "Pay particular attention to whether "
+                    "Windows PowerShell and Notepad are visible. "
+                    "Do not infer hidden windows or previous state."
+                ),
+            },
         ],
     )
 
@@ -86,42 +89,12 @@ def main() -> None:
     )
 
     print()
-    print("INTERACTION")
-    print("===========")
-    print(interaction)
+    print("MODEL RESPONSE")
+    print("==============")
 
-    print()
-    print("OUTPUT TEXT")
-    print("===========")
-
-    output_text = getattr(
-        interaction,
-        "output_text",
-        None,
+    print(
+        interaction.output_text
     )
-
-    print(output_text)
-
-    print()
-    print("OUTPUT")
-    print("======")
-
-    output = getattr(
-        interaction,
-        "output",
-        None,
-    )
-
-    if output is None:
-        print("No output attribute.")
-    else:
-        for index, item in enumerate(
-            output,
-            start=1,
-        ):
-            print(
-                f"[{index}] {item!r}"
-            )
 
 
 if __name__ == "__main__":
