@@ -13,14 +13,24 @@ async def main() -> None:
 
     session = AlfredLiveSession(registry)
 
-    await session.connect()
-
     try:
-        response = await session.ask(
-            "Use PowerShell to tell me the current date and time."
-        )
+        await session.connect()
 
-        print(response)
+        print("Alfred is connected.")
+        print("Push-to-talk mode.")
+
+        while True:
+            try:
+                response = await session.push_to_talk()
+
+                if response:
+                    print(f"\nAlfred: {response}")
+                else:
+                    print("\nAlfred returned no transcript.")
+
+            except KeyboardInterrupt:
+                break
+
     finally:
         await session.close()
 
