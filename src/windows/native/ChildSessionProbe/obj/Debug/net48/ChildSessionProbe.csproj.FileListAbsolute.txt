@@ -1,0 +1,11 @@
+C:\Users\ahmed\Alfred\src\windows\native\ChildSessionProbe\bin\Debug\net48\ChildSessionProbe.exe.config
+C:\Users\ahmed\Alfred\src\windows\native\ChildSessionProbe\bin\Debug\net48\ChildSessionProbe.exe
+C:\Users\ahmed\Alfred\src\windows\native\ChildSessionProbe\bin\Debug\net48\ChildSessionProbe.pdb
+C:\Users\ahmed\Alfred\src\windows\native\ChildSessionProbe\obj\Debug\net48\ChildSessionProbe.csproj.AssemblyReference.cache
+C:\Users\ahmed\Alfred\src\windows\native\ChildSessionProbe\obj\Debug\net48\ChildSessionProbe.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\ahmed\Alfred\src\windows\native\ChildSessionProbe\obj\Debug\net48\ChildSessionProbe.AssemblyInfoInputs.cache
+C:\Users\ahmed\Alfred\src\windows\native\ChildSessionProbe\obj\Debug\net48\ChildSessionProbe.AssemblyInfo.cs
+C:\Users\ahmed\Alfred\src\windows\native\ChildSessionProbe\obj\Debug\net48\ChildSessionProbe.csproj.CoreCompileInputs.cache
+C:\Users\ahmed\Alfred\src\windows\native\ChildSessionProbe\obj\Debug\net48\ChildSessionProbe.sourcelink.json
+C:\Users\ahmed\Alfred\src\windows\native\ChildSessionProbe\obj\Debug\net48\ChildSessionProbe.exe
+C:\Users\ahmed\Alfred\src\windows\native\ChildSessionProbe\obj\Debug\net48\ChildSessionProbe.pdb

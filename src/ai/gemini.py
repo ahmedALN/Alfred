@@ -1,6 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
+import queue
 import threading
 from typing import Any
 
@@ -16,21 +17,10 @@ class AlfredLiveSession:
     """
     Persistent Gemini Live session for Alfred.
 
-    Audio flow:
-
-        Microphone
-            ↓
-        16 kHz PCM
-            ↓
-        Gemini Live
-            ↓
-        Server-side VAD + model
-            ↓
-        Tool calls / response
-            ↓
-        24 kHz PCM
-            ↓
-        Speakers
+    Screenshots are handled by the computer_screenshot tool itself.
+    The tool sends the exact captured image to a dedicated
+    multimodal Interactions API model and returns the resulting
+    visual analysis as ordinary tool-response text.
     """
 
     INPUT_SAMPLE_RATE = 16_000
@@ -39,10 +29,13 @@ class AlfredLiveSession:
     INPUT_CHANNELS = 1
     OUTPUT_CHANNELS = 1
 
-    # 100 ms at 16 kHz.
     INPUT_BLOCKSIZE = 1_600
+    MIC_QUEUE_SIZE = 50
 
-    def __init__(self, registry: ToolRegistry) -> None:
+    def __init__(
+        self,
+        registry: ToolRegistry,
+    ) -> None:
         settings = load_settings()
 
         self.client = genai.Client(
@@ -56,61 +49,31 @@ class AlfredLiveSession:
         self._connection: Any = None
 
         self._audio_input: sd.RawInputStream | None = None
-        self._audio_output: sd.RawOutputStream | None = None
-
         self._mic_queue: asyncio.Queue[bytes] | None = None
         self._mic_loop: asyncio.AbstractEventLoop | None = None
 
-        self._running = False
+        self._audio_output: sd.RawOutputStream | None = None
 
-        # Protects state touched by the PortAudio callback thread.
+        self._speaker_queue: queue.Queue[
+            bytes | None
+        ] = queue.Queue()
+
+        self._speaker_thread: threading.Thread | None = None
+        self._speaker_stop = threading.Event()
+
+        self._running = False
         self._state_lock = threading.Lock()
 
     # ================================================================
     # Gemini configuration
     # ================================================================
 
-    def _tool_declarations(self) -> list[dict[str, Any]]:
-        """Build Gemini function declarations."""
-
-        declarations: list[dict[str, Any]] = []
-
-        for tool in self.registry.list():
-            if tool.name == "powershell":
-                declarations.append(
-                    {
-                        "name": tool.name,
-                        "description": tool.description,
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "command": {
-                                    "type": "string",
-                                    "description": (
-                                        "PowerShell command to execute "
-                                        "on the Windows computer."
-                                    ),
-                                },
-                                "timeout": {
-                                    "type": "number",
-                                    "description": (
-                                        "Maximum execution time "
-                                        "in seconds."
-                                    ),
-                                },
-                            },
-                            "required": ["command"],
-                        },
-                    }
-                )
-
-        return declarations
+    def _tool_declarations(
+        self,
+    ) -> list[dict[str, Any]]:
+        return self.registry.gemini_declarations()
 
     def _config(self) -> types.LiveConnectConfig:
-        """Build Gemini Live configuration."""
-
-        declarations = self._tool_declarations()
-
         return types.LiveConnectConfig(
             response_modalities=["AUDIO"],
 
@@ -122,8 +85,6 @@ class AlfredLiveSession:
                 types.AudioTranscriptionConfig()
             ),
 
-            # Let Gemini's server-side VAD determine speech
-            # start/end boundaries.
             realtime_input_config=(
                 types.RealtimeInputConfig(
                     automatic_activity_detection=(
@@ -136,7 +97,9 @@ class AlfredLiveSession:
 
             tools=[
                 types.Tool(
-                    function_declarations=declarations
+                    function_declarations=(
+                        self._tool_declarations()
+                    )
                 )
             ],
 
@@ -145,13 +108,24 @@ class AlfredLiveSession:
             ),
 
             system_instruction=(
-                "You are Alfred, a concise Windows desktop AI assistant. "
-                "Respond in English unless the user explicitly speaks "
-                "another language. Keep responses direct and concise. "
-                "When an action is successfully completed and no further "
-                "information is needed, say 'Done.'. "
-                "Use tools when the user asks you to perform an action "
-                "that requires them."
+                "You are Alfred, a concise Windows desktop "
+                "AI assistant. "
+                "Respond in English unless the user explicitly "
+                "speaks another language. "
+                "Keep responses direct and concise. "
+                "When an action is successfully completed and "
+                "no further information is needed, say 'Done.'. "
+                "Use tools whenever the user asks you to perform "
+                "an action that requires them. "
+
+                "Alfred has an isolated child Windows session "
+                "separate from the user's normal desktop. "
+                "The computer_screenshot tool captures and "
+                "analyzes the complete child-session display. "
+                "Treat its analysis as the visual state of the "
+                "child desktop at the time of capture. "
+                "Do not assume the child desktop is empty unless "
+                "the screenshot analysis explicitly indicates that."
             ),
         )
 
@@ -159,9 +133,31 @@ class AlfredLiveSession:
     # Speaker
     # ================================================================
 
-    def _start_audio_output(self) -> None:
-        """Open the default Windows output device."""
+    def _speaker_worker(self) -> None:
+        if self._audio_output is None:
+            return
 
+        while not self._speaker_stop.is_set():
+            try:
+                chunk = self._speaker_queue.get(
+                    timeout=0.1
+                )
+            except queue.Empty:
+                continue
+
+            if chunk is None:
+                break
+
+            try:
+                self._audio_output.write(
+                    chunk
+                )
+            except Exception as exc:
+                print(
+                    f"[Speaker] playback error: {exc}"
+                )
+
+    def _start_audio_output(self) -> None:
         if self._audio_output is not None:
             return
 
@@ -173,34 +169,92 @@ class AlfredLiveSession:
 
         self._audio_output.start()
 
-    def _stop_audio_output(self) -> None:
-        """Close the Windows output device."""
+        self._speaker_stop.clear()
 
-        if self._audio_output is None:
-            return
+        self._speaker_thread = threading.Thread(
+            target=self._speaker_worker,
+            name="alfred-speaker",
+            daemon=True,
+        )
 
-        try:
-            self._audio_output.stop()
-        finally:
-            self._audio_output.close()
-            self._audio_output = None
+        self._speaker_thread.start()
 
-    def _play_audio(self, audio_data: bytes) -> None:
-        """Play one raw PCM chunk from Gemini."""
+    def _clear_speaker_queue(self) -> None:
+        while True:
+            try:
+                self._speaker_queue.get_nowait()
+            except queue.Empty:
+                return
 
+    def _queue_audio(
+        self,
+        audio_data: bytes,
+    ) -> None:
         if not audio_data:
             return
 
-        if self._audio_output is None:
-            raise RuntimeError(
-                "Audio output is not initialized."
+        self._speaker_queue.put_nowait(
+            audio_data
+        )
+
+    def _stop_audio_output(self) -> None:
+        self._speaker_stop.set()
+
+        try:
+            self._speaker_queue.put_nowait(
+                None
+            )
+        except queue.Full:
+            pass
+
+        if self._speaker_thread is not None:
+            self._speaker_thread.join(
+                timeout=2.0
             )
 
-        self._audio_output.write(audio_data)
+            self._speaker_thread = None
+
+        if self._audio_output is not None:
+            try:
+                self._audio_output.stop()
+            finally:
+                self._audio_output.close()
+                self._audio_output = None
+
+        self._clear_speaker_queue()
 
     # ================================================================
     # Microphone
     # ================================================================
+
+    def _enqueue_mic_audio(
+        self,
+        chunk: bytes,
+    ) -> None:
+        if self._mic_queue is None:
+            return
+
+        try:
+            self._mic_queue.put_nowait(
+                chunk
+            )
+
+            return
+
+        except asyncio.QueueFull:
+            pass
+
+        try:
+            self._mic_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+
+        try:
+            self._mic_queue.put_nowait(
+                chunk
+            )
+        except asyncio.QueueFull:
+            pass
 
     def _microphone_callback(
         self,
@@ -209,17 +263,12 @@ class AlfredLiveSession:
         time_info: Any,
         status: sd.CallbackFlags,
     ) -> None:
-        """
-        PortAudio microphone callback.
-
-        Keep this callback lightweight. It only copies PCM into
-        the asyncio queue.
-        """
-
         del frames, time_info
 
         if status:
-            print(f"[Microphone] {status}")
+            print(
+                f"[Microphone] {status}"
+            )
 
         with self._state_lock:
             running = self._running
@@ -227,29 +276,31 @@ class AlfredLiveSession:
         if not running:
             return
 
-        if self._mic_queue is None:
-            return
-
         if self._mic_loop is None:
             return
 
-        audio_bytes = bytes(indata)
+        if self._mic_queue is None:
+            return
+
+        chunk = bytes(
+            indata
+        )
 
         self._mic_loop.call_soon_threadsafe(
-            self._mic_queue.put_nowait,
-            audio_bytes,
+            self._enqueue_mic_audio,
+            chunk,
         )
 
     def _start_microphone(self) -> None:
-        """Open the default Windows microphone."""
-
         if self._audio_input is not None:
             return
 
-        self._mic_loop = asyncio.get_running_loop()
+        self._mic_loop = (
+            asyncio.get_running_loop()
+        )
 
         self._mic_queue = asyncio.Queue(
-            maxsize=20
+            maxsize=self.MIC_QUEUE_SIZE
         )
 
         self._audio_input = sd.RawInputStream(
@@ -263,8 +314,6 @@ class AlfredLiveSession:
         self._audio_input.start()
 
     def _stop_microphone(self) -> None:
-        """Close the microphone."""
-
         if self._audio_input is None:
             return
 
@@ -279,47 +328,47 @@ class AlfredLiveSession:
     # ================================================================
 
     async def connect(self) -> None:
-        """Open the persistent Gemini Live connection."""
-
         if self._connection is not None:
             raise RuntimeError(
                 "Alfred Live session is already connected."
             )
 
-        self._mic_loop = asyncio.get_running_loop()
+        self._mic_loop = (
+            asyncio.get_running_loop()
+        )
 
         self._start_audio_output()
 
-        self._connection = self.client.aio.live.connect(
-            model=self.model,
-            config=self._config(),
+        self._connection = (
+            self.client.aio.live.connect(
+                model=self.model,
+                config=self._config(),
+            )
         )
 
         try:
-            self.session = await self._connection.__aenter__()
-
-            self._start_microphone()
+            self.session = (
+                await self._connection.__aenter__()
+            )
 
             with self._state_lock:
                 self._running = True
 
+            self._start_microphone()
+
         except Exception:
             self._connection = None
+
             self._stop_microphone()
             self._stop_audio_output()
+
             raise
 
     # ================================================================
-    # Continuous microphone stream
+    # Microphone → Gemini
     # ================================================================
 
     async def _stream_microphone(self) -> None:
-        """
-        Continuously send microphone PCM to Gemini Live.
-
-        Gemini's automatic VAD handles turn boundaries.
-        """
-
         if self.session is None:
             raise RuntimeError(
                 "Alfred Live session is not connected."
@@ -350,69 +399,58 @@ class AlfredLiveSession:
             )
 
     # ================================================================
-    # Receive Gemini events
+    # Gemini → Alfred
     # ================================================================
 
     async def _receive(self) -> None:
-        """
-        Continuously receive Gemini events.
-
-        Audio playback and tool handling happen here while microphone
-        streaming happens independently.
-        """
-
         if self.session is None:
             raise RuntimeError(
                 "Alfred Live session is not connected."
             )
 
-        # Buffer Alfred's transcription fragments so they are printed
-        # as one complete response instead of many tiny lines.
         transcript_parts: list[str] = []
 
         while True:
             async for response in self.session.receive():
 
-                # ----------------------------------------------------
-                # Tool calls
-                # ----------------------------------------------------
-
                 if response.tool_call:
                     await self._handle_tool_call(
                         response.tool_call
                     )
+
                     continue
 
-                server_content = response.server_content
+                server_content = (
+                    response.server_content
+                )
 
                 if server_content is None:
                     continue
 
-                # ----------------------------------------------------
-                # Model output
-                # ----------------------------------------------------
-
-                model_turn = server_content.model_turn
+                model_turn = (
+                    server_content.model_turn
+                )
 
                 if model_turn is not None:
                     for part in model_turn.parts:
 
-                        # Stream Gemini's audio directly to speakers.
                         if part.inline_data:
-                            audio_data = part.inline_data.data
+                            audio_data = (
+                                part.inline_data.data
+                            )
 
-                            if isinstance(audio_data, bytes):
-                                self._play_audio(audio_data)
+                            if isinstance(
+                                audio_data,
+                                bytes,
+                            ):
+                                self._queue_audio(
+                                    audio_data
+                                )
 
-                        # Some model responses may include text parts.
                         if part.text:
                             transcript_parts.append(
                                 part.text
                             )
-
-                # ----------------------------------------------------
-                # User transcription
-                # ----------------------------------------------------
 
                 input_transcription = (
                     server_content.input_transcription
@@ -425,10 +463,6 @@ class AlfredLiveSession:
                             f"{input_transcription.text}"
                         )
 
-                # ----------------------------------------------------
-                # Alfred transcription
-                # ----------------------------------------------------
-
                 output_transcription = (
                     server_content.output_transcription
                 )
@@ -439,20 +473,14 @@ class AlfredLiveSession:
                             output_transcription.text
                         )
 
-                # ----------------------------------------------------
-                # Interruption
-                # ----------------------------------------------------
-
                 if server_content.interrupted:
-                    print("\n[Alfred interrupted]")
+                    self._clear_speaker_queue()
 
-                    # Throw away any unfinished transcript from the
-                    # response that was interrupted.
                     transcript_parts.clear()
 
-                # ----------------------------------------------------
-                # Turn complete
-                # ----------------------------------------------------
+                    print(
+                        "\n[Alfred interrupted]"
+                    )
 
                 if server_content.turn_complete:
                     response_text = "".join(
@@ -465,7 +493,9 @@ class AlfredLiveSession:
                             f"{response_text}"
                         )
 
-                    print("[Turn complete]")
+                    print(
+                        "[Turn complete]"
+                    )
 
                     transcript_parts.clear()
 
@@ -479,8 +509,6 @@ class AlfredLiveSession:
         self,
         tool_call: Any,
     ) -> None:
-        """Execute Gemini tool calls and return their results."""
-
         if self.session is None:
             raise RuntimeError(
                 "Alfred Live session is not connected."
@@ -491,16 +519,17 @@ class AlfredLiveSession:
         ] = []
 
         for call in tool_call.function_calls:
+
             if not call.name:
                 raise RuntimeError(
                     "Gemini returned a function call "
                     "without a name."
                 )
 
-            arguments = dict(call.args or {})
+            arguments = dict(
+                call.args or {}
+            )
 
-            # Useful during development: show exactly what Alfred
-            # decided to execute.
             print(
                 f"\n[Tool] {call.name}"
             )
@@ -509,10 +538,22 @@ class AlfredLiveSession:
                 f"[Arguments] {arguments}"
             )
 
-            result = self.registry.execute(
+            result = await asyncio.to_thread(
+                self.registry.execute,
                 call.name,
                 arguments,
             )
+
+            if not isinstance(
+                result,
+                dict,
+            ):
+                result = {
+                    "status": "error",
+                    "error": (
+                        "Tool returned a non-dictionary result."
+                    ),
+                }
 
             print(
                 f"[Tool Result] {result}"
@@ -531,19 +572,10 @@ class AlfredLiveSession:
         )
 
     # ================================================================
-    # Run loop
+    # Runtime
     # ================================================================
 
     async def run_forever(self) -> None:
-        """
-        Keep Alfred alive.
-
-        Two concurrent pipelines operate independently:
-
-        microphone → Gemini
-        Gemini → audio / tools
-        """
-
         if self.session is None:
             raise RuntimeError(
                 "Alfred Live session is not connected."
@@ -595,14 +627,17 @@ class AlfredLiveSession:
     # ================================================================
 
     async def close(self) -> None:
-        """Close Gemini Live and all audio resources."""
-
         with self._state_lock:
             self._running = False
 
         try:
             if self._mic_queue is not None:
-                await self._mic_queue.put(b"")
+                try:
+                    self._mic_queue.put_nowait(
+                        b""
+                    )
+                except asyncio.QueueFull:
+                    pass
 
             if self._connection is not None:
                 await self._connection.__aexit__(

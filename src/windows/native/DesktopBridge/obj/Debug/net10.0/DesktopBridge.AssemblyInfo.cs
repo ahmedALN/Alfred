@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("DesktopBridge")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+5922e3e02c7f454afbda00dbdef63661e5de4a63")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+835b1392b5720c775624dd7217c6bfadc5bec1c2")]
 [assembly: System.Reflection.AssemblyProductAttribute("DesktopBridge")]
 [assembly: System.Reflection.AssemblyTitleAttribute("DesktopBridge")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

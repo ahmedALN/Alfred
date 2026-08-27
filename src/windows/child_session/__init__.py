@@ -1,0 +1,637 @@
+﻿from __future__ import annotations
+
+import base64
+import json
+import threading
+from dataclasses import dataclass
+from typing import Any
+
+
+class ChildSessionError(RuntimeError):
+    """Raised when communication with the child-session agent fails."""
+
+
+@dataclass(frozen=True)
+class Screenshot:
+    """A screenshot captured from the isolated child session."""
+
+    png_bytes: bytes
+    width: int
+    height: int
+    session: int
+
+    @property
+    def mime_type(self) -> str:
+        return "image/png"
+
+
+class ChildSessionClient:
+    """
+    Client for the persistent Alfred ChildInputAgent.
+
+    The native C# agent runs inside Session 2 and listens on:
+
+        \\\\.\\pipe\\Alfred.ChildInput.v1
+
+    This Python client runs in the normal Alfred session.
+    """
+
+    PIPE_NAME = r"\\.\pipe\Alfred.ChildInput.v1"
+
+    def __init__(self) -> None:
+        self._pipe: Any = None
+        self._reader: Any = None
+        self._writer: Any = None
+
+        self._lock = threading.RLock()
+
+    # ================================================================
+    # Connection
+    # ================================================================
+
+    def connect(self) -> None:
+        """
+        Connect to the already-running ChildInputAgent.
+
+        Note:
+        Windows named pipes are not ordinary files. We therefore
+        use the Windows API directly instead of Python open().
+        """
+
+        with self._lock:
+            if self._pipe is not None:
+                return
+
+            import ctypes
+
+            kernel32 = ctypes.WinDLL(
+                "kernel32",
+                use_last_error=True,
+            )
+
+            CreateFileW = kernel32.CreateFileW
+            CreateFileW.argtypes = [
+                ctypes.c_wchar_p,
+                ctypes.c_uint32,
+                ctypes.c_uint32,
+                ctypes.c_void_p,
+                ctypes.c_uint32,
+                ctypes.c_uint32,
+                ctypes.c_void_p,
+            ]
+            CreateFileW.restype = ctypes.c_void_p
+
+            GENERIC_READ = 0x80000000
+            GENERIC_WRITE = 0x40000000
+            OPEN_EXISTING = 3
+
+            handle = CreateFileW(
+                self.PIPE_NAME,
+                GENERIC_READ | GENERIC_WRITE,
+                0,
+                None,
+                OPEN_EXISTING,
+                0,
+                None,
+            )
+
+            invalid_handle = (
+                ctypes.c_void_p(-1).value
+            )
+
+            if (
+                handle is None
+                or handle == invalid_handle
+            ):
+                error = ctypes.get_last_error()
+
+                raise ChildSessionError(
+                    "Could not connect to ChildInputAgent.\n"
+                    "Make sure ChildInputAgent is running "
+                    "inside Session 2.\n"
+                    f"Pipe: {self.PIPE_NAME}\n"
+                    f"Win32 error: {error}"
+                )
+
+            self._pipe = _WindowsPipe(
+                handle
+            )
+
+            self._reader = self._pipe
+            self._writer = self._pipe
+
+            try:
+                response = self._request_locked(
+                    {
+                        "op": "ping"
+                    }
+                )
+
+                if response.get("ok") is not True:
+                    raise ChildSessionError(
+                        "ChildInputAgent ping failed."
+                    )
+
+            except Exception:
+                self._close_locked()
+                raise
+
+    # ================================================================
+    # Low-level IPC
+    # ================================================================
+
+    def _request_locked(
+        self,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._pipe is None:
+            raise ChildSessionError(
+                "ChildInputAgent is not connected."
+            )
+
+        payload = (
+            json.dumps(
+                request,
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
+
+        try:
+            self._writer.write(
+                payload.encode("utf-8")
+            )
+
+            line = self._reader.readline()
+
+        except Exception as exc:
+            self._close_locked()
+
+            raise ChildSessionError(
+                f"ChildInputAgent pipe I/O failed: {exc}"
+            ) from exc
+
+        if not line:
+            self._close_locked()
+
+            raise ChildSessionError(
+                "ChildInputAgent disconnected."
+            )
+
+        try:
+            response = json.loads(
+                line.decode("utf-8")
+            )
+        except json.JSONDecodeError as exc:
+            raise ChildSessionError(
+                "ChildInputAgent returned invalid JSON.\n"
+                f"Response: {line!r}"
+            ) from exc
+
+        if not isinstance(
+            response,
+            dict,
+        ):
+            raise ChildSessionError(
+                "ChildInputAgent returned a non-object response."
+            )
+
+        if response.get("ok") is False:
+            code = response.get(
+                "error",
+                "unknown_error",
+            )
+
+            message = response.get(
+                "message",
+                "ChildInputAgent request failed.",
+            )
+
+            raise ChildSessionError(
+                f"{code}: {message}"
+            )
+
+        return response
+
+    def _request(
+        self,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        with self._lock:
+            if self._pipe is None:
+                self.connect()
+
+            return self._request_locked(
+                request
+            )
+
+    # ================================================================
+    # Session
+    # ================================================================
+
+    def ping(self) -> dict[str, Any]:
+        return self._request(
+            {
+                "op": "ping"
+            }
+        )
+
+    def session(self) -> int:
+        response = self._request(
+            {
+                "op": "session"
+            }
+        )
+
+        data = response.get(
+            "data"
+        )
+
+        if not isinstance(
+            data,
+            dict,
+        ):
+            raise ChildSessionError(
+                "Invalid child-session response."
+            )
+
+        value = data.get(
+            "session"
+        )
+
+        if not isinstance(
+            value,
+            int,
+        ):
+            raise ChildSessionError(
+                "Invalid child-session ID."
+            )
+
+        return value
+
+    # ================================================================
+    # Capture
+    # ================================================================
+
+    def capture_start(self) -> dict[str, Any]:
+        return self._request(
+            {
+                "op": "capture_start"
+            }
+        )
+
+    def capture_stop(self) -> dict[str, Any]:
+        return self._request(
+            {
+                "op": "capture_stop"
+            }
+        )
+
+    def screenshot(self) -> Screenshot:
+        """
+        Request the latest full-resolution child-session screenshot.
+
+        The PNG is decoded into memory only.
+        No screenshot file is created.
+        """
+
+        response = self._request(
+            {
+                "op": "screenshot"
+            }
+        )
+
+        data = response.get(
+            "data"
+        )
+
+        if not isinstance(
+            data,
+            dict,
+        ):
+            raise ChildSessionError(
+                "Screenshot response has invalid data."
+            )
+
+        mime_type = data.get(
+            "mime_type"
+        )
+
+        if mime_type != "image/png":
+            raise ChildSessionError(
+                "Unsupported screenshot MIME type: "
+                f"{mime_type!r}"
+            )
+
+        width = data.get(
+            "width"
+        )
+
+        height = data.get(
+            "height"
+        )
+
+        session = data.get(
+            "session"
+        )
+
+        encoded = data.get(
+            "image_base64"
+        )
+
+        if not isinstance(width, int):
+            raise ChildSessionError(
+                "Screenshot width is invalid."
+            )
+
+        if not isinstance(height, int):
+            raise ChildSessionError(
+                "Screenshot height is invalid."
+            )
+
+        if not isinstance(session, int):
+            raise ChildSessionError(
+                "Screenshot session is invalid."
+            )
+
+        if not isinstance(encoded, str):
+            raise ChildSessionError(
+                "Screenshot image data is missing."
+            )
+
+        try:
+            png_bytes = base64.b64decode(
+                encoded,
+                validate=True,
+            )
+        except Exception as exc:
+            raise ChildSessionError(
+                "Screenshot Base64 decoding failed."
+            ) from exc
+
+        if not png_bytes:
+            raise ChildSessionError(
+                "ChildInputAgent returned an empty screenshot."
+            )
+
+        return Screenshot(
+            png_bytes=png_bytes,
+            width=width,
+            height=height,
+            session=session,
+        )
+
+    # ================================================================
+    # Input
+    # ================================================================
+
+    def activate(
+        self,
+        hwnd: int,
+    ) -> dict[str, Any]:
+        return self._request(
+            {
+                "op": "activate",
+                "hwnd": int(hwnd),
+            }
+        )
+
+    def mouse_move(
+        self,
+        x: int,
+        y: int,
+    ) -> dict[str, Any]:
+        return self._request(
+            {
+                "op": "mouse_move",
+                "x": int(x),
+                "y": int(y),
+            }
+        )
+
+    def click(
+        self,
+        button: str = "left",
+    ) -> dict[str, Any]:
+        return self._request(
+            {
+                "op": "click",
+                "button": button,
+            }
+        )
+
+    def type_text(
+        self,
+        text: str,
+    ) -> dict[str, Any]:
+        return self._request(
+            {
+                "op": "type",
+                "text": text,
+            }
+        )
+
+    # ================================================================
+    # Lifecycle
+    # ================================================================
+
+    def _close_locked(self) -> None:
+        pipe = self._pipe
+
+        self._pipe = None
+        self._reader = None
+        self._writer = None
+
+        if pipe is not None:
+            try:
+                pipe.close()
+            except Exception:
+                pass
+
+    def close(self) -> None:
+        with self._lock:
+            self._close_locked()
+
+    def __enter__(
+        self,
+    ) -> "ChildSessionClient":
+        self.connect()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: Any,
+        exc_value: Any,
+        traceback: Any,
+    ) -> None:
+        self.close()
+
+
+class _WindowsPipe:
+    """
+    Minimal synchronous wrapper around a Windows named-pipe HANDLE.
+    """
+
+    def __init__(
+        self,
+        handle: Any,
+    ) -> None:
+        import ctypes
+
+        self._ctypes = ctypes
+        self._handle = handle
+
+        kernel32 = ctypes.WinDLL(
+            "kernel32",
+            use_last_error=True,
+        )
+
+        self._kernel32 = kernel32
+
+        self._read_file = kernel32.ReadFile
+        self._read_file.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.POINTER(ctypes.c_uint32),
+            ctypes.c_void_p,
+        ]
+        self._read_file.restype = ctypes.c_bool
+
+        self._write_file = kernel32.WriteFile
+        self._write_file.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.POINTER(ctypes.c_uint32),
+            ctypes.c_void_p,
+        ]
+        self._write_file.restype = ctypes.c_bool
+
+        self._close_handle = kernel32.CloseHandle
+        self._close_handle.argtypes = [
+            ctypes.c_void_p
+        ]
+        self._close_handle.restype = ctypes.c_bool
+
+        self._buffer = bytearray()
+
+    def write(
+        self,
+        data: bytes,
+    ) -> None:
+        if not data:
+            return
+
+        ctypes = self._ctypes
+
+        buffer = ctypes.create_string_buffer(
+            data
+        )
+
+        written = ctypes.c_uint32(
+            0
+        )
+
+        ok = self._write_file(
+            self._handle,
+            buffer,
+            len(data),
+            ctypes.byref(written),
+            None,
+        )
+
+        if not ok:
+            error = ctypes.get_last_error()
+
+            raise OSError(
+                error,
+                f"WriteFile failed with Win32 error {error}."
+            )
+
+        if written.value != len(data):
+            raise OSError(
+                f"WriteFile wrote only "
+                f"{written.value} of {len(data)} bytes."
+            )
+
+    def readline(self) -> bytes:
+        """
+        Read until the newline that terminates a JSON response.
+        """
+
+        while True:
+            newline_index = self._buffer.find(
+                b"\n"
+            )
+
+            if newline_index >= 0:
+                line = bytes(
+                    self._buffer[
+                        :newline_index
+                    ]
+                )
+
+                del self._buffer[
+                    :newline_index + 1
+                ]
+
+                return line
+
+            chunk = self._read_chunk()
+
+            if not chunk:
+                return b""
+
+            self._buffer.extend(
+                chunk
+            )
+
+    def _read_chunk(
+        self,
+    ) -> bytes:
+        ctypes = self._ctypes
+
+        buffer_size = 64 * 1024
+
+        buffer = ctypes.create_string_buffer(
+            buffer_size
+        )
+
+        bytes_read = ctypes.c_uint32(
+            0
+        )
+
+        ok = self._read_file(
+            self._handle,
+            buffer,
+            buffer_size,
+            ctypes.byref(bytes_read),
+            None,
+        )
+
+        if not ok:
+            error = ctypes.get_last_error()
+
+            raise OSError(
+                error,
+                f"ReadFile failed with Win32 error {error}."
+            )
+
+        if bytes_read.value == 0:
+            return b""
+
+        return buffer.raw[
+            :bytes_read.value
+        ]
+
+    def close(self) -> None:
+        if self._handle is None:
+            return
+
+        try:
+            self._close_handle(
+                self._handle
+            )
+        finally:
+            self._handle = None

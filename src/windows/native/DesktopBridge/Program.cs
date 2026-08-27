@@ -1,10 +1,14 @@
 ﻿using System;
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Threading;
 
 internal static class Program
 {
     // ================================================================
-    // Windows virtual desktop GUIDs
+    // COM identifiers
     // ================================================================
 
     private static readonly Guid ClsidImmersiveShell =
@@ -29,50 +33,37 @@ internal static class Program
         new("3F07F4BE-B107-441A-AF0F-39D82529072C");
 
     // ================================================================
+    // Win32 constants
+    // ================================================================
+
+    private const int SwHide = 0;
+    private const int SwShowNoActivate = 4;
+
+    private const uint GwOwner = 4;
+
+    // ================================================================
     // Entry point
     // ================================================================
 
     [STAThread]
-    private static int Main(string[] args)
+    private static int Main()
     {
+        Console.Error.WriteLine(
+            "Alfred DesktopBridge started."
+        );
+
         try
         {
-            Console.WriteLine(
-                "Alfred DesktopBridge diagnostic startup."
-            );
+            using var bridge = new DesktopBridge();
 
-            if (args.Length == 0)
-            {
-                PrintUsage();
-                return 1;
-            }
+            RunServer(bridge);
 
-            return args[0].ToLowerInvariant() switch
-            {
-                "diagnose" => Diagnose(),
-                "count" => HandleCount(),
-                "current" => HandleCurrent(),
-                "window-desktop" => HandleWindowDesktop(args),
-                "move-window" => HandleMoveWindow(args),
-                _ => PrintUsageAndFail()
-            };
-        }
-        catch (COMException ex)
-        {
-            Console.Error.WriteLine(
-                $"COM ERROR: 0x{ex.HResult:X8}"
-            );
-
-            Console.Error.WriteLine(
-                ex.Message
-            );
-
-            return 10;
+            return 0;
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine(
-                $"ERROR: {ex.GetType().Name}: {ex.Message}"
+                $"FATAL: {ex.GetType().Name}: {ex.Message}"
             );
 
             return 1;
@@ -80,261 +71,281 @@ internal static class Program
     }
 
     // ================================================================
-    // Diagnostic bootstrap
+    // Persistent JSONL server
     // ================================================================
 
-    private static int Diagnose()
+    private static void RunServer(
+        DesktopBridge bridge)
     {
-        Console.WriteLine("[1] Creating ImmersiveShell...");
-
-        Type? shellType =
-            Type.GetTypeFromCLSID(
-                ClsidImmersiveShell
-            );
-
-        if (shellType is null)
+        while (true)
         {
-            Console.Error.WriteLine(
-                "FAILED: ImmersiveShell CLSID could not be resolved."
-            );
+            string? line =
+                Console.ReadLine();
 
-            return 2;
+            if (line is null)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            string response;
+
+            try
+            {
+                using JsonDocument document =
+                    JsonDocument.Parse(line);
+
+                response =
+                    HandleRequest(
+                        bridge,
+                        document.RootElement
+                    );
+            }
+            catch (JsonException ex)
+            {
+                response =
+                    JsonSerializer.Serialize(
+                        new
+                        {
+                            ok = false,
+                            error = "invalid_json",
+                            message = ex.Message
+                        }
+                    );
+            }
+            catch (COMException ex)
+            {
+                response =
+                    JsonSerializer.Serialize(
+                        new
+                        {
+                            ok = false,
+                            error = "com_error",
+                            hresult =
+                                $"0x{ex.HResult:X8}",
+                            message = ex.Message
+                        }
+                    );
+            }
+            catch (Win32Exception ex)
+            {
+                response =
+                    JsonSerializer.Serialize(
+                        new
+                        {
+                            ok = false,
+                            error = "win32_error",
+                            code = ex.NativeErrorCode,
+                            message = ex.Message
+                        }
+                    );
+            }
+            catch (Exception ex)
+            {
+                response =
+                    JsonSerializer.Serialize(
+                        new
+                        {
+                            ok = false,
+                            error = ex.GetType().Name,
+                            message = ex.Message
+                        }
+                    );
+            }
+
+            Console.WriteLine(response);
+            Console.Out.Flush();
         }
-
-        var shell =
-            (IServiceProvider)
-            Activator.CreateInstance(shellType)!;
-
-        Console.WriteLine(
-            "[1] OK: ImmersiveShell created."
-        );
-
-        Console.WriteLine(
-            "[2] Querying IVirtualDesktopManagerInternal..."
-        );
-
-        IVirtualDesktopManagerInternal internalManager =
-            QueryService<
-                IVirtualDesktopManagerInternal
-            >(
-                shell,
-                ClsidVirtualDesktopManagerInternal,
-                IidVirtualDesktopManagerInternal
-            );
-
-        Console.WriteLine(
-            "[2] OK: IVirtualDesktopManagerInternal obtained."
-        );
-
-        Console.WriteLine(
-            "[3] Calling GetCount()..."
-        );
-
-        int count =
-            internalManager.GetCount();
-
-        Console.WriteLine(
-            $"[3] OK: GetCount returned {count}."
-        );
-
-        Console.WriteLine(
-            "[4] Querying IApplicationViewCollection..."
-        );
-
-        IApplicationViewCollection views =
-            QueryService<
-                IApplicationViewCollection
-            >(
-                shell,
-                IidApplicationViewCollection,
-                IidApplicationViewCollection
-            );
-
-        Console.WriteLine(
-            "[4] OK: IApplicationViewCollection obtained."
-        );
-
-        Console.WriteLine(
-            "[5] Creating public VirtualDesktopManager..."
-        );
-
-        Type? publicManagerType =
-            Type.GetTypeFromCLSID(
-                ClsidVirtualDesktopManager
-            );
-
-        if (publicManagerType is null)
-        {
-            Console.Error.WriteLine(
-                "FAILED: VirtualDesktopManager CLSID could not be resolved."
-            );
-
-            return 3;
-        }
-
-        var publicManager =
-            (IVirtualDesktopManager)
-            Activator.CreateInstance(
-                publicManagerType
-            )!;
-
-        Console.WriteLine(
-            "[5] OK: public VirtualDesktopManager created."
-        );
-
-        Console.WriteLine(
-            "[6] Calling GetCurrentDesktop()..."
-        );
-
-        IVirtualDesktop current =
-            internalManager.GetCurrentDesktop();
-
-        if (current is null)
-        {
-            Console.Error.WriteLine(
-                "FAILED: GetCurrentDesktop returned null."
-            );
-
-            return 4;
-        }
-
-        Guid currentId =
-            current.GetId();
-
-        Console.WriteLine(
-            $"[6] OK: Current desktop ID = {currentId}"
-        );
-
-        Console.WriteLine(
-            "[7] Enumerating desktops..."
-        );
-
-        internalManager.GetDesktops(
-            out IObjectArray desktopArray
-        );
-
-        int arrayCount = 0;
-
-        desktopArray.GetCount(
-            out arrayCount
-        );
-
-        Console.WriteLine(
-            $"[7] OK: IObjectArray contains {arrayCount} desktops."
-        );
-
-        ReleaseComObject(
-            desktopArray
-        );
-
-        ReleaseComObject(
-            publicManager
-        );
-
-        ReleaseComObject(
-            views
-        );
-
-        ReleaseComObject(
-            current
-        );
-
-        ReleaseComObject(
-            internalManager
-        );
-
-        ReleaseComObject(
-            shell
-        );
-
-        Console.WriteLine(
-            "DIAGNOSTIC PASSED."
-        );
-
-        return 0;
     }
 
     // ================================================================
-    // Normal commands
+    // Request dispatch
     // ================================================================
 
-    private static int HandleCount()
+    private static string HandleRequest(
+        DesktopBridge bridge,
+        JsonElement request)
     {
-        using var bridge =
-            new DesktopBridge();
-
-        Console.WriteLine(
-            $"Desktop count: {bridge.GetDesktopCount()}"
-        );
-
-        return 0;
-    }
-
-    private static int HandleCurrent()
-    {
-        using var bridge =
-            new DesktopBridge();
-
-        Console.WriteLine(
-            $"Current desktop: "
-            + $"{bridge.GetCurrentDesktopNumber()}"
-        );
-
-        return 0;
-    }
-
-    private static int HandleWindowDesktop(
-        string[] args)
-    {
-        if (args.Length != 2 ||
-            !TryParseHwnd(
-                args[1],
-                out IntPtr hwnd))
+        if (!request.TryGetProperty(
+                "op",
+                out JsonElement opElement))
         {
-            Console.Error.WriteLine(
-                "Usage: DesktopBridge.exe "
-                + "window-desktop <hwnd>"
+            return Error(
+                "missing_operation",
+                "Request must contain an 'op' property."
             );
-
-            return 1;
         }
 
-        using var bridge =
-            new DesktopBridge();
+        string? operation =
+            opElement.GetString();
+
+        if (string.IsNullOrWhiteSpace(operation))
+        {
+            return Error(
+                "invalid_operation",
+                "'op' must be a non-empty string."
+            );
+        }
+
+        return operation.ToLowerInvariant() switch
+        {
+            "ping" =>
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        ok = true,
+                        pong = true
+                    }
+                ),
+
+            "count" =>
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        ok = true,
+                        count =
+                            bridge.GetDesktopCount()
+                    }
+                ),
+
+            "current" =>
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        ok = true,
+                        desktop =
+                            bridge.GetCurrentDesktopNumber()
+                    }
+                ),
+
+            "window_desktop" =>
+                HandleWindowDesktop(
+                    bridge,
+                    request
+                ),
+
+            "can_move" =>
+                HandleCanMove(
+                    bridge,
+                    request
+                ),
+
+            "move_window" =>
+                HandleMoveWindow(
+                    bridge,
+                    request
+                ),
+
+            "launch_hidden" =>
+                HandleLaunchHidden(
+                    bridge,
+                    request
+                ),
+
+            "shutdown" =>
+                HandleShutdown(),
+
+            _ =>
+                Error(
+                    "unknown_operation",
+                    $"Unknown operation '{operation}'."
+                )
+        };
+    }
+
+    // ================================================================
+    // Window operations
+    // ================================================================
+
+    private static string HandleWindowDesktop(
+        DesktopBridge bridge,
+        JsonElement request)
+    {
+        if (!TryGetHwnd(
+                request,
+                out IntPtr hwnd,
+                out string error))
+        {
+            return Error(
+                "invalid_hwnd",
+                error
+            );
+        }
 
         int desktop =
             bridge.GetWindowDesktopNumber(
                 hwnd
             );
 
-        Console.WriteLine(
-            $"Window {hwnd} is on Desktop {desktop}"
+        return JsonSerializer.Serialize(
+            new
+            {
+                ok = true,
+                hwnd = hwnd.ToInt64(),
+                desktop
+            }
         );
-
-        return 0;
     }
 
-    private static int HandleMoveWindow(
-        string[] args)
+    private static string HandleCanMove(
+        DesktopBridge bridge,
+        JsonElement request)
     {
-        if (args.Length != 3 ||
-            !TryParseHwnd(
-                args[1],
-                out IntPtr hwnd) ||
-            !int.TryParse(
-                args[2],
-                out int desktop))
+        if (!TryGetHwnd(
+                request,
+                out IntPtr hwnd,
+                out string error))
         {
-            Console.Error.WriteLine(
-                "Usage: DesktopBridge.exe "
-                + "move-window <hwnd> <desktop>"
+            return Error(
+                "invalid_hwnd",
+                error
             );
-
-            return 1;
         }
 
-        using var bridge =
-            new DesktopBridge();
+        bool movable =
+            bridge.CanMoveWindow(
+                hwnd
+            );
+
+        return JsonSerializer.Serialize(
+            new
+            {
+                ok = true,
+                hwnd = hwnd.ToInt64(),
+                movable
+            }
+        );
+    }
+
+    private static string HandleMoveWindow(
+        DesktopBridge bridge,
+        JsonElement request)
+    {
+        if (!TryGetHwnd(
+                request,
+                out IntPtr hwnd,
+                out string hwndError))
+        {
+            return Error(
+                "invalid_hwnd",
+                hwndError
+            );
+        }
+
+        if (!TryGetDesktop(
+                request,
+                out int desktop,
+                out string desktopError))
+        {
+            return Error(
+                "invalid_desktop",
+                desktopError
+            );
+        }
 
         bridge.MoveWindowToDesktop(
             hwnd,
@@ -346,14 +357,193 @@ internal static class Program
                 hwnd
             );
 
-        Console.WriteLine(
-            $"Window {hwnd} moved to Desktop "
-            + $"{actualDesktop}"
+        return JsonSerializer.Serialize(
+            new
+            {
+                ok = actualDesktop == desktop,
+                hwnd = hwnd.ToInt64(),
+                requested_desktop = desktop,
+                actual_desktop = actualDesktop
+            }
         );
+    }
 
-        return actualDesktop == desktop
-            ? 0
-            : 2;
+    // ================================================================
+    // Hidden launch experiment
+    // ================================================================
+
+    private static string HandleLaunchHidden(
+        DesktopBridge bridge,
+        JsonElement request)
+    {
+        if (!request.TryGetProperty(
+                "executable",
+                out JsonElement executableElement))
+        {
+            return Error(
+                "missing_executable",
+                "Request must contain 'executable'."
+            );
+        }
+
+        string? executable =
+            executableElement.GetString();
+
+        if (string.IsNullOrWhiteSpace(
+                executable))
+        {
+            return Error(
+                "invalid_executable",
+                "'executable' must be a non-empty string."
+            );
+        }
+
+        if (!request.TryGetProperty(
+                "title",
+                out JsonElement titleElement))
+        {
+            return Error(
+                "missing_title",
+                "Request must contain 'title'."
+            );
+        }
+
+        string? title =
+            titleElement.GetString();
+
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return Error(
+                "invalid_title",
+                "'title' must be a non-empty string."
+            );
+        }
+
+        if (!TryGetDesktop(
+                request,
+                out int desktop,
+                out string desktopError))
+        {
+            return Error(
+                "invalid_desktop",
+                desktopError
+            );
+        }
+
+        return bridge.LaunchHidden(
+            executable,
+            title,
+            desktop
+        );
+    }
+
+    // ================================================================
+    // Request helpers
+    // ================================================================
+
+    private static bool TryGetHwnd(
+        JsonElement request,
+        out IntPtr hwnd,
+        out string error)
+    {
+        hwnd = IntPtr.Zero;
+        error = "";
+
+        if (!request.TryGetProperty(
+                "hwnd",
+                out JsonElement element))
+        {
+            error =
+                "Request must contain 'hwnd'.";
+
+            return false;
+        }
+
+        if (!element.TryGetInt64(
+                out long value))
+        {
+            error =
+                "'hwnd' must be an integer.";
+
+            return false;
+        }
+
+        if (value <= 0)
+        {
+            error =
+                "'hwnd' must be greater than zero.";
+
+            return false;
+        }
+
+        hwnd =
+            new IntPtr(value);
+
+        return true;
+    }
+
+    private static bool TryGetDesktop(
+        JsonElement request,
+        out int desktop,
+        out string error)
+    {
+        desktop = 0;
+        error = "";
+
+        if (!request.TryGetProperty(
+                "desktop",
+                out JsonElement element))
+        {
+            error =
+                "Request must contain 'desktop'.";
+
+            return false;
+        }
+
+        if (!element.TryGetInt32(
+                out desktop))
+        {
+            error =
+                "'desktop' must be an integer.";
+
+            return false;
+        }
+
+        if (desktop < 1)
+        {
+            error =
+                "'desktop' must be at least 1.";
+
+            return false;
+        }
+
+        return true;
+    }
+
+    private static string Error(
+        string code,
+        string message)
+    {
+        return JsonSerializer.Serialize(
+            new
+            {
+                ok = false,
+                error = code,
+                message
+            }
+        );
+    }
+
+    private static string HandleShutdown()
+    {
+        Environment.Exit(0);
+
+        return JsonSerializer.Serialize(
+            new
+            {
+                ok = true
+            }
+        );
     }
 
     // ================================================================
@@ -430,6 +620,10 @@ internal static class Program
                 )!;
         }
 
+        // ------------------------------------------------------------
+        // Desktop information
+        // ------------------------------------------------------------
+
         public int GetDesktopCount()
         {
             return _internalManager.GetCount();
@@ -438,14 +632,14 @@ internal static class Program
         public int GetCurrentDesktopNumber()
         {
             IVirtualDesktop current =
-                _internalManager.GetCurrentDesktop();
+                _internalManager
+                    .GetCurrentDesktop();
 
             try
             {
-                Guid id =
-                    current.GetId();
-
-                return GetDesktopNumber(id);
+                return GetDesktopNumber(
+                    current.GetId()
+                );
             }
             finally
             {
@@ -458,15 +652,53 @@ internal static class Program
         public int GetWindowDesktopNumber(
             IntPtr hwnd)
         {
-            Guid desktopId =
-                _publicManager.GetWindowDesktopId(
-                    hwnd
-                );
+            Guid id =
+                _publicManager
+                    .GetWindowDesktopId(
+                        hwnd
+                    );
 
-            return GetDesktopNumber(
-                desktopId
-            );
+            return GetDesktopNumber(id);
         }
+
+        // ------------------------------------------------------------
+        // Window capability
+        // ------------------------------------------------------------
+
+        public bool CanMoveWindow(
+            IntPtr hwnd)
+        {
+            int hr =
+                _viewCollection
+                    .GetViewForHwnd(
+                        hwnd,
+                        out IApplicationView view
+                    );
+
+            if (hr != 0 ||
+                view is null)
+            {
+                return false;
+            }
+
+            try
+            {
+                return _internalManager
+                    .CanViewMoveDesktops(
+                        view
+                    );
+            }
+            finally
+            {
+                ReleaseComObject(
+                    view
+                );
+            }
+        }
+
+        // ------------------------------------------------------------
+        // Existing window move
+        // ------------------------------------------------------------
 
         public void MoveWindowToDesktop(
             IntPtr hwnd,
@@ -480,66 +712,243 @@ internal static class Program
             {
                 throw new ArgumentOutOfRangeException(
                     nameof(desktopNumber),
-                    $"Desktop must be between 1 and {count}."
+                    $"Desktop must be between 1 and "
+                    + $"{count}."
                 );
             }
 
-            int hr =
-                _viewCollection.GetViewForHwnd(
-                    hwnd,
-                    out IApplicationView view
+            Guid targetId =
+                GetDesktopId(
+                    desktopNumber
                 );
 
-            if (hr != 0)
+            int result =
+                _publicManager
+                    .MoveWindowToDesktop(
+                        hwnd,
+                        ref targetId
+                    );
+
+            if (result != 0)
             {
                 throw new COMException(
-                    "GetViewForHwnd failed.",
-                    hr
+                    $"MoveWindowToDesktop failed. "
+                    + $"HRESULT=0x{result:X8}",
+                    result
+                );
+            }
+        }
+
+        // ------------------------------------------------------------
+        // Hidden launch
+        // ------------------------------------------------------------
+
+        public string LaunchHidden(
+            string executable,
+            string windowTitle,
+            int desktopNumber)
+        {
+            int desktopCount =
+                GetDesktopCount();
+
+            if (desktopNumber < 1 ||
+                desktopNumber > desktopCount)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(desktopNumber),
+                    $"Desktop must be between 1 and "
+                    + $"{desktopCount}."
                 );
             }
 
-            if (view is null)
+            Console.Error.WriteLine(
+                $"Launching hidden: {executable}"
+            );
+
+            Console.Error.WriteLine(
+                $"Target desktop: {desktopNumber}"
+            );
+
+            var startupInfo =
+                new STARTUPINFO();
+
+            startupInfo.cb =
+                Marshal.SizeOf<STARTUPINFO>();
+
+            startupInfo.dwFlags =
+                StartfUseShowWindow;
+
+            startupInfo.wShowWindow =
+                SwHide;
+
+            string commandLine =
+                executable;
+
+            bool created =
+                CreateProcess(
+                    null,
+                    commandLine,
+                    IntPtr.Zero,
+                    IntPtr.Zero,
+                    false,
+                    0,
+                    IntPtr.Zero,
+                    null,
+                    ref startupInfo,
+                    out PROCESS_INFORMATION processInfo
+                );
+
+            if (!created)
             {
-                throw new InvalidOperationException(
-                    "GetViewForHwnd returned null."
+                int error =
+                    Marshal.GetLastWin32Error();
+
+                throw new Win32Exception(
+                    error,
+                    $"CreateProcess failed for "
+                    + $"'{executable}'."
                 );
             }
 
             try
             {
-                if (!_internalManager
-                        .CanViewMoveDesktops(view))
+                int pid =
+                    unchecked(
+                        (int)processInfo.dwProcessId
+                    );
+
+                Console.Error.WriteLine(
+                    $"PID: {pid}"
+                );
+
+                IntPtr hwnd =
+                    FindWindowForTitle(
+                        windowTitle,
+                        10_000
+                    );
+
+                if (hwnd == IntPtr.Zero)
                 {
-                    throw new InvalidOperationException(
-                        "Windows reports that this "
-                        + "view cannot move desktops."
+                    throw new TimeoutException(
+                        $"Could not find a window titled "
+                        + $"'{windowTitle}' within 10 seconds."
                     );
                 }
 
-                IVirtualDesktop target =
-                    GetDesktopByNumber(
+                Console.Error.WriteLine(
+                    $"Found HWND: {hwnd}"
+                );
+
+                ShowWindow(
+                    hwnd,
+                    SwHide
+                );
+
+                Console.Error.WriteLine(
+                    "Window hidden."
+                );
+
+                Guid targetId =
+                    GetDesktopId(
                         desktopNumber
                     );
 
-                try
-                {
-                    _internalManager
-                        .MoveViewToDesktop(
-                            view,
-                            target
+                Console.Error.WriteLine(
+                    "Moving hidden window..."
+                );
+
+                int moveResult =
+                    _publicManager
+                        .MoveWindowToDesktop(
+                            hwnd,
+                            ref targetId
                         );
-                }
-                finally
+
+                if (moveResult != 0)
                 {
-                    ReleaseComObject(
-                        target
+                    throw new COMException(
+                        $"MoveWindowToDesktop failed. "
+                        + $"HRESULT=0x{moveResult:X8}",
+                        moveResult
                     );
                 }
+
+                int actualDesktop =
+                    GetDesktopNumber(
+                        _publicManager
+                            .GetWindowDesktopId(
+                                hwnd
+                            )
+                    );
+
+                Console.Error.WriteLine(
+                    $"Verified desktop: "
+                    + $"{actualDesktop}"
+                );
+
+                if (actualDesktop !=
+                    desktopNumber)
+                {
+                    throw new InvalidOperationException(
+                        $"Window ended up on Desktop "
+                        + $"{actualDesktop}, expected "
+                        + $"{desktopNumber}."
+                    );
+                }
+
+                ShowWindow(
+                    hwnd,
+                    SwShowNoActivate
+                );
+
+                Console.Error.WriteLine(
+                    "Window shown."
+                );
+
+                return JsonSerializer.Serialize(
+                    new
+                    {
+                        ok = true,
+                        executable,
+                        hwnd = hwnd.ToInt64(),
+                        desktop = actualDesktop,
+                        method =
+                            "hidden-launch-public-manager"
+                    }
+                );
+            }
+            finally
+            {
+                CloseHandle(
+                    processInfo.hProcess
+                );
+
+                CloseHandle(
+                    processInfo.hThread
+                );
+            }
+        }
+
+        // ------------------------------------------------------------
+        // Desktop helpers
+        // ------------------------------------------------------------
+
+        private Guid GetDesktopId(
+            int desktopNumber)
+        {
+            IVirtualDesktop desktop =
+                GetDesktopByNumber(
+                    desktopNumber
+                );
+
+            try
+            {
+                return desktop.GetId();
             }
             finally
             {
                 ReleaseComObject(
-                    view
+                    desktop
                 );
             }
         }
@@ -548,9 +957,10 @@ internal static class Program
             GetDesktopByNumber(
                 int desktopNumber)
         {
-            _internalManager.GetDesktops(
-                out IObjectArray desktops
-            );
+            _internalManager
+                .GetDesktops(
+                    out IObjectArray desktops
+                );
 
             try
             {
@@ -560,11 +970,11 @@ internal static class Program
                 desktops.GetAt(
                     desktopNumber - 1,
                     ref iid,
-                    out object desktop
+                    out object desktopObject
                 );
 
                 return (IVirtualDesktop)
-                    desktop;
+                    desktopObject;
             }
             finally
             {
@@ -577,9 +987,10 @@ internal static class Program
         private int GetDesktopNumber(
             Guid desktopId)
         {
-            _internalManager.GetDesktops(
-                out IObjectArray desktops
-            );
+            _internalManager
+                .GetDesktops(
+                    out IObjectArray desktops
+                );
 
             try
             {
@@ -628,8 +1039,128 @@ internal static class Program
             }
 
             throw new InvalidOperationException(
-                $"Desktop {desktopId} was not found."
+                $"Virtual desktop {desktopId} "
+                + "was not found."
             );
+        }
+
+        // ------------------------------------------------------------
+        // Window discovery
+        // ------------------------------------------------------------
+
+        private static IntPtr FindWindowForTitle(
+            string title,
+            int timeoutMs)
+        {
+            string wanted =
+                title.Trim();
+
+            long deadline =
+                Environment.TickCount64
+                + timeoutMs;
+
+            while (
+                Environment.TickCount64
+                < deadline)
+            {
+                IntPtr found =
+                    FindWindowByExactTitle(
+                        wanted
+                    );
+
+                if (found != IntPtr.Zero)
+                {
+                    return found;
+                }
+
+                Thread.Sleep(50);
+            }
+
+            return IntPtr.Zero;
+        }
+
+        private static IntPtr FindWindowByExactTitle(
+            string wantedTitle)
+        {
+            IntPtr found =
+                IntPtr.Zero;
+
+            EnumWindows(
+                (hwnd, _) =>
+                {
+                    if (!IsWindowVisible(hwnd))
+                    {
+                        return true;
+                    }
+
+                    if (GetParent(hwnd) !=
+                        IntPtr.Zero)
+                    {
+                        return true;
+                    }
+
+                    if (GetWindow(
+                            hwnd,
+                            GwOwner) !=
+                        IntPtr.Zero)
+                    {
+                        return true;
+                    }
+
+                    int length =
+                        GetWindowTextLength(hwnd);
+
+                    if (length <= 0)
+                    {
+                        return true;
+                    }
+
+                    var buffer =
+                        new System.Text.StringBuilder(
+                            length + 1
+                        );
+
+                    GetWindowText(
+                        hwnd,
+                        buffer,
+                        buffer.Capacity
+                    );
+
+                    if (
+                        string.Equals(
+                            buffer.ToString().Trim(),
+                            wantedTitle,
+                            StringComparison.OrdinalIgnoreCase
+                        ))
+                    {
+                        found =
+                            hwnd;
+
+                        return false;
+                    }
+
+                    return true;
+                },
+                IntPtr.Zero
+            );
+
+            return found;
+        }
+
+        // ------------------------------------------------------------
+        // COM cleanup
+        // ------------------------------------------------------------
+
+        private static void ReleaseComObject(
+            object? value)
+        {
+            if (value is not null &&
+                Marshal.IsComObject(value))
+            {
+                Marshal.ReleaseComObject(
+                    value
+                );
+            }
         }
 
         public void Dispose()
@@ -653,7 +1184,7 @@ internal static class Program
     }
 
     // ================================================================
-    // IServiceProvider helper
+    // COM service helper
     // ================================================================
 
     private static T QueryService<T>(
@@ -662,8 +1193,11 @@ internal static class Program
         Guid interfaceGuid)
         where T : class
     {
-        Guid service = serviceGuid;
-        Guid iid = interfaceGuid;
+        Guid service =
+            serviceGuid;
+
+        Guid iid =
+            interfaceGuid;
 
         object result =
             shell.QueryService(
@@ -680,88 +1214,6 @@ internal static class Program
         }
 
         return typed;
-    }
-
-    // ================================================================
-    // Utilities
-    // ================================================================
-
-    private static bool TryParseHwnd(
-        string value,
-        out IntPtr hwnd)
-    {
-        hwnd = IntPtr.Zero;
-
-        if (value.StartsWith(
-                "0x",
-                StringComparison.OrdinalIgnoreCase))
-        {
-            if (!long.TryParse(
-                    value[2..],
-                    System.Globalization.NumberStyles.HexNumber,
-                    null,
-                    out long parsed))
-            {
-                return false;
-            }
-
-            hwnd = new IntPtr(parsed);
-
-            return hwnd != IntPtr.Zero;
-        }
-
-        if (!long.TryParse(
-                value,
-                out long decimalValue))
-        {
-            return false;
-        }
-
-        hwnd = new IntPtr(decimalValue);
-
-        return hwnd != IntPtr.Zero;
-    }
-
-    private static int PrintUsageAndFail()
-    {
-        PrintUsage();
-        return 1;
-    }
-
-    private static void PrintUsage()
-    {
-        Console.WriteLine(
-            """
-            Alfred DesktopBridge
-
-            Commands:
-
-              diagnose
-                  Diagnose Windows COM virtual-desktop access.
-
-              count
-                  Print the number of virtual desktops.
-
-              current
-                  Print the current desktop.
-
-              window-desktop <hwnd>
-                  Print the desktop containing a window.
-
-              move-window <hwnd> <desktop>
-                  Move a window without switching desktops.
-            """
-        );
-    }
-
-    private static void ReleaseComObject(
-        object? value)
-    {
-        if (value is not null &&
-            Marshal.IsComObject(value))
-        {
-            Marshal.ReleaseComObject(value);
-        }
     }
 
     // ================================================================
@@ -798,7 +1250,7 @@ internal static class Program
             IntPtr topLevelWindow
         );
 
-        void MoveWindowToDesktop(
+        int MoveWindowToDesktop(
             IntPtr topLevelWindow,
             ref Guid desktopId
         );
@@ -836,10 +1288,6 @@ internal static class Program
         );
 
         void SwitchDesktop(
-            IVirtualDesktop desktop
-        );
-
-        void SwitchDesktopAndMoveForegroundView(
             IVirtualDesktop desktop
         );
 
@@ -910,7 +1358,8 @@ internal static class Program
         );
 
         int GetAppUserModelId(
-            [MarshalAs(UnmanagedType.LPWStr)]
+            [MarshalAs(
+                UnmanagedType.LPWStr)]
             out string id
         );
 
@@ -949,30 +1398,6 @@ internal static class Program
 
         int SetVirtualDesktopId(
             ref Guid guid
-        );
-
-        int GetShowInSwitchers(
-            out int flag
-        );
-
-        int SetShowInSwitchers(
-            int flag
-        );
-
-        int GetScaleFactor(
-            out int factor
-        );
-
-        int CanReceiveInput(
-            out bool canReceiveInput
-        );
-
-        int GetCompatibilityPolicyType(
-            out int flags
-        );
-
-        int SetCompatibilityPolicyType(
-            int flags
         );
     }
 
@@ -1045,7 +1470,8 @@ internal static class Program
         void GetAt(
             int index,
             ref Guid iid,
-            [MarshalAs(UnmanagedType.Interface)]
+            [MarshalAs(
+                UnmanagedType.IUnknown)]
             out object value
         );
     }
@@ -1073,4 +1499,148 @@ internal static class Program
 
         bool IsRemote();
     }
+
+    // ================================================================
+    // Win32 API
+    // ================================================================
+
+    private const int StartfUseShowWindow =
+        0x00000001;
+
+    [StructLayout(
+        LayoutKind.Sequential,
+        CharSet = CharSet.Unicode)]
+    private struct STARTUPINFO
+    {
+        public int cb;
+
+        public string? lpReserved;
+
+        public string? lpDesktop;
+
+        public string? lpTitle;
+
+        public int dwX;
+
+        public int dwY;
+
+        public int dwXSize;
+
+        public int dwYSize;
+
+        public int dwXCountChars;
+
+        public int dwYCountChars;
+
+        public int dwFillAttribute;
+
+        public int dwFlags;
+
+        public short wShowWindow;
+
+        public short cbReserved2;
+
+        public IntPtr lpReserved2;
+
+        public IntPtr hStdInput;
+
+        public IntPtr hStdOutput;
+
+        public IntPtr hStdError;
+    }
+
+    [StructLayout(
+        LayoutKind.Sequential)]
+    private struct PROCESS_INFORMATION
+    {
+        public IntPtr hProcess;
+
+        public IntPtr hThread;
+
+        public uint dwProcessId;
+
+        public uint dwThreadId;
+    }
+
+    [DllImport(
+        "kernel32.dll",
+        SetLastError = true,
+        CharSet = CharSet.Unicode)]
+    [return: MarshalAs(
+        UnmanagedType.Bool)]
+    private static extern bool CreateProcess(
+        string? lpApplicationName,
+        string lpCommandLine,
+        IntPtr lpProcessAttributes,
+        IntPtr lpThreadAttributes,
+        bool bInheritHandles,
+        uint dwCreationFlags,
+        IntPtr lpEnvironment,
+        string? lpCurrentDirectory,
+        ref STARTUPINFO lpStartupInfo,
+        out PROCESS_INFORMATION lpProcessInformation
+    );
+
+    [DllImport(
+        "kernel32.dll",
+        SetLastError = true)]
+    [return: MarshalAs(
+        UnmanagedType.Bool)]
+    private static extern bool CloseHandle(
+        IntPtr hObject
+    );
+
+    [DllImport(
+        "user32.dll")]
+    private static extern bool EnumWindows(
+        EnumWindowsProc lpEnumFunc,
+        IntPtr lParam
+    );
+
+    private delegate bool EnumWindowsProc(
+        IntPtr hWnd,
+        IntPtr lParam
+    );
+
+    [DllImport(
+        "user32.dll")]
+    private static extern bool IsWindowVisible(
+        IntPtr hWnd
+    );
+
+    [DllImport(
+        "user32.dll")]
+    private static extern IntPtr GetParent(
+        IntPtr hWnd
+    );
+
+    [DllImport(
+        "user32.dll")]
+    private static extern IntPtr GetWindow(
+        IntPtr hWnd,
+        uint uCmd
+    );
+
+    [DllImport(
+        "user32.dll",
+        CharSet = CharSet.Unicode)]
+    private static extern int GetWindowTextLength(
+        IntPtr hWnd
+    );
+
+    [DllImport(
+        "user32.dll",
+        CharSet = CharSet.Unicode)]
+    private static extern int GetWindowText(
+        IntPtr hWnd,
+        System.Text.StringBuilder lpString,
+        int nMaxCount
+    );
+
+    [DllImport(
+        "user32.dll")]
+    private static extern bool ShowWindow(
+        IntPtr hWnd,
+        int nCmdShow
+    );
 }

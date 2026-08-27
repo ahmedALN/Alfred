@@ -1,0 +1,15 @@
+C:\Users\ahmed\Alfred\src\windows\native\DesktopBridge\bin\Release\net10.0\win-x64\DesktopBridge.exe
+C:\Users\ahmed\Alfred\src\windows\native\DesktopBridge\bin\Release\net10.0\win-x64\DesktopBridge.deps.json
+C:\Users\ahmed\Alfred\src\windows\native\DesktopBridge\bin\Release\net10.0\win-x64\DesktopBridge.runtimeconfig.json
+C:\Users\ahmed\Alfred\src\windows\native\DesktopBridge\bin\Release\net10.0\win-x64\DesktopBridge.dll
+C:\Users\ahmed\Alfred\src\windows\native\DesktopBridge\bin\Release\net10.0\win-x64\DesktopBridge.pdb
+C:\Users\ahmed\Alfred\src\windows\native\DesktopBridge\obj\Release\net10.0\win-x64\DesktopBridge.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\ahmed\Alfred\src\windows\native\DesktopBridge\obj\Release\net10.0\win-x64\DesktopBridge.AssemblyInfoInputs.cache
+C:\Users\ahmed\Alfred\src\windows\native\DesktopBridge\obj\Release\net10.0\win-x64\DesktopBridge.AssemblyInfo.cs
+C:\Users\ahmed\Alfred\src\windows\native\DesktopBridge\obj\Release\net10.0\win-x64\DesktopBridge.csproj.CoreCompileInputs.cache
+C:\Users\ahmed\Alfred\src\windows\native\DesktopBridge\obj\Release\net10.0\win-x64\DesktopBridge.sourcelink.json
+C:\Users\ahmed\Alfred\src\windows\native\DesktopBridge\obj\Release\net10.0\win-x64\DesktopBridge.dll
+C:\Users\ahmed\Alfred\src\windows\native\DesktopBridge\obj\Release\net10.0\win-x64\refint\DesktopBridge.dll
+C:\Users\ahmed\Alfred\src\windows\native\DesktopBridge\obj\Release\net10.0\win-x64\DesktopBridge.pdb
+C:\Users\ahmed\Alfred\src\windows\native\DesktopBridge\obj\Release\net10.0\win-x64\DesktopBridge.genruntimeconfig.cache
+C:\Users\ahmed\Alfred\src\windows\native\DesktopBridge\obj\Release\net10.0\win-x64\ref\DesktopBridge.dll

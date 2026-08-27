@@ -1,0 +1,15 @@
+C:\Users\ahmed\Alfred\src\windows\native\ChildInputClient\bin\Debug\net10.0-windows\ChildInputClient.exe
+C:\Users\ahmed\Alfred\src\windows\native\ChildInputClient\bin\Debug\net10.0-windows\ChildInputClient.deps.json
+C:\Users\ahmed\Alfred\src\windows\native\ChildInputClient\bin\Debug\net10.0-windows\ChildInputClient.runtimeconfig.json
+C:\Users\ahmed\Alfred\src\windows\native\ChildInputClient\bin\Debug\net10.0-windows\ChildInputClient.dll
+C:\Users\ahmed\Alfred\src\windows\native\ChildInputClient\bin\Debug\net10.0-windows\ChildInputClient.pdb
+C:\Users\ahmed\Alfred\src\windows\native\ChildInputClient\obj\Debug\net10.0-windows\ChildInputClient.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\ahmed\Alfred\src\windows\native\ChildInputClient\obj\Debug\net10.0-windows\ChildInputClient.AssemblyInfoInputs.cache
+C:\Users\ahmed\Alfred\src\windows\native\ChildInputClient\obj\Debug\net10.0-windows\ChildInputClient.AssemblyInfo.cs
+C:\Users\ahmed\Alfred\src\windows\native\ChildInputClient\obj\Debug\net10.0-windows\ChildInputClient.csproj.CoreCompileInputs.cache
+C:\Users\ahmed\Alfred\src\windows\native\ChildInputClient\obj\Debug\net10.0-windows\ChildInputClient.sourcelink.json
+C:\Users\ahmed\Alfred\src\windows\native\ChildInputClient\obj\Debug\net10.0-windows\ChildInputClient.dll
+C:\Users\ahmed\Alfred\src\windows\native\ChildInputClient\obj\Debug\net10.0-windows\refint\ChildInputClient.dll
+C:\Users\ahmed\Alfred\src\windows\native\ChildInputClient\obj\Debug\net10.0-windows\ChildInputClient.pdb
+C:\Users\ahmed\Alfred\src\windows\native\ChildInputClient\obj\Debug\net10.0-windows\ChildInputClient.genruntimeconfig.cache
+C:\Users\ahmed\Alfred\src\windows\native\ChildInputClient\obj\Debug\net10.0-windows\ref\ChildInputClient.dll
