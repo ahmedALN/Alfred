@@ -25,3 +25,4 @@ recordings/
 src/windows/native/ChildScreenCapture/child-capture.png
 src/windows/native/ChildScreenCapture/child-desktop.png
 src/windows/native/ChildScreenCapture/child-monitor-*.png
+debug-child-desktop.png
