@@ -16,20 +16,13 @@ async def main() -> None:
     try:
         await session.connect()
 
-        print("Alfred is connected.")
-        print("Push-to-talk mode.")
+        print("Alfred is listening.")
+        print("Speak naturally. Press Ctrl+C to exit.")
 
-        while True:
-            try:
-                response = await session.push_to_talk()
+        await session.run_forever()
 
-                if response:
-                    print(f"\nAlfred: {response}")
-                else:
-                    print("\nAlfred returned no transcript.")
-
-            except KeyboardInterrupt:
-                break
+    except KeyboardInterrupt:
+        print("\nShutting down Alfred...")
 
     finally:
         await session.close()
