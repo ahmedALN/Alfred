@@ -9,9 +9,11 @@ from src.ai.providers import build_providers
 from src.brain.audit import AuditLog
 from src.brain.deliberation import Deliberator
 from src.brain.orchestrator import BrainLoop
+from src.brain.agent import TaskAgent
 from src.brain.perception import Perception
 from src.brain.policy import Policy
 from src.brain.reasoner import LLMReasoner
+from src.brain.tasks import TaskQueue
 from src.config import load_settings
 from src.memory.learner import MemoryLearner
 from src.memory.store import MemoryStore
@@ -23,6 +25,7 @@ from src.tools.open_app import OpenAppTool
 from src.tools.powershell import PowerShellTool
 from src.tools.registry import ToolRegistry
 from src.tools.system_info import SystemInfoTool
+from src.tools.task_tool import RunTaskTool, TaskStatusTool
 from src.windows.child_session import ChildSessionClient
 from src.windows.child_session.bootstrap import ensure_agent_running
 
@@ -80,6 +83,9 @@ async def main() -> None:
         vision=providers.vision,
     )
 
+    # Background task agent: delegate multi-step jobs.
+    task_queue = TaskQueue()
+
     for tool in (
         powershell_tool,
         open_app_tool,
@@ -89,6 +95,8 @@ async def main() -> None:
         network_info_tool,
         remember_tool,
         recall_tool,
+        RunTaskTool(task_queue),
+        TaskStatusTool(task_queue),
     ):
         registry.register(tool)
 
@@ -105,6 +113,26 @@ async def main() -> None:
         policy=voice_policy,
     )
 
+    task_agent = TaskAgent(
+        chat=providers.chat,
+        registry=registry,
+        policy=Policy(
+            autonomy=settings.brain_autonomy,
+            # the task agent must not enqueue more tasks
+            known_tools=set(registry.names()) - {"run_task", "task_status"},
+            surface="brain",
+        ),
+        audit=None,  # set below once the audit log exists
+    )
+
+    session.add_background_task(
+        lambda: task_queue.run(
+            task_agent,
+            session.inject_system_prompt,
+            lambda: session.session_key,
+        )
+    )
+
     # --------------------------------------------------------------
     # Proactive brain: background awareness loop. Optional; disabled
     # via ALFRED_BRAIN_ENABLED=false.
@@ -114,6 +142,7 @@ async def main() -> None:
 
     if settings.brain_enabled:
         audit = AuditLog(settings.brain_audit_path)
+        task_agent._audit = audit
 
         perception = Perception()
 

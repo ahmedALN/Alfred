@@ -58,6 +58,10 @@ class AlfredLiveSession:
         self._policy = policy
         self._session_id = uuid.uuid4().hex
 
+        # Extra long-lived coroutines to run alongside the session
+        # (e.g. the background task-queue worker).
+        self._background_factories: list[Any] = []
+
         # Partial input-transcription fragments for the current user
         # turn, joined and handed to the brain on turn completion.
         self._input_transcript_parts: list[str] = []
@@ -95,6 +99,14 @@ class AlfredLiveSession:
         """Wire the background awareness loop in after construction."""
 
         self._brain = brain
+
+    def add_background_task(self, factory: Any) -> None:
+        """
+        Register a zero-arg callable returning a coroutine to run for the
+        lifetime of the session (cancelled on shutdown).
+        """
+
+        self._background_factories.append(factory)
 
     def _gate_tool_call(
         self,
@@ -238,6 +250,12 @@ class AlfredLiveSession:
             "If the user tells you to stop mentioning a topic, to be "
             "quiet, or to pause the background loop, acknowledge it in "
             "one short sentence. "
+
+            "For a job that needs several steps in sequence (organizing "
+            "files, auditing and fixing settings, setting something up), "
+            "call run_task with a clear goal and let the background agent "
+            "do it; tell the user you've started and don't wait. Do quick "
+            "single actions yourself. "
 
             "Run whatever the user asks without hesitation. If a tool "
             "returns status 'needs_confirmation', follow its instruction: "
@@ -854,6 +872,9 @@ class AlfredLiveSession:
         if self._brain is not None:
             brain_task = asyncio.create_task(self._brain.run())
             tasks.add(brain_task)
+
+        for factory in self._background_factories:
+            tasks.add(asyncio.create_task(factory()))
 
         try:
             done, pending = await asyncio.wait(
