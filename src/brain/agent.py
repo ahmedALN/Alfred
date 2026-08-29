@@ -10,21 +10,49 @@ from src.brain.policy import Policy
 from src.brain.types import Proposal, ProposalKind, Verdict
 from src.tools.registry import ToolRegistry
 
-_SYSTEM = """You are Alfred's task executor. You carry out one goal for the \
-user by using tools, one step at a time, on Alfred's own isolated desktop.
+_PLAN_SYSTEM = """You are Alfred's task planner. Break the user's goal into the \
+fewest concrete steps that a tool-using agent can carry out on this Windows PC.
+
+For each step give a 'done_when' that can be CHECKED from a tool result - name \
+a specific observable thing (a control that appears, a value a tool returns, a \
+file that exists, text shown in the UI). Vague checks like "it worked" are \
+useless.
+
+Prefer the ui_control tool (reads app controls by name, exact) over \
+desktop_control (screenshot guessing). For file/system work prefer powershell \
+and system_info.
+
+Reply with ONLY this JSON:
+{"plan":[{"step":"<imperative>","done_when":"<checkable condition>"}],
+ "note":"<one line about anything risky or uncertain>"}
+"""
+
+_EXEC_SYSTEM = """You are Alfred's task executor, working through a plan one \
+step at a time using tools.
 
 Rules:
 - Each reply is exactly ONE JSON object, nothing else.
-- Prefer the smallest number of steps. Stop as soon as the goal is met.
-- Use action='look' style inspection before you click or type.
-- If a step fails, try a different approach; do not repeat the same failing
-  call. If you are truly stuck, give up and say why.
+- Only work on the CURRENT step. Do the smallest thing that makes its \
+'done_when' true, then reply action=done.
+- ui_control: call action='tree' first to see the real controls, then click / \
+type by ref or name. Do NOT guess coordinates.
+- If a call fails, try a different approach - never repeat the same failing \
+call. If truly stuck on this step, action=give_up.
+- Never claim done unless a tool result actually shows the 'done_when' is true.
 
 Reply with one of:
 {"action":"use_tool","tool":"<name>","args":{...},"rationale":"<short>"}
-{"action":"done","summary":"<what you accomplished, one or two sentences>"}
+{"action":"done","evidence":"<the tool result that proves done_when>"}
 {"action":"give_up","reason":"<what blocked you>"}
 """
+
+_VERIFY_SYSTEM = """You check whether a task step really finished. Be strict: \
+only say VERIFIED if the log contains a concrete tool result that shows the \
+'done_when' condition is actually true right now. An executor SAYING it's done \
+is not evidence. If you are unsure, say UNVERIFIED.
+
+Reply with exactly one line: 'VERIFIED: <why>' or 'UNVERIFIED: <what's \
+missing>'."""
 
 
 @dataclass
@@ -41,10 +69,14 @@ class Step:
 @dataclass
 class TaskResult:
     goal: str
-    status: str  # "done" | "gave_up" | "exhausted" | "error"
+    status: str  # done | partial | failed | uncertain | gave_up | exhausted
+                 # | cancelled | error
     summary: str
     steps: list[Step] = field(default_factory=list)
     skipped_confirmations: list[str] = field(default_factory=list)
+    verified: list[str] = field(default_factory=list)
+    unverified: list[str] = field(default_factory=list)
+    plan: list[str] = field(default_factory=list)
     elapsed_seconds: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
@@ -53,6 +85,9 @@ class TaskResult:
             "status": self.status,
             "summary": self.summary,
             "steps": len(self.steps),
+            "plan": self.plan,
+            "verified": self.verified,
+            "unverified": self.unverified,
             "skipped_confirmations": self.skipped_confirmations,
             "elapsed_seconds": round(self.elapsed_seconds, 1),
         }
@@ -78,6 +113,7 @@ class TaskAgent:
         plan_chat: ChatProvider | None = None,
         max_steps: int = 20,
         max_seconds: float = 360.0,
+        substep_max_calls: int = 5,
         audit: Any = None,
     ) -> None:
         self._chat = chat
@@ -89,7 +125,11 @@ class TaskAgent:
         self._ask_user: "Callable[[str], bool] | None" = None
         self._max_steps = max_steps
         self._max_seconds = max_seconds
+        self._substep_max_calls = substep_max_calls
         self._audit = audit
+        self._catalogue = ""
+        self._deadline = 0.0
+        self._cancel_check: "Callable[[], bool]" = lambda: False
 
     # ----------------------------------------------------------------
 
@@ -105,98 +145,245 @@ class TaskAgent:
     ) -> TaskResult:
         goal = goal.strip()
         started = time.monotonic()
-        last_progress = started
+        self._deadline = started + self._max_seconds
+        self._cancel_check = cancel_check or (lambda: False)
 
         self._policy = (
             self._policy_voice if source == "voice" else self._policy_brain
         )
         self._ask_user = ask_user
 
-        result = TaskResult(goal=goal, status="exhausted", summary="")
-
-        catalogue = "\n".join(
+        result = TaskResult(goal=goal, status="failed", summary="")
+        self._catalogue = "\n".join(
             f"- {t.get('name')}: {t.get('description', '')}"
             for t in self._registry.gemini_declarations()
         )
-
         history: list[str] = []
-
         self._log("task_start", {"goal": goal}, session_id)
 
-        for i in range(1, self._max_steps + 1):
-            if cancel_check is not None and cancel_check():
+        if self._cancel_check():
+            result.status = "cancelled"
+            result.elapsed_seconds = time.monotonic() - started
+            self._finalize(result)
+            return result
+
+        # 1. PLAN
+        plan = self._make_plan(goal)
+        result.plan = [p["step"] for p in plan]
+        if on_progress is not None:
+            on_progress("Plan: " + "; ".join(result.plan[:6]))
+        self._log("task_plan", {"goal": goal, "plan": plan}, session_id)
+
+        replans = 0
+        pi = 0
+        total_calls = 0
+
+        while pi < len(plan):
+            if self._cancel_check():
                 result.status = "cancelled"
-                result.summary = f"Stopped at your request after {i - 1} steps."
                 break
-
-            if time.monotonic() - started > self._max_seconds:
+            if time.monotonic() > self._deadline:
                 result.status = "exhausted"
-                result.summary = (
-                    f"Ran out of time after {i - 1} steps on: {goal}"
-                )
+                break
+            if total_calls >= self._max_steps:
                 break
 
-            if on_progress is not None and i > 1 and (
-                (i - 1) % 3 == 0 or time.monotonic() - last_progress > 45
-            ):
-                last_progress = time.monotonic()
-                done_ok = sum(1 for s in result.steps if s.ok)
-                on_progress(
-                    f"Still on '{goal[:60]}' - {done_ok} steps done so far."
-                )
+            pstep = plan[pi]
+            if on_progress is not None and pi > 0:
+                on_progress(f"Step {pi + 1}/{len(plan)}: {pstep['step'][:70]}")
 
-            prompt = (
-                f"{_SYSTEM}\n\nGOAL: {goal}\n\nTOOLS:\n{catalogue}\n\n"
-                f"HISTORY:\n" + ("\n".join(history) or "(nothing yet)")
-                + "\n\nYour next JSON:"
+            before = len(result.steps)
+            calls = self._execute_substep(
+                goal, plan, pi, history, result, session_id,
+                budget=self._max_steps - total_calls,
+            )
+            total_calls += calls
+            progressed = any(s.ok for s in result.steps[before:])
+
+            if not progressed:
+                # The executor did nothing that worked - a "done" here is the
+                # exact pattern behind the "it said it opened Drake" bug.
+                ok, evidence = False, "no successful tool action for this step"
+            else:
+                ok, evidence = self._verify(pstep, history)
+            self._log(
+                "task_verify",
+                {"step": pstep["step"], "verified": ok, "evidence": evidence},
+                session_id,
             )
 
+            if ok:
+                result.verified.append(pstep["step"])
+                pi += 1
+                continue
+
+            if replans < 2 and total_calls < self._max_steps:
+                replans += 1
+                history.append(
+                    f"[replan {replans}] step '{pstep['step']}' not verified: "
+                    f"{evidence}"
+                )
+                remainder = self._make_plan(
+                    goal,
+                    extra=(
+                        f"Done so far: {result.verified or 'nothing'}. "
+                        f"Stuck on: {pstep['step']} - {evidence}. "
+                        "Give the remaining steps only."
+                    ),
+                )
+                plan = plan[:pi] + remainder
+                result.plan = [p["step"] for p in plan]
+                continue
+
+            result.unverified.append(f"{pstep['step']} ({evidence})")
+            pi += 1
+
+        # 4. REPORT - only from what was verified
+        result.elapsed_seconds = time.monotonic() - started
+        self._finalize(result)
+        self._log("task_end", result.as_dict(), session_id)
+        return result
+
+    # ----------------------------------------------------------------
+
+    def _make_plan(self, goal: str, extra: str = "") -> list[dict[str, str]]:
+        prompt = (
+            f"{_PLAN_SYSTEM}\n\nGOAL: {goal}\n\nTOOLS:\n{self._catalogue}\n"
+            + (f"\nCONTEXT: {extra}\n" if extra else "")
+            + "\nYour JSON:"
+        )
+        try:
+            raw = self._plan_chat.generate(prompt, temperature=0.2)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Task] planner failed ({exc}); using a single step.")
+            return [{"step": goal, "done_when": goal}]
+
+        obj = _parse(raw) or {}
+        plan = obj.get("plan")
+        steps: list[dict[str, str]] = []
+        if isinstance(plan, list):
+            for item in plan:
+                if isinstance(item, dict) and item.get("step"):
+                    steps.append({
+                        "step": str(item["step"]).strip(),
+                        "done_when": str(item.get("done_when", "")).strip()
+                        or str(item["step"]).strip(),
+                    })
+        return steps or [{"step": goal, "done_when": goal}]
+
+    def _execute_substep(
+        self,
+        goal: str,
+        plan: list[dict[str, str]],
+        pi: int,
+        history: list[str],
+        result: TaskResult,
+        session_id: str | None,
+        *,
+        budget: int,
+    ) -> int:
+        pstep = plan[pi]
+        plan_view = "\n".join(
+            f"  {'>' if j == pi else ' '} {p['step']}"
+            for j, p in enumerate(plan)
+        )
+        calls = 0
+        for _ in range(max(0, min(self._substep_max_calls, budget))):
+            if self._cancel_check() or time.monotonic() > self._deadline:
+                break
+
+            prompt = (
+                f"{_EXEC_SYSTEM}\n\nOVERALL GOAL: {goal}\n\nPLAN:\n{plan_view}\n\n"
+                f"CURRENT STEP: {pstep['step']}\nDONE WHEN: {pstep['done_when']}\n\n"
+                f"TOOLS:\n{self._catalogue}\n\n"
+                f"HISTORY:\n" + ("\n".join(history[-14:]) or "(nothing yet)")
+                + "\n\nYour next JSON:"
+            )
             try:
                 raw = self._chat.generate(prompt, temperature=0.2)
             except Exception as exc:  # noqa: BLE001
-                result.status = "error"
-                result.summary = f"Reasoning model failed: {exc}"
+                history.append(f"[system] executor model error: {exc}")
                 break
 
             decision = _parse(raw)
-
             if decision is None:
-                history.append(f"[system] Unparseable reply, retrying: {raw[:120]}")
+                history.append(f"[system] unparseable: {raw[:120]}")
                 continue
 
             action = decision.get("action")
-
             if action == "done":
-                result.status = "done"
-                result.summary = str(decision.get("summary", "")).strip() or (
-                    f"Completed: {goal}"
+                history.append(
+                    f"[step {pi + 1} executor claims done] "
+                    f"{decision.get('evidence', '')}"
                 )
                 break
-
             if action == "give_up":
-                result.status = "gave_up"
-                result.summary = str(decision.get("reason", "")).strip() or (
-                    f"Could not complete: {goal}"
+                history.append(
+                    f"[step {pi + 1} executor gave up] {decision.get('reason', '')}"
                 )
                 break
-
             if action != "use_tool":
-                history.append(f"[system] Unknown action {action!r}.")
+                history.append(f"[system] unknown action {action!r}")
                 continue
 
-            step = self._run_tool_step(i, decision, history, result, session_id)
-            result.steps.append(step)
-
-        result.elapsed_seconds = time.monotonic() - started
-
-        if not result.summary:
-            result.summary = (
-                f"Stopped after {len(result.steps)} steps without finishing: "
-                f"{goal}"
+            step = self._run_tool_step(
+                len(result.steps) + 1, decision, history, result, session_id
             )
+            result.steps.append(step)
+            calls += 1
 
-        self._log("task_end", result.as_dict(), session_id)
-        return result
+        return calls
+
+    def _verify(
+        self, pstep: dict[str, str], history: list[str]
+    ) -> tuple[bool, str]:
+        prompt = (
+            f"{_VERIFY_SYSTEM}\n\nSTEP: {pstep['step']}\n"
+            f"DONE WHEN: {pstep['done_when']}\n\n"
+            f"LOG:\n" + "\n".join(history[-16:]) + "\n\nYour one line:"
+        )
+        try:
+            raw = self._chat.generate(prompt, temperature=0.0).strip()
+        except Exception as exc:  # noqa: BLE001
+            return False, f"could not verify: {exc}"
+
+        line = raw.splitlines()[0] if raw else ""
+        if line.upper().startswith("VERIFIED"):
+            return True, line.split(":", 1)[-1].strip()[:200]
+        return False, line.split(":", 1)[-1].strip()[:200] or "no evidence"
+
+    def _finalize(self, result: TaskResult) -> None:
+        n_plan = len(result.plan)
+        n_ok = len(result.verified)
+
+        if result.status in ("cancelled", "exhausted", "error"):
+            base = {
+                "cancelled": "Stopped at your request",
+                "exhausted": "Ran out of time",
+                "error": "Hit an error",
+            }[result.status]
+        elif n_ok == n_plan and n_plan:
+            result.status = "done"
+            base = "Done"
+        elif n_ok:
+            result.status = "partial"
+            base = "Partly done"
+        else:
+            result.status = "failed"
+            base = "Couldn't do it"
+
+        parts = [f"{base} on '{result.goal}'."]
+        if result.verified:
+            parts.append("Confirmed: " + "; ".join(result.verified) + ".")
+        if result.unverified:
+            parts.append(
+                "Couldn't confirm: " + "; ".join(result.unverified) + "."
+            )
+        if result.skipped_confirmations:
+            parts.append(
+                "Left for you: " + "; ".join(result.skipped_confirmations) + "."
+            )
+        result.summary = " ".join(parts)
 
     # ----------------------------------------------------------------
 

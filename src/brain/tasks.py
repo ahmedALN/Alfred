@@ -15,7 +15,9 @@ SpeakFn = Callable[[str], Awaitable[None]]
 class TaskRecord:
     id: str
     goal: str
-    status: str = "queued"  # queued | running | done | gave_up | error | exhausted
+    status: str = "queued"
+    # queued | running | done | partial | failed | uncertain | gave_up
+    # | exhausted | cancelled | error
     summary: str = ""
     source: str = "voice"  # "voice" (user asked) | "brain" (proactive)
     skipped_confirmations: list[str] = field(default_factory=list)
@@ -234,17 +236,12 @@ async def _safe_speak(speak: SpeakFn, text: str) -> None:
 
 
 def _announce(result: TaskResult) -> str:
-    lead = {
-        "done": "Finished",
-        "gave_up": "I had to stop",
-        "exhausted": "I ran out of steps",
-        "error": "Something went wrong",
-        "cancelled": "Stopped",
-    }.get(result.status, "Update")
+    # result.summary is already an honest, self-contained sentence built by
+    # TaskAgent._finalize ("Partly done on '...'. Confirmed: ... Couldn't
+    # confirm: ... Left for you: ...").
+    msg = f"(System: proactive) {result.summary}".rstrip()
 
-    msg = f"(System: proactive) {lead} on '{result.goal}': {result.summary}"
-
-    if result.skipped_confirmations:
+    if result.skipped_confirmations and "Left for you" not in result.summary:
         msg += (
             " I left these for you to approve: "
             + "; ".join(result.skipped_confirmations)
