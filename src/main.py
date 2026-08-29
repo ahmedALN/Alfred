@@ -3,7 +3,11 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from google import genai
+from src.logging_setup import configure_logging
+
+configure_logging()
+
+from google import genai  # noqa: E402
 
 # The SDK logs a noisy "AFC is not recommended" warning on every plain
 # generate_content call; we use that path deliberately.
