@@ -71,10 +71,26 @@ class PowerShellTool(AlfredTool):
         )
 
         return {
+            "status": "success" if result.success else "error",
             "success": result.success,
             "command": result.command,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
+            "stdout": _cap(result.stdout),
+            "stderr": _cap(result.stderr),
             "return_code": result.return_code,
             "duration_ms": result.duration_ms,
         }
+
+
+# Keep tool output small: the model pays for every character of it, and a
+# stray `Get-ChildItem -Recurse` can otherwise dump megabytes.
+_MAX_OUT = 6000
+
+
+def _cap(text: str) -> str:
+    if text is None:
+        return ""
+    if len(text) <= _MAX_OUT:
+        return text
+    head = text[: _MAX_OUT - 400]
+    tail = text[-300:]
+    return f"{head}\n...[{len(text) - _MAX_OUT} chars trimmed]...\n{tail}"

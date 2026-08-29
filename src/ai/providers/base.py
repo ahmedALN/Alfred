@@ -1,10 +1,29 @@
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 
 
 class ProviderError(RuntimeError):
     """Raised when an AI provider call fails."""
+
+
+_THINK_RE = re.compile(
+    r"<(think|thinking|reasoning)>.*?</\1>", re.IGNORECASE | re.DOTALL
+)
+
+
+def strip_reasoning(text: str) -> str:
+    """Drop <think>...</think> style blocks that reasoning models
+    (qwen3.x, Nemotron, DeepSeek-R1, ...) emit even with thinking
+    disabled, so downstream JSON parsing stays reliable."""
+    if not text:
+        return text
+    cleaned = _THINK_RE.sub("", text)
+    low = cleaned.lower()
+    if "<think>" in low and "</think>" not in low:
+        cleaned = cleaned[: low.rfind("<think>")]
+    return cleaned.strip()
 
 
 class _Unloadable:

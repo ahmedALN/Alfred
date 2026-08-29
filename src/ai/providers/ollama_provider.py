@@ -8,6 +8,7 @@ from src.ai.providers.base import (
     EmbeddingProvider,
     ProviderError,
     VisionProvider,
+    strip_reasoning,
 )
 
 DEFAULT_BASE_URL = "http://localhost:11434"
@@ -43,6 +44,7 @@ class OllamaChatProvider(ChatProvider):
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = 180.0,
         think: bool = False,
+        num_ctx: int = 8192,
     ) -> None:
         self.model = model
         self._base = _clean_base(base_url)
@@ -52,6 +54,10 @@ class OllamaChatProvider(ChatProvider):
         # decision. Alfred wants fast structured answers, so thinking is
         # off unless explicitly enabled.
         self._think = think
+        # Ollama's default context is 4096 - Alfred's planner/executor
+        # prompts (system + tool catalogue + plan + history) routinely
+        # exceed that, and the overflow silently drops the system prompt.
+        self._num_ctx = num_ctx
 
     def generate(
         self,
@@ -61,7 +67,10 @@ class OllamaChatProvider(ChatProvider):
         temperature: float = 0.4,
         max_tokens: int | None = None,
     ) -> str:
-        options: dict[str, object] = {"temperature": temperature}
+        options: dict[str, object] = {
+            "temperature": temperature,
+            "num_ctx": self._num_ctx,
+        }
 
         if max_tokens is not None:
             options["num_predict"] = max_tokens
@@ -81,7 +90,7 @@ class OllamaChatProvider(ChatProvider):
             f"{self._base}/api/generate", payload, timeout=self._timeout
         )
 
-        return str(data.get("response", "")).strip()
+        return strip_reasoning(str(data.get("response", "")).strip())
 
     def unload(self) -> None:
         _unload_model(self._base, self.model)

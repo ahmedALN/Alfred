@@ -1054,11 +1054,23 @@ class AlfredLiveSession:
                 continue
 
             try:
-                result = await asyncio.to_thread(
-                    self.registry.execute,
-                    call.name,
-                    arguments,
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self.registry.execute,
+                        call.name,
+                        arguments,
+                    ),
+                    timeout=90.0,
                 )
+            except asyncio.TimeoutError:
+                # A wedged tool (frozen app, stuck UIA call) must not make
+                # Alfred go deaf - report it and move on. The worker
+                # thread is abandoned but daemonised.
+                result = {
+                    "status": "error",
+                    "error": f"{call.name} timed out after 90s",
+                }
+                print(f"[Tool Error] {call.name}: timed out")
             except Exception as exc:  # noqa: BLE001
                 # A failing tool must never take the whole session
                 # down: report it back to the model and keep going.
@@ -1084,14 +1096,14 @@ class AlfredLiveSession:
             )
 
             if self._store is not None:
-                success = result.get("status") != "error"
+                from src.tools.results import tool_succeeded
 
                 self._store.add_tool_event(
                     self._session_id,
                     call.name,
                     arguments,
                     result,
-                    success,
+                    tool_succeeded(result),
                 )
 
             function_responses.append(

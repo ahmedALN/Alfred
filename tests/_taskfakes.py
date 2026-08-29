@@ -55,7 +55,7 @@ class DispatchChat:
                 item = {"plan": item}
             return item if isinstance(item, str) else json.dumps(item)
 
-        if "check whether a task step" in prompt:
+        if "judge whether one task step" in prompt:
             self.verify_calls += 1
             step = _line_after(prompt, "STEP:")
             ok = self._verify(step) if callable(self._verify) else self._verify

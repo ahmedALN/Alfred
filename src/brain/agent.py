@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -10,50 +11,72 @@ from src.brain.policy import Policy
 from src.brain.skills import align, apply_params
 from src.brain.types import Proposal, ProposalKind, Verdict
 from src.tools.registry import ToolRegistry
+from src.tools.results import summarize_result, tool_succeeded
 
-_PLAN_SYSTEM = """You are Alfred's task planner. Break the user's goal into the \
-fewest concrete steps that a tool-using agent can carry out on this Windows PC.
-
-For each step give a 'done_when' that can be CHECKED from a tool result - name \
-a specific observable thing (a control that appears, a value a tool returns, a \
-file that exists, text shown in the UI). Vague checks like "it worked" are \
-useless.
-
-Prefer the ui_control tool (reads app controls by name, exact) over \
-desktop_control (screenshot guessing). For file/system work prefer powershell \
-and system_info.
-
-Reply with ONLY this JSON:
-{"plan":[{"step":"<imperative>","done_when":"<checkable condition>"}],
- "note":"<one line about anything risky or uncertain>"}
-"""
-
-_EXEC_SYSTEM = """You are Alfred's task executor, working through a plan one \
-step at a time using tools.
+_PLAN_SYSTEM = """You are Alfred's task planner on a Windows PC. Turn the goal \
+into an ordered plan a tool-using agent can execute.
 
 Rules:
-- Each reply is exactly ONE JSON object, nothing else.
-- Only work on the CURRENT step. Do the smallest thing that makes its \
-'done_when' true, then reply action=done.
-- ui_control: call action='tree' first to see the real controls, then click / \
-type by ref or name. Do NOT guess coordinates.
-- If a call fails, try a different approach - never repeat the same failing \
-call. If truly stuck on this step, action=give_up.
-- Never claim done unless a tool result actually shows the 'done_when' is true.
+- 2 to 6 steps. Each step is one imperative sentence a person would recognise \
+("Search Spotify for the artist and start the top track"), NOT a code-style \
+identifier and NOT a UI micro-action like "focus the search box".
+- Every 'done_when' must be checkable from a tool result you can actually get \
+with the listed tools - a value a tool returns, a file that exists, text shown \
+in a control, a process that is running. Never "it worked" or "the user is \
+happy".
+- Prefer ui_control (reads controls by name, exact) over desktop_control \
+(screenshot guessing). Prefer powershell / system_info for files and settings.
+- Use the SITUATION block for real paths (the user's profile folder, etc.) - \
+never invent a username.
 
-Reply with one of:
+Example goal: "play a Drake song on Spotify"
+{"plan":[
+ {"step":"Open Spotify","done_when":"open_app returns success or ui_control tree lists the Spotify window"},
+ {"step":"Search Spotify for Drake and play the top track","done_when":"ui_control get on the now-playing area shows a Drake track and it is playing"}],
+ "note":""}
+
+Reply with ONLY this JSON:
+{"plan":[{"step":"<imperative sentence>","done_when":"<checkable condition>"}],
+ "note":"<one line about anything risky or uncertain, or empty>"}
+"""
+
+_EXEC_SYSTEM = """You are Alfred's task executor. Work ONLY on the CURRENT step \
+using tools, one JSON object per reply, nothing else.
+
+Use tools EXACTLY as the catalogue shows - the args in [brackets] are the only \
+valid values for that parameter. Do not invent parameters.
+
+ui_control recipe (for Spotify, browsers, Explorer, Office):
+ 1. {"action":"tree","window":"<app>"}  - once, to see real controls
+ 2. {"action":"type","window":"<app>","text":"<query>"}  - into the search/Edit
+ 3. {"action":"click","window":"<app>","name":"<button or first result>"}
+ 4. {"action":"get","window":"<app>","name":"<now-playing / status text>"} - to confirm
+
+Rules:
+- Do the smallest set of actions that makes 'done_when' true, then action=done \
+with the tool result that proves it.
+- NEVER repeat a call with the same args - HISTORY shows what you already did.
+- If an app is already open in HISTORY, do NOT open it again.
+- After 2-3 failed calls, change tool or approach; if truly stuck, action=give_up.
+- Do not claim done unless a real tool result in HISTORY shows done_when holds.
+
+Reply with exactly one of:
 {"action":"use_tool","tool":"<name>","args":{...},"rationale":"<short>"}
-{"action":"done","evidence":"<the tool result that proves done_when>"}
+{"action":"done","evidence":"<quote the tool result that proves done_when>"}
 {"action":"give_up","reason":"<what blocked you>"}
 """
 
-_VERIFY_SYSTEM = """You check whether a task step really finished. Be strict: \
-only say VERIFIED if the log contains a concrete tool result that shows the \
-'done_when' condition is actually true right now. An executor SAYING it's done \
-is not evidence. If you are unsure, say UNVERIFIED.
+_VERIFY_SYSTEM = """You judge whether one task step is complete, from its tool \
+log. Be fair, not pedantic:
+- A tool result in the log that shows the intended action succeeded (a success \
+status for the right action, the expected file/'control/text present) IS \
+evidence - say VERIFIED.
+- Say UNVERIFIED only if the log shows the action failed, was never attempted, \
+or clearly shows the opposite of 'done_when'.
+- The executor merely saying "done" is not evidence on its own.
 
-Reply with exactly one line: 'VERIFIED: <why>' or 'UNVERIFIED: <what's \
-missing>'."""
+Reply with exactly one line: 'VERIFIED: <which log line shows it>' or \
+'UNVERIFIED: <what is missing or failed>'."""
 
 _REFLECT_SYSTEM = """You are Alfred reviewing a task you just finished, to get \
 better next time.
@@ -131,15 +154,20 @@ class TaskAgent:
         *,
         policy_voice: Policy | None = None,
         plan_chat: ChatProvider | None = None,
+        verify_chat: ChatProvider | None = None,
         max_steps: int = 20,
         max_seconds: float = 360.0,
-        substep_max_calls: int = 5,
+        substep_max_calls: int = 6,
         situation: "Callable[[], str] | None" = None,
         learner: Any = None,
         audit: Any = None,
     ) -> None:
         self._chat = chat
         self._plan_chat = plan_chat or chat
+        # Verification accuracy matters more than its latency (it's the
+        # guard against reporting unverified work), so it defaults to the
+        # stronger planning model rather than the fast local one.
+        self._verify_chat = verify_chat or self._plan_chat
         self._registry = registry
         self._situation = situation
         self._learner = learner
@@ -152,8 +180,39 @@ class TaskAgent:
         self._substep_max_calls = substep_max_calls
         self._audit = audit
         self._catalogue = ""
+        self._exec_catalogue = ""
+        self._plan_gripe = ""
+        self._planned_ever: set[str] = set()
         self._deadline = 0.0
         self._cancel_check: "Callable[[], bool]" = lambda: False
+
+    # ----------------------------------------------------------------
+
+    @staticmethod
+    def _environment() -> str:
+        home = os.path.expanduser("~")
+        return (
+            f"Windows. User profile: {home}. "
+            f"Downloads: {os.path.join(home, 'Downloads')}. "
+            f"Documents: {os.path.join(home, 'Documents')}. "
+            f"Desktop: {os.path.join(home, 'Desktop')}."
+        )
+
+    def _tool_catalogue(self, *, full: bool) -> str:
+        """One catalogue builder. Always surfaces each tool's enum values
+        (e.g. ui_control action: tree|click|type|get) - the single most
+        useful hint for a weak executor model - and, in full mode, the
+        complete description for the planner."""
+        lines = []
+        for t in self._registry.gemini_declarations():
+            name = t.get("name")
+            desc = (t.get("description", "") or "").strip()
+            if not full:
+                desc = desc[:300]
+            enums = _enum_hints(t.get("parameters", {}))
+            suffix = f"  [{enums}]" if enums else ""
+            lines.append(f"- {name}: {desc}{suffix}")
+        return "\n".join(lines)
 
     # ----------------------------------------------------------------
 
@@ -178,10 +237,9 @@ class TaskAgent:
         self._ask_user = ask_user
 
         result = TaskResult(goal=goal, status="failed", summary="")
-        self._catalogue = "\n".join(
-            f"- {t.get('name')}: {t.get('description', '')}"
-            for t in self._registry.gemini_declarations()
-        )
+        self._catalogue = self._tool_catalogue(full=True)
+        self._exec_catalogue = self._tool_catalogue(full=False)
+        self._planned_ever: set[str] = set()
         history: list[str] = []
         self._log("task_start", {"goal": goal}, session_id)
 
@@ -194,6 +252,7 @@ class TaskAgent:
         # 1. PLAN
         plan = self._make_plan(goal)
         result.plan = [p["step"] for p in plan]
+        self._planned_ever.update(result.plan)
         if on_progress is not None:
             on_progress("Plan: " + "; ".join(result.plan[:6]))
         self._log("task_plan", {"goal": goal, "plan": plan}, session_id)
@@ -223,13 +282,18 @@ class TaskAgent:
             )
             total_calls += calls
             progressed = any(s.ok for s in result.steps[before:])
+            claimed = any("executor claims done" in h for h in history[-4:])
+            any_success = any("-> ok:" in h for h in history)
 
-            if not progressed:
-                # The executor did nothing that worked - a "done" here is the
-                # exact pattern behind the "it said it opened Drake" bug.
-                ok, evidence = False, "no successful tool action for this step"
-            else:
+            if progressed or (claimed and any_success):
+                # Either work just happened, or the step was already done
+                # on an earlier attempt (post-replan) - let the verifier
+                # read the whole log and decide.
                 ok, evidence = self._verify(pstep, history)
+            else:
+                # Nothing worked and nothing in the log supports it - the
+                # exact pattern behind "it said it opened Drake".
+                ok, evidence = False, "no successful tool action for this step"
             self._log(
                 "task_verify",
                 {"step": pstep["step"], "verified": ok, "evidence": evidence},
@@ -257,6 +321,7 @@ class TaskAgent:
                 )
                 plan = plan[:pi] + remainder
                 result.plan = [p["step"] for p in plan]
+                self._planned_ever.update(result.plan)
                 continue
 
             result.unverified.append(f"{pstep['step']} ({evidence})")
@@ -354,31 +419,67 @@ class TaskAgent:
     # ----------------------------------------------------------------
 
     def _make_plan(self, goal: str, extra: str = "") -> list[dict[str, str]]:
-        prompt = (
+        base_prompt = (
             f"{_PLAN_SYSTEM}\n\nGOAL: {goal}\n\n"
+            f"ENVIRONMENT: {self._environment()}\n\n"
             + (f"SITUATION:\n{self._situation_text()}\n\n" if self._situation else "")
             + f"TOOLS:\n{self._catalogue}\n"
             + (f"\nCONTEXT: {extra}\n" if extra else "")
-            + "\nYour JSON:"
         )
-        try:
-            raw = self._plan_chat.generate(prompt, temperature=0.2)
-        except Exception as exc:  # noqa: BLE001
-            print(f"[Task] planner failed ({exc}); using a single step.")
-            return [{"step": goal, "done_when": goal}]
 
-        obj = _parse(raw) or {}
-        plan = obj.get("plan")
         steps: list[dict[str, str]] = []
-        if isinstance(plan, list):
-            for item in plan:
-                if isinstance(item, dict) and item.get("step"):
-                    steps.append({
-                        "step": str(item["step"]).strip(),
-                        "done_when": str(item.get("done_when", "")).strip()
-                        or str(item["step"]).strip(),
-                    })
-        return steps or [{"step": goal, "done_when": goal}]
+        for attempt in range(2):
+            prompt = base_prompt + (
+                "\nYour JSON:" if attempt == 0 else
+                f"\nThat plan was rejected ({self._plan_gripe}). "
+                "Give a better one - real imperative sentences, checkable "
+                "done_when, 2 to 6 steps.\nYour JSON:"
+            )
+            try:
+                raw = self._plan_chat.generate(
+                    prompt, temperature=0.2, max_tokens=700
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"[Task] planner failed ({exc}); using a single step.")
+                return [{"step": goal, "done_when": goal}]
+
+            obj = _parse(raw) or {}
+            raw_plan = obj.get("plan")
+            steps = []
+            if isinstance(raw_plan, list):
+                for item in raw_plan:
+                    if isinstance(item, dict) and item.get("step"):
+                        s = str(item["step"]).strip()
+                        dw = str(item.get("done_when", "")).strip() or s
+                        steps.append({"step": s, "done_when": dw})
+
+            if self._plan_ok(steps, goal):
+                return steps[:8]
+
+        # Both attempts weak - use whatever we got, or a single step.
+        return steps[:8] or [{"step": goal, "done_when": goal}]
+
+    def _plan_ok(self, steps: list[dict[str, str]], goal: str) -> bool:
+        self._plan_gripe = ""
+        if not steps:
+            self._plan_gripe = "empty plan"
+            return False
+        if len(steps) > 8:
+            self._plan_gripe = "too many steps"
+            return False
+        for s in steps:
+            text = s["step"]
+            # identifier-like ("search_spotify_top_track") or one bare word
+            if " " not in text and (
+                "_" in text or text.isalnum() and len(text) > 12
+            ):
+                self._plan_gripe = f"step is not a real sentence: {text!r}"
+                return False
+            dw = s["done_when"].strip()
+            if not dw or dw.lower() == text.lower():
+                self._plan_gripe = f"step has no checkable done_when: {text!r}"
+                return False
+        return True
 
     def reflect(self, result: "TaskResult") -> str:
         """One cheap post-mortem call. Turns a concrete failure reason into
@@ -399,7 +500,9 @@ class TaskAgent:
             f"STEPS:\n{trace}\n\nYour one line:"
         )
         try:
-            line = self._plan_chat.generate(prompt, temperature=0.2).strip()
+            line = self._plan_chat.generate(
+                prompt, temperature=0.2, max_tokens=120
+            ).strip()
         except Exception as exc:  # noqa: BLE001
             return f"(reflection failed: {exc})"
 
@@ -444,6 +547,9 @@ class TaskAgent:
             for j, p in enumerate(plan)
         )
         calls = 0
+        seen_calls: dict[str, int] = {}
+        loops = 0
+        consecutive_fail = 0
         for _ in range(max(0, min(self._substep_max_calls, budget))):
             if self._cancel_check() or time.monotonic() > self._deadline:
                 break
@@ -451,35 +557,78 @@ class TaskAgent:
             prompt = (
                 f"{_EXEC_SYSTEM}\n\nOVERALL GOAL: {goal}\n\nPLAN:\n{plan_view}\n\n"
                 f"CURRENT STEP: {pstep['step']}\nDONE WHEN: {pstep['done_when']}\n\n"
-                f"TOOLS:\n{self._catalogue}\n\n"
-                f"HISTORY:\n" + ("\n".join(history[-14:]) or "(nothing yet)")
+                f"ENVIRONMENT: {self._environment()}\n\n"
+                f"TOOLS:\n{self._exec_catalogue}\n\n"
+                f"HISTORY:\n" + ("\n".join(history[-16:]) or "(nothing yet)")
                 + "\n\nYour next JSON:"
             )
             try:
-                raw = self._chat.generate(prompt, temperature=0.2)
+                raw = self._chat.generate(
+                    prompt, temperature=0.2, max_tokens=500
+                )
             except Exception as exc:  # noqa: BLE001
                 history.append(f"[system] executor model error: {exc}")
                 break
 
             decision = _parse(raw)
             if decision is None:
-                history.append(f"[system] unparseable: {raw[:120]}")
+                history.append(f"[system] unparseable model reply, retry")
                 continue
 
             action = decision.get("action")
             if action == "done":
                 history.append(
                     f"[step {pi + 1} executor claims done] "
-                    f"{decision.get('evidence', '')}"
+                    f"{str(decision.get('evidence', ''))[:200]}"
                 )
                 break
             if action == "give_up":
                 history.append(
-                    f"[step {pi + 1} executor gave up] {decision.get('reason', '')}"
+                    f"[step {pi + 1} executor gave up] "
+                    f"{str(decision.get('reason', ''))[:160]}"
                 )
                 break
             if action != "use_tool":
                 history.append(f"[system] unknown action {action!r}")
+                continue
+
+            dtool = decision.get("tool")
+            dargs = decision.get("args") if isinstance(
+                decision.get("args"), dict
+            ) else {}
+
+            # Already-open guard: re-launching an app that HISTORY shows
+            # is open is the weak model's favourite wheel-spin.
+            if dtool == "open_app":
+                app = str(dargs.get("app") or dargs.get("name") or "").lower()
+                if app and any(
+                    f"open_app(" in h and app in h.lower() and "-> ok:" in h
+                    for h in history
+                ):
+                    history.append(
+                        f"[system] {app} is already open (see HISTORY) - "
+                        "move on to the next action."
+                    )
+                    loops += 1
+                    if loops >= 3:
+                        break
+                    continue
+
+            # Loop guard: the weak local model loves to repeat a call.
+            sig = f"{dtool}|{_short(dargs, 200)}"
+            seen_calls[sig] = seen_calls.get(sig, 0) + 1
+            if seen_calls[sig] >= 2:
+                loops += 1
+                history.append(
+                    f"[system] you ALREADY ran {dtool} with those exact args "
+                    "- its result is above. Do something different or reply "
+                    "action=done / give_up."
+                )
+                if loops >= 3:
+                    history.append(
+                        f"[step {pi + 1} executor stuck in a loop] abandoned"
+                    )
+                    break
                 continue
 
             step = self._run_tool_step(
@@ -488,29 +637,99 @@ class TaskAgent:
             result.steps.append(step)
             calls += 1
 
+            if step.ok:
+                consecutive_fail = 0
+            else:
+                consecutive_fail += 1
+                if consecutive_fail >= 3:
+                    history.append(
+                        f"[step {pi + 1} executor] 3 failed calls in a row - "
+                        "abandoned this step"
+                    )
+                    break
+
         return calls
+
+    _VERIFY_STOP = {
+        "the", "a", "an", "is", "are", "was", "were", "and", "or", "to", "of",
+        "in", "on", "at", "it", "that", "this", "with", "for", "shows", "show",
+        "returns", "return", "tool", "result", "when", "done", "currently",
+        "value", "text", "control", "window", "which", "line", "there",
+    }
 
     def _verify(
         self, pstep: dict[str, str], history: list[str]
     ) -> tuple[bool, str]:
+        done_when = pstep["done_when"]
+
+        # --- deterministic fast-paths (never say "no", only "yes") ------
+        probe = self._deterministic_verify(done_when, history)
+        if probe is not None:
+            return True, probe
+
+        # --- model check ---------------------------------------------
         prompt = (
             f"{_VERIFY_SYSTEM}\n\nSTEP: {pstep['step']}\n"
-            f"DONE WHEN: {pstep['done_when']}\n\n"
-            f"LOG:\n" + "\n".join(history[-16:]) + "\n\nYour one line:"
+            f"DONE WHEN: {done_when}\n\n"
+            f"LOG:\n" + "\n".join(history[-18:]) + "\n\nYour one line:"
         )
         try:
-            raw = self._chat.generate(prompt, temperature=0.0).strip()
+            raw = self._verify_chat.generate(
+                prompt, temperature=0.0, max_tokens=160
+            ).strip()
         except Exception as exc:  # noqa: BLE001
-            return False, f"could not verify: {exc}"
+            # Verifier unavailable: fall back to the fast model, then to a
+            # lenient "a relevant tool call succeeded" heuristic.
+            try:
+                raw = self._chat.generate(
+                    prompt, temperature=0.0, max_tokens=160
+                ).strip()
+            except Exception:  # noqa: BLE001
+                ok = any("-> ok:" in h for h in history[-6:])
+                return ok, "a relevant tool call succeeded" if ok else (
+                    f"could not verify: {exc}"
+                )
 
         line = raw.splitlines()[0] if raw else ""
         if line.upper().startswith("VERIFIED"):
             return True, line.split(":", 1)[-1].strip()[:200]
         return False, line.split(":", 1)[-1].strip()[:200] or "no evidence"
 
+    def _deterministic_verify(
+        self, done_when: str, history: list[str]
+    ) -> str | None:
+        low = done_when.lower()
+
+        # file / folder existence
+        if any(w in low for w in ("exist", "file", "folder", "directory", "created")):
+            import re as _re
+            for m in _re.findall(r"[A-Za-z]:\\[^\s'\"]+", done_when):
+                if os.path.exists(m):
+                    return f"path exists on disk: {m}"
+
+        # signal-word overlap with a recent successful tool result
+        signals = {
+            w.strip(".,:;()'\"").lower()
+            for w in done_when.split()
+            if len(w) > 3 and w.strip(".,:;()'\"").lower() not in self._VERIFY_STOP
+        }
+        if len(signals) >= 2:
+            for h in reversed(history[-5:]):
+                if "-> ok:" not in h:
+                    continue
+                hl = h.lower()
+                hit = sum(1 for s in signals if s in hl)
+                if hit >= max(2, len(signals) // 2):
+                    return f"a successful tool result matches: {h[:160]}"
+        return None
+
     def _finalize(self, result: TaskResult) -> None:
-        n_plan = len(result.plan)
-        n_ok = len(result.verified)
+        # Compare what was verified against the CURRENT plan (replans can
+        # grow result.plan with re-listed steps), not a raw list length.
+        current = [s for s in result.plan]
+        verified_set = set(result.verified)
+        outstanding = [s for s in current if s not in verified_set]
+        n_ok = len(verified_set)
 
         if result.status in ("cancelled", "exhausted", "error"):
             base = {
@@ -518,7 +737,7 @@ class TaskAgent:
                 "exhausted": "Ran out of time",
                 "error": "Hit an error",
             }[result.status]
-        elif n_ok == n_plan and n_plan:
+        elif n_ok and not outstanding:
             result.status = "done"
             base = "Done"
         elif n_ok:
@@ -552,7 +771,8 @@ class TaskAgent:
         session_id: str | None,
     ) -> Step:
         tool = decision.get("tool")
-        args = decision.get("args") if isinstance(decision.get("args"), dict) else {}
+        raw_args = decision.get("args")
+        args = raw_args if isinstance(raw_args, dict) else {}
         thought = str(decision.get("rationale", "")).strip()
 
         proposal = Proposal(
@@ -606,11 +826,11 @@ class TaskAgent:
         except Exception as exc:  # noqa: BLE001
             outcome = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
 
-        ok = not (isinstance(outcome, dict) and outcome.get("status") == "error")
+        ok = tool_succeeded(outcome)
 
-        summary = _short(outcome)
+        summary = summarize_result(outcome, 400)
         history.append(
-            f"[step {index}] {tool}({_short(args)}) -> "
+            f"[step {index}] {tool}({_short(args, 160)}) -> "
             f"{'ok' if ok else 'FAILED'}: {summary}"
         )
 
@@ -634,6 +854,19 @@ class TaskAgent:
 # ====================================================================
 # helpers
 # ====================================================================
+
+
+def _enum_hints(schema: dict[str, Any]) -> str:
+    """'action: tree|click|type|get; target: alfred|user' from a JSON schema."""
+    props = schema.get("properties") if isinstance(schema, dict) else None
+    if not isinstance(props, dict):
+        return ""
+    bits = []
+    for key, spec in props.items():
+        if isinstance(spec, dict) and isinstance(spec.get("enum"), list):
+            vals = "|".join(str(v) for v in spec["enum"][:12])
+            bits.append(f"{key}: {vals}")
+    return "; ".join(bits)
 
 
 def _parse(raw: str) -> dict[str, Any] | None:

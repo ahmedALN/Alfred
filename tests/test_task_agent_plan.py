@@ -147,3 +147,52 @@ def test_reflection_skipped_when_no_steps():
         DispatchChat(), FakeRegistry(), Policy("full", KNOWN, surface="brain"),
     )
     assert agent.reflect(TaskResult(goal="x", status="done", summary="")) == ""
+
+
+# --------------------------------------------------------------------
+# hardening: plan validation, loop guard, deterministic verify
+# --------------------------------------------------------------------
+
+def _agent2(chat, reg):
+    return TaskAgent(chat, reg, Policy("full", KNOWN, surface="brain"),
+                     policy_voice=Policy("full", KNOWN, surface="voice"))
+
+
+def test_junk_plan_is_rejected_and_reasked():
+    chat = DispatchChat(
+        plan=[
+            [{"step": "search_spotify_top_track", "done_when": "done"}],  # junk
+            [{"step": "Open Spotify and play the top track",
+              "done_when": "ui_control get shows a track playing"}],      # good
+        ],
+        steps={"Open Spotify": [_use("ui_control", {"action": "tree"})]},
+        verify=True,
+    )
+    result = _agent2(chat, FakeRegistry()).run("play music", source="voice")
+    assert result.plan == ["Open Spotify and play the top track"]
+    assert chat.plan_calls == 2
+
+
+def test_executor_loop_is_broken():
+    # executor keeps proposing the exact same call forever
+    same = _use("system_info", {"query": "disks"})
+    chat = DispatchChat(
+        plan=[[{"step": "check the disks", "done_when": "system_info returns disk data"}]],
+        steps={"check the disks": [same] * 10},
+        verify=False,
+    )
+    reg = FakeRegistry()
+    result = _agent2(chat, reg).run("check disks", source="voice")
+    # the same call runs at most twice before the loop guard abandons it
+    assert len(reg.executed) <= 2
+
+
+def test_deterministic_verify_passes_on_signal_match():
+    agent = _agent2(DispatchChat(verify=False), FakeRegistry())
+    hist = ['[step 1] system_info({"query":"disks"}) -> ok: {"status":"success",'
+            ' "free_gb": 120, "disks": 2}']
+    ok, why = agent._verify(
+        {"step": "check disk space", "done_when": "system_info returns disks and free space"},
+        hist,
+    )
+    assert ok and "successful tool result" in why

@@ -8,6 +8,7 @@ from src.ai.providers.base import (
     EmbeddingProvider,
     ProviderError,
     VisionProvider,
+    strip_reasoning,
 )
 
 # Works with any OpenAI-compatible endpoint: NVIDIA NIM
@@ -75,7 +76,7 @@ class OpenAICompatibleChatProvider(ChatProvider):
             timeout=self._timeout,
         )
 
-        return _first_choice_text(data)
+        return strip_reasoning(_first_choice_text(data))
 
 
 class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):

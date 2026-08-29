@@ -90,6 +90,14 @@ class MemoryStore:
             self._conn.executescript(SCHEMA)
             self._conn.commit()
 
+        # all_facts() runs several times per conversation turn (recall,
+        # situation, active-goal) and re-parses every embedding each time.
+        # Facts change rarely, so cache the full list and drop it on write.
+        self._facts_cache: list[Fact] | None = None
+
+    def _invalidate_facts(self) -> None:
+        self._facts_cache = None
+
     # ----------------------------------------------------------------
     # Facts
     # ----------------------------------------------------------------
@@ -123,6 +131,7 @@ class MemoryStore:
                 ),
             )
             self._conn.commit()
+            self._invalidate_facts()
 
             return int(cursor.lastrowid)
 
@@ -155,22 +164,28 @@ class MemoryStore:
                 )
 
             self._conn.commit()
+            self._invalidate_facts()
 
     def all_facts(self, category: str | None = None) -> list[Fact]:
         with self._lock:
             if category is None:
-                rows = self._conn.execute(
-                    "SELECT * FROM facts ORDER BY updated_at DESC"
-                ).fetchall()
-            else:
-                rows = self._conn.execute(
-                    """
-                    SELECT * FROM facts
-                    WHERE category = ?
-                    ORDER BY updated_at DESC
-                    """,
-                    (category,),
-                ).fetchall()
+                if self._facts_cache is None:
+                    rows = self._conn.execute(
+                        "SELECT * FROM facts ORDER BY updated_at DESC"
+                    ).fetchall()
+                    self._facts_cache = [
+                        self._row_to_fact(row) for row in rows
+                    ]
+                return list(self._facts_cache)
+
+            rows = self._conn.execute(
+                """
+                SELECT * FROM facts
+                WHERE category = ?
+                ORDER BY updated_at DESC
+                """,
+                (category,),
+            ).fetchall()
 
         return [self._row_to_fact(row) for row in rows]
 
@@ -180,6 +195,7 @@ class MemoryStore:
                 "DELETE FROM facts WHERE id = ?", (fact_id,)
             )
             self._conn.commit()
+            self._invalidate_facts()
 
     def update_fact(self, fact_id: int, content: str) -> None:
         with self._lock:
@@ -188,6 +204,7 @@ class MemoryStore:
                 (content, _now(), fact_id),
             )
             self._conn.commit()
+            self._invalidate_facts()
 
     def search_facts(self, text: str) -> list[Fact]:
         like = f"%{text.strip()}%"
@@ -210,6 +227,7 @@ class MemoryStore:
             )
             self._conn.execute("DELETE FROM facts WHERE id = ?", (drop_id,))
             self._conn.commit()
+            self._invalidate_facts()
 
     @staticmethod
     def _row_to_fact(row: sqlite3.Row) -> Fact:

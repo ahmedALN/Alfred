@@ -61,19 +61,35 @@ class SingleInstance:
         return None
 
     def acquire(self) -> None:
-        holder = self._holder_is_alive()
+        # Two attempts: the second only after clearing a confirmed-stale
+        # lock. Uses an atomic O_EXCL create so two instances racing to
+        # start can't both win (the "two voices" bug).
+        for attempt in range(2):
+            try:
+                fd = os.open(
+                    self._path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644
+                )
+            except FileExistsError:
+                holder = self._holder_is_alive()
+                if holder is not None:
+                    raise AlreadyRunning(holder)
+                # Stale lock (dead pid / unrelated process). Clear once.
+                if attempt == 0:
+                    try:
+                        self._path.unlink()
+                    except OSError:
+                        pass
+                    continue
+                raise AlreadyRunning(-1)
+            except OSError as exc:
+                print(f"[Singleton] could not create lock file: {exc}")
+                return
 
-        if holder is not None:
-            raise AlreadyRunning(holder)
-
-        try:
-            self._path.write_text(str(os.getpid()), encoding="utf-8")
-        except OSError as exc:
-            print(f"[Singleton] could not write lock file: {exc}")
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(str(os.getpid()))
+            self._locked = True
+            atexit.register(self.release)
             return
-
-        self._locked = True
-        atexit.register(self.release)
 
     def release(self) -> None:
         if not self._locked:
