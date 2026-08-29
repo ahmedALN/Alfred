@@ -10,6 +10,7 @@ from src.ai.providers.base import (
     ProviderError,
     VisionProvider,
 )
+from src.usage import USAGE, record_response
 
 
 class GeminiChatProvider(ChatProvider):
@@ -42,6 +43,7 @@ class GeminiChatProvider(ChatProvider):
         except Exception as exc:  # noqa: BLE001
             raise ProviderError(f"Gemini generate_content failed: {exc}") from exc
 
+        record_response(response)
         return (getattr(response, "text", None) or "").strip()
 
 
@@ -67,6 +69,7 @@ class GeminiEmbeddingProvider(EmbeddingProvider):
             print(f"[Embeddings/gemini] failed: {exc}")
             return None
 
+        USAGE.record()
         embeddings = getattr(response, "embeddings", None)
 
         if embeddings:
@@ -116,6 +119,7 @@ class GeminiVisionProvider(VisionProvider):
                 f"Gemini vision request failed: {type(exc).__name__}: {exc}"
             ) from exc
 
+        record_response(response)
         text = (getattr(response, "text", None) or "").strip()
 
         if not text:

@@ -766,6 +766,14 @@ class AlfredLiveSession:
         while True:
             async for response in self.session.receive():
 
+                if getattr(response, "usage_metadata", None) is not None:
+                    try:
+                        from src.usage import record_response
+
+                        record_response(response)
+                    except Exception:  # noqa: BLE001
+                        pass
+
                 if response.tool_call:
                     await self._handle_tool_call(
                         response.tool_call
@@ -1100,6 +1108,17 @@ class AlfredLiveSession:
 
                 if not _is_connection_error(exc):
                     raise exc
+
+                try:
+                    from src.usage import USAGE
+
+                    text = f"{exc}".lower()
+                    USAGE.record_error(
+                        "quota" if ("exhausted" in text or "429" in text)
+                        else "disconnect"
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
 
                 consecutive_failures += 1
                 if consecutive_failures > 10:

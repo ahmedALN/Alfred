@@ -152,6 +152,25 @@ def main() -> int:
         for t in tasks:
             print(f"  {t}")
 
+    usage_file = _ROOT / "alfred_usage.json"
+    if usage_file.exists():
+        try:
+            from datetime import datetime, timezone
+
+            today = datetime.now(timezone.utc).date().isoformat()
+            u = json.loads(usage_file.read_text()).get(today, {})
+            if u:
+                errs = ", ".join(
+                    f"{k}:{v}" for k, v in u.get("errors", {}).items()
+                )
+                print(
+                    f"gemini today   : {u.get('requests', 0)} requests, "
+                    f"{u.get('input_tokens', 0) + u.get('output_tokens', 0)} "
+                    f"tokens" + (f"  (errors: {errs})" if errs else "")
+                )
+        except Exception:  # noqa: BLE001
+            pass
+
     print("ollama models  :")
     for line in _ollama_ps():
         print(f"  {line}")
