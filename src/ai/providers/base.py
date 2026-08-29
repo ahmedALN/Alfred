@@ -12,17 +12,37 @@ _THINK_RE = re.compile(
     r"<(think|thinking|reasoning)>.*?</\1>", re.IGNORECASE | re.DOTALL
 )
 
+# Prose reasoning preambles some models emit with no tags at all, e.g.
+# nemotron-lightning: "Here's a thinking process:\n\n1. ...\n\n{answer}".
+_PREAMBLE_RE = re.compile(
+    r"^\s*(here('?s| is)|let me|okay|first|i need to|i'll|the user|thinking)"
+    r"[^\n]{0,80}(thinking|think|process|analyz|plan|reason|step)",
+    re.IGNORECASE,
+)
+
 
 def strip_reasoning(text: str) -> str:
-    """Drop <think>...</think> style blocks that reasoning models
-    (qwen3.x, Nemotron, DeepSeek-R1, ...) emit even with thinking
-    disabled, so downstream JSON parsing stays reliable."""
+    """Drop <think>...</think> blocks and tagless reasoning preambles that
+    reasoning models (qwen3.x, Nemotron, DeepSeek-R1, ...) emit even with
+    thinking disabled, so downstream JSON parsing stays reliable."""
     if not text:
         return text
     cleaned = _THINK_RE.sub("", text)
     low = cleaned.lower()
     if "<think>" in low and "</think>" not in low:
         cleaned = cleaned[: low.rfind("<think>")]
+    cleaned = cleaned.strip()
+
+    # Tagless preamble followed by a JSON payload -> keep the payload.
+    if _PREAMBLE_RE.match(cleaned):
+        brace = min(
+            (i for i in (cleaned.find("{"), cleaned.find("[")) if i != -1),
+            default=-1,
+        )
+        end = max(cleaned.rfind("}"), cleaned.rfind("]"))
+        if 0 <= brace < end:
+            cleaned = cleaned[brace : end + 1]
+
     return cleaned.strip()
 
 

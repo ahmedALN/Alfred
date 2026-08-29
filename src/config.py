@@ -192,7 +192,7 @@ def load_settings() -> Settings:
             "ALFRED_AI_PLAN_PROVIDER", "openai"
         ).strip().lower() or "openai",
         ai_plan_model=os.getenv(
-            "ALFRED_AI_PLAN_MODEL", "nvidia/nemotron-3-ultra-550b-a55b"
+            "ALFRED_AI_PLAN_MODEL", "nvidia/nemotron-3-super-120b-a12b"
         ).strip(),
         ai_plan_fallbacks=[
             p.strip().lower()

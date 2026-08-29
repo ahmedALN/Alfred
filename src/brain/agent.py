@@ -182,6 +182,7 @@ class TaskAgent:
         self._catalogue = ""
         self._exec_catalogue = ""
         self._plan_gripe = ""
+        self._run_knowledge = ""
         self._planned_ever: set[str] = set()
         self._first_plan_len = 0
         self._deadline = 0.0
@@ -249,6 +250,10 @@ class TaskAgent:
             result.elapsed_seconds = time.monotonic() - started
             self._finalize(result)
             return result
+
+        # Retrieve goal-relevant know-how once (embedding call); reused by
+        # planning and every substep.
+        self._run_knowledge = self._relevant_knowledge(goal)
 
         # 1. PLAN
         plan = self._make_plan(goal)
@@ -440,9 +445,11 @@ class TaskAgent:
     # ----------------------------------------------------------------
 
     def _make_plan(self, goal: str, extra: str = "") -> list[dict[str, str]]:
+        know = getattr(self, "_run_knowledge", "") or self._relevant_knowledge(goal)
         base_prompt = (
             f"{_PLAN_SYSTEM}\n\nGOAL: {goal}\n\n"
             f"ENVIRONMENT: {self._environment()}\n\n"
+            + (f"KNOWN GOOD PRACTICE:\n{know}\n\n" if know else "")
             + (f"SITUATION:\n{self._situation_text()}\n\n" if self._situation else "")
             + f"TOOLS:\n{self._catalogue}\n"
             + (f"\nCONTEXT: {extra}\n" if extra else "")
@@ -566,6 +573,22 @@ class TaskAgent:
             print(f"[Task] situation probe failed: {exc}")
             return ""
 
+    def _relevant_knowledge(self, goal: str, k: int = 5) -> str:
+        """Pull the handful of learned facts / playbook entries most
+        relevant to this goal, so planning starts from good practice."""
+        if self._learner is None:
+            return ""
+        try:
+            facts = self._learner.recall(goal, top_k=k)
+        except Exception:  # noqa: BLE001
+            return ""
+        lines = []
+        for f in facts:
+            c = getattr(f, "content", str(f)).strip()
+            if c and not c.upper().startswith(("SUPPRESS:", "GOAL:")):
+                lines.append(f"- {c}")
+        return "\n".join(lines[:k])
+
     def _execute_substep(
         self,
         goal: str,
@@ -590,12 +613,14 @@ class TaskAgent:
             if self._cancel_check() or time.monotonic() > self._deadline:
                 break
 
+            know = getattr(self, "_run_knowledge", "")
             prompt = (
                 f"{_EXEC_SYSTEM}\n\nOVERALL GOAL: {goal}\n\nPLAN:\n{plan_view}\n\n"
                 f"CURRENT STEP: {pstep['step']}\nDONE WHEN: {pstep['done_when']}\n\n"
                 f"ENVIRONMENT: {self._environment()}\n\n"
-                f"TOOLS:\n{self._exec_catalogue}\n\n"
-                f"HISTORY:\n" + ("\n".join(history[-16:]) or "(nothing yet)")
+                + (f"KNOWN GOOD PRACTICE:\n{know}\n\n" if know else "")
+                + f"TOOLS:\n{self._exec_catalogue}\n\n"
+                + f"HISTORY:\n" + ("\n".join(history[-16:]) or "(nothing yet)")
                 + "\n\nYour next JSON:"
             )
             try:
