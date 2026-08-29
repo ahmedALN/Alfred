@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from src.ai.providers.base import ChatProvider
 from src.brain.policy import Policy
@@ -87,9 +87,16 @@ class TaskAgent:
 
     # ----------------------------------------------------------------
 
-    def run(self, goal: str, session_id: str | None = None) -> TaskResult:
+    def run(
+        self,
+        goal: str,
+        session_id: str | None = None,
+        cancel_check: "Callable[[], bool] | None" = None,
+        on_progress: "Callable[[str], None] | None" = None,
+    ) -> TaskResult:
         goal = goal.strip()
         started = time.monotonic()
+        last_progress = started
 
         result = TaskResult(goal=goal, status="exhausted", summary="")
 
@@ -103,12 +110,26 @@ class TaskAgent:
         self._log("task_start", {"goal": goal}, session_id)
 
         for i in range(1, self._max_steps + 1):
+            if cancel_check is not None and cancel_check():
+                result.status = "cancelled"
+                result.summary = f"Stopped at your request after {i - 1} steps."
+                break
+
             if time.monotonic() - started > self._max_seconds:
                 result.status = "exhausted"
                 result.summary = (
                     f"Ran out of time after {i - 1} steps on: {goal}"
                 )
                 break
+
+            if on_progress is not None and i > 1 and (
+                (i - 1) % 3 == 0 or time.monotonic() - last_progress > 45
+            ):
+                last_progress = time.monotonic()
+                done_ok = sum(1 for s in result.steps if s.ok)
+                on_progress(
+                    f"Still on '{goal[:60]}' - {done_ok} steps done so far."
+                )
 
             prompt = (
                 f"{_SYSTEM}\n\nGOAL: {goal}\n\nTOOLS:\n{catalogue}\n\n"

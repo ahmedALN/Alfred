@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 
 from src.logging_setup import configure_logging
 
 configure_logging()
+
+_ROOT = Path(__file__).resolve().parent.parent
 
 from google import genai  # noqa: E402
 
@@ -23,7 +26,9 @@ from src.brain.perception import Perception
 from src.brain.policy import Policy
 from src.brain.reasoner import LLMReasoner
 from src.brain.tasks import TaskQueue
+from src.brain.task_store import TaskStore
 from src.config import load_settings
+from src.tools.introspect import WhatCanYouDoTool
 from src.memory.learner import MemoryLearner
 from src.memory.store import MemoryStore
 from src.resource_mode import ResourceMode
@@ -104,8 +109,10 @@ async def main() -> None:
         vision=providers.vision,
     )
 
-    # Background task agent: delegate multi-step jobs.
-    task_queue = TaskQueue()
+    # Background task agent: delegate multi-step jobs (persisted so a
+    # job survives an Alfred restart).
+    task_store = TaskStore(_ROOT / "alfred_tasks.sqlite3")
+    task_queue = TaskQueue(store=task_store)
 
     # --------------------------------------------------------------
     # Activation: wake word + hotkey + conversation window.
@@ -151,8 +158,16 @@ async def main() -> None:
         RunTaskTool(task_queue),
         TaskStatusTool(task_queue),
         ResourceModeTool(resource_mode),
+        WhatCanYouDoTool(
+            registry, settings, resource_mode=resource_mode,
+            brain_enabled=settings.brain_enabled,
+        ),
     ):
         registry.register(tool)
+
+    restored = task_queue.restore()
+    if restored:
+        print(f"[Tasks] resumed {restored} unfinished task(s) from last run.")
 
     session.attach_policy(
         Policy(
@@ -260,6 +275,7 @@ async def main() -> None:
 
         session.attach_brain(brain)
         brain.attach_resource_mode(resource_mode)
+        brain.attach_task_queue(task_queue)
         resource_mode.attach_brain(brain)
 
         print(
@@ -331,6 +347,7 @@ async def main() -> None:
         if audit is not None:
             audit.close()
 
+        task_store.close()
         store.close()
 
         instance_lock.release()

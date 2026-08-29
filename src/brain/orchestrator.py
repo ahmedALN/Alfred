@@ -63,6 +63,11 @@ _GAME_OFF = re.compile(
     r"exit game mode|stop game mode|full power)\b",
     re.I,
 )
+_CANCEL_TASK = re.compile(
+    r"\b(stop the task|cancel the task|cancel that|stop that task|"
+    r"abort the task|stop what you'?re doing)\b",
+    re.I,
+)
 
 
 @dataclass
@@ -111,6 +116,7 @@ class BrainLoop:
         self._speak = speak
         self._get_session_id = get_session_id
         self._resource_mode = None  # set via attach_resource_mode()
+        self._task_queue = None  # set via attach_task_queue()
 
         self._tick_seconds = tick_seconds
         self._min_speak_gap = min_speak_gap_seconds
@@ -138,6 +144,9 @@ class BrainLoop:
 
     def attach_resource_mode(self, resource_mode: object) -> None:
         self._resource_mode = resource_mode
+
+    def attach_task_queue(self, task_queue: object) -> None:
+        self._task_queue = task_queue
 
     def set_paused(self, value: bool) -> None:
         self._paused = bool(value)
@@ -357,6 +366,10 @@ class BrainLoop:
             if _GAME_OFF.search(text):
                 await self._resource_mode.exit_game("voice")
                 return
+
+        if self._task_queue is not None and _CANCEL_TASK.search(text):
+            self._task_queue.cancel_current()
+            return
 
         suppress_match = _SUPPRESS.search(text)
         if suppress_match:
