@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -38,6 +39,9 @@ the user will see (Spotify, a browser, Notepad, Settings).
 - For work INSIDE an app, one step per thing the user would call a thing: \
 "Open the app", "Search for X and open it", "Change setting Y to Z". The \
 executor handles the clicks and typing within a step - do not plan those.
+- Write steps in PLAIN ENGLISH, never as tool syntax. "Select all the text" \
+is a step; "ui_control key keys='^a'" is NOT - the executor chooses the tool \
+call, you describe the outcome.
 - If the goal needs signing in, make that its own step ("Get to the sign-in \
 screen"). Alfred never types passwords; the user does that part.
 - For a "tell me / show me / what is / how much" question, the plan is just \
@@ -578,6 +582,13 @@ class TaskAgent:
             ):
                 self._plan_gripe = f"step is not a real sentence: {text!r}"
                 return False
+            # a tool call pasted in as a step ("ui_control key keys='^a'")
+            if _TOOL_SYNTAX.search(text):
+                self._plan_gripe = (
+                    f"step {text!r} is tool syntax - describe the outcome in "
+                    "plain English and let the executor pick the tool"
+                )
+                return False
             dw = s["done_when"].strip()
             if not dw or dw.lower() == text.lower():
                 self._plan_gripe = f"step has no checkable done_when: {text!r}"
@@ -1055,6 +1066,13 @@ class TaskAgent:
 # helpers
 # ====================================================================
 
+
+# A plan step that is really a tool call: "ui_control key keys='^a'",
+# "system_info query='disks'", "powershell -Command ...".
+_TOOL_SYNTAX = re.compile(
+    r"\b(ui_control|desktop_control|system_info|network_info|open_app|"
+    r"run_task|computer_screenshot)\b\s*[\w'\"{(=-]",
+)
 
 _MUTATION_INTENT = (
     "clean up", "tidy", "organi", "declutter", "sort out", "fix", "delete",

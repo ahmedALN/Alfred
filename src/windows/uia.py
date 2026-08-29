@@ -50,8 +50,32 @@ class UiaError(RuntimeError):
     pass
 
 
+# Pseudo-selector shapes models invent for a window, e.g.
+# "[contains='Untitled - Notepad']", "title='Calculator'", '"Spotify"'.
+_PSEUDO_SELECTOR = re.compile(
+    r"""^\s*\[?\s*(?:contains|title|name|window)?\s*[=:]?\s*"""
+    r"""['"]?(?P<inner>.+?)['"]?\s*\]?\s*$""",
+    re.I | re.X,
+)
+
+
+def clean_title(title: str) -> str:
+    """Pull the real window title out of a model-invented selector."""
+    text = (title or "").strip()
+    if not text:
+        return text
+    if text.startswith("[") or "=" in text[:12] or text[0] in "'\"":
+        m = _PSEUDO_SELECTOR.match(text)
+        if m:
+            inner = m.group("inner").strip().strip("'\"").strip()
+            if inner:
+                return inner
+    return text
+
+
 def title_pattern(title: str) -> str:
     """A plain string becomes a case-insensitive substring match."""
+    title = clean_title(title)
     if _REGEX_META.search(title):
         return title
     return f"(?i).*{re.escape(title)}.*"

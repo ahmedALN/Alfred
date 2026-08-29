@@ -29,6 +29,17 @@ _SECRET_REFUSAL = (
 )
 
 
+def _as_int(value: Any) -> int | None:
+    """Models pass refs as "0" or 0 interchangeably - accept both."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+        return int(value.strip())
+    return None
+
+
 class UIControlTool(AlfredTool):
     """
     Control real Windows apps through the accessibility layer - reads
@@ -147,8 +158,8 @@ class UIControlTool(AlfredTool):
             }
 
         window = arguments.get("window")
-        pid = arguments.get("pid") if isinstance(arguments.get("pid"), int) else None
-        ref = arguments.get("ref") if isinstance(arguments.get("ref"), int) else None
+        pid = _as_int(arguments.get("pid"))
+        ref = _as_int(arguments.get("ref"))
         name = arguments.get("name")
         timeout = arguments.get("timeout")
         timeout = float(timeout) if isinstance(timeout, (int, float)) else None
@@ -200,8 +211,13 @@ class UIControlTool(AlfredTool):
                 text = arguments.get("text")
                 if not isinstance(text, str):
                     return {"status": "error", "error": "'type' needs 'text'."}
-                into = arguments.get("into")
-                into = into if isinstance(into, int) else ref
+                into = _as_int(arguments.get("into"))
+                if into is None:
+                    into = ref
+                    # "into" may name the field rather than reference it.
+                    raw_into = arguments.get("into")
+                    if name is None and isinstance(raw_into, str) and raw_into:
+                        name = raw_into
                 refused = self._secret_guard(into, name, text)
                 if refused is not None:
                     return refused

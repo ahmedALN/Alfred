@@ -243,3 +243,35 @@ def test_escape_special_keys_chars():
 def test_title_pattern_wraps_plain_strings_only():
     assert title_pattern("Spotify") == "(?i).*Spotify.*"
     assert title_pattern(r"^Spot.*fy$") == r"^Spot.*fy$"
+
+
+# ------------------------------------------- model-invented arg shapes
+
+
+def test_clean_title_unwraps_pseudo_selectors():
+    from src.windows.uia import clean_title
+
+    assert clean_title("[contains='Untitled - Notepad']") == "Untitled - Notepad"
+    assert clean_title("title='Calculator'") == "Calculator"
+    assert clean_title('"Spotify"') == "Spotify"
+    assert clean_title("Untitled - Notepad") == "Untitled - Notepad"
+    assert clean_title("Notepad") == "Notepad"
+
+
+def test_ref_accepts_a_numeric_string():
+    t = _tool()
+    t.execute({"action": "click", "ref": "2"})
+    assert ("click", 2, None, False, False) in t._uia.calls
+
+
+def test_into_may_name_the_field_instead_of_referencing_it():
+    t = _tool()
+    t.execute({"action": "type", "text": "hi", "into": "Search input"})
+    assert ("type", "hi", None, "Search input") in t._uia.calls
+
+
+def test_named_password_field_via_into_is_still_refused():
+    t = _tool()
+    out = t.execute({"action": "type", "text": "hunter2", "into": "Password"})
+    assert out["status"] == "refused"
+    assert not any(c[0] == "type" for c in t._uia.calls)
