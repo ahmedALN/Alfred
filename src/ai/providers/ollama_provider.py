@@ -27,10 +27,16 @@ class OllamaChatProvider(ChatProvider):
         model: str,
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = 180.0,
+        think: bool = False,
     ) -> None:
         self.model = model
         self._base = _clean_base(base_url)
         self._timeout = timeout
+        # Reasoning models (qwen3.5, etc.) default to extended "thinking"
+        # in Ollama, which can burn 15k+ tokens and 60s+ on a trivial
+        # decision. Alfred wants fast structured answers, so thinking is
+        # off unless explicitly enabled.
+        self._think = think
 
     def generate(
         self,
@@ -49,6 +55,7 @@ class OllamaChatProvider(ChatProvider):
             "model": self.model,
             "prompt": prompt,
             "stream": False,
+            "think": self._think,
             "options": options,
         }
 
@@ -109,10 +116,12 @@ class OllamaVisionProvider(VisionProvider):
         model: str,
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = 180.0,
+        think: bool = False,
     ) -> None:
         self.model = model
         self._base = _clean_base(base_url)
         self._timeout = timeout
+        self._think = think
 
     def analyze(
         self,
@@ -133,6 +142,7 @@ class OllamaVisionProvider(VisionProvider):
                 "prompt": prompt,
                 "images": [encoded],
                 "stream": False,
+                "think": self._think,
             },
             timeout=self._timeout,
         )
