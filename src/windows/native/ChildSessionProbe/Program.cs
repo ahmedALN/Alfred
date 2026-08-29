@@ -78,6 +78,11 @@ namespace Alfred.ChildSessionProbe
 
         private sealed class ProbeForm : Form
         {
+            // Fixed geometry for Alfred's session. Stable coordinates
+            // matter more than matching the host window.
+            private const int ChildDesktopWidth = 1600;
+            private const int ChildDesktopHeight = 900;
+
             private readonly RdpHostControl _host;
             private readonly RdpEventSink _sink;
 
@@ -187,17 +192,16 @@ namespace Alfred.ChildSessionProbe
                 _ocx.Server =
                     "localhost";
 
+                // Pin the child desktop to a FIXED resolution rather
+                // than the host window's size. A vision model reading
+                // pixel coordinates needs the geometry to be stable
+                // between runs; sizing to the window makes every
+                // learned coordinate resolution-dependent.
                 _ocx.DesktopWidth =
-                    Math.Max(
-                        640,
-                        ClientSize.Width
-                    );
+                    ChildDesktopWidth;
 
                 _ocx.DesktopHeight =
-                    Math.Max(
-                        480,
-                        ClientSize.Height
-                    );
+                    ChildDesktopHeight;
 
                 _ocx.ColorDepth =
                     32;
@@ -247,6 +251,44 @@ namespace Alfred.ChildSessionProbe
                         "DisplayConnectionBar",
                         () =>
                             advanced.DisplayConnectionBar =
+                                false
+                    );
+
+                    // ------------------------------------------------
+                    // Keep the two sessions genuinely separate.
+                    //
+                    // Device/resource redirection is ON by default, and
+                    // that includes the CLIPBOARD - without this, the
+                    // child session shares the user's clipboard, which
+                    // is exactly the kind of interference Alfred is
+                    // supposed to avoid.
+                    // ------------------------------------------------
+
+                    TrySet(
+                        "DisableRdpdr",
+                        () =>
+                            advanced.DisableRdpdr =
+                                true
+                    );
+
+                    TrySet(
+                        "RedirectClipboard",
+                        () =>
+                            advanced.RedirectClipboard =
+                                false
+                    );
+
+                    TrySet(
+                        "RedirectDrives",
+                        () =>
+                            advanced.RedirectDrives =
+                                false
+                    );
+
+                    TrySet(
+                        "RedirectPrinters",
+                        () =>
+                            advanced.RedirectPrinters =
                                 false
                     );
 
