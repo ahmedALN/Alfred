@@ -4,7 +4,7 @@ import re
 from typing import Any
 
 from src.tools.base import AlfredTool
-from src.windows.uia import UiaError, UiaSession
+from src.windows.uia import UiaError, UiaSession, normalise_keys
 
 _ACTIONS = (
     "windows", "focus", "tree", "find", "click", "double_click",
@@ -225,9 +225,15 @@ class UIControlTool(AlfredTool):
                 return {"status": "success", "typed": text}
 
             if action == "key":
-                keys = arguments.get("keys")
-                if not isinstance(keys, str) or not keys:
-                    return {"status": "error", "error": "'key' needs 'keys'."}
+                keys = normalise_keys(
+                    arguments.get("keys") or arguments.get("key")
+                )
+                if not keys:
+                    return {
+                        "status": "error",
+                        "error": "'key' needs 'keys', e.g. '^a', 'ctrl+a' or "
+                                 "'{ENTER}'.",
+                    }
                 self._uia.send_key(keys)
                 return {"status": "success", "keys": keys}
 

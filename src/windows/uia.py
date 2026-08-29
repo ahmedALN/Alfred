@@ -576,6 +576,68 @@ def _is_password_element(el) -> bool:
     return False
 
 
+# Human/model key names -> pywinauto's send_keys syntax.
+_MODIFIERS = {"ctrl": "^", "control": "^", "alt": "%", "shift": "+",
+              "win": "{VK_LWIN}", "cmd": "^", "meta": "{VK_LWIN}"}
+_NAMED_KEYS = {
+    "enter": "{ENTER}", "return": "{ENTER}", "esc": "{ESC}",
+    "escape": "{ESC}", "tab": "{TAB}", "space": "{SPACE}",
+    "backspace": "{BACKSPACE}", "bs": "{BACKSPACE}", "del": "{DEL}",
+    "delete": "{DEL}", "home": "{HOME}", "end": "{END}",
+    "pgup": "{PGUP}", "pageup": "{PGUP}", "pgdn": "{PGDN}",
+    "pagedown": "{PGDN}", "up": "{UP}", "down": "{DOWN}",
+    "left": "{LEFT}", "right": "{RIGHT}", "insert": "{INSERT}",
+    "printscreen": "{PRTSC}", "capslock": "{CAPSLOCK}",
+    **{f"f{i}": f"{{F{i}}}" for i in range(1, 25)},
+}
+
+
+def normalise_keys(keys: Any) -> str:
+    """Turn what a model emits into pywinauto send_keys syntax.
+
+    Accepts ``["ctrl","a"]``, ``"ctrl+a"``, ``"Ctrl-A"``, ``"enter"`` and
+    already-correct strings like ``"^a"`` or ``"{ENTER}"``.
+    """
+    if isinstance(keys, (list, tuple)):
+        parts = [str(k).strip() for k in keys if str(k).strip()]
+    elif isinstance(keys, str):
+        text = keys.strip()
+        if not text:
+            return ""
+        # Already pywinauto syntax - leave it alone.
+        if any(ch in text for ch in "^%+{}") and "+" not in text.strip("+"):
+            return text
+        if re.fullmatch(r"[^\s+\-]+", text) and text.lower() not in _NAMED_KEYS:
+            return text if len(text) > 1 else text
+        parts = [p for p in re.split(r"[+\-]", text) if p.strip()]
+    else:
+        return ""
+
+    if not parts:
+        return ""
+
+    prefix = ""
+    final: list[str] = []
+    for part in parts:
+        low = part.strip().lower()
+        if low in _MODIFIERS and part is not parts[-1]:
+            prefix += _MODIFIERS[low]
+        elif low in _NAMED_KEYS:
+            final.append(_NAMED_KEYS[low])
+        elif low in _MODIFIERS:
+            prefix += _MODIFIERS[low]
+        else:
+            final.append(part)
+
+    body = "".join(final)
+    if not body:
+        return prefix
+    # A modifier applies to the whole group when the key is multi-char.
+    if prefix and len(body) > 1 and not body.startswith("{"):
+        return f"{prefix}({body})"
+    return f"{prefix}{body}"
+
+
 def _escape(text: str) -> str:
     text = text.replace("{", "{{}").replace("}", "{}}")
     for ch in "+^%~()[]":

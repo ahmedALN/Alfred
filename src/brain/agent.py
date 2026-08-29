@@ -589,6 +589,13 @@ class TaskAgent:
                     "plain English and let the executor pick the tool"
                 )
                 return False
+            # a UI micro-action the executor handles on its own
+            if _MICRO_ACTION.search(text):
+                self._plan_gripe = (
+                    f"step {text!r} is a UI micro-action - the executor "
+                    "finds and focuses controls itself; plan the outcome"
+                )
+                return False
             dw = s["done_when"].strip()
             if not dw or dw.lower() == text.lower():
                 self._plan_gripe = f"step has no checkable done_when: {text!r}"
@@ -1072,6 +1079,15 @@ class TaskAgent:
 _TOOL_SYNTAX = re.compile(
     r"\b(ui_control|desktop_control|system_info|network_info|open_app|"
     r"run_task|computer_screenshot)\b\s*[\w'\"{(=-]",
+)
+
+# Steps that are really the executor's internal business: finding,
+# focusing or reading the control tree.
+_MICRO_ACTION = re.compile(
+    r"^(find|locate|focus|identify|read|inspect)\b.*\b"
+    r"(control|edit box|text ?box|element|tree|field|handle)\b|"
+    r"^(focus|activate)\s+the\b",
+    re.I,
 )
 
 _MUTATION_INTENT = (

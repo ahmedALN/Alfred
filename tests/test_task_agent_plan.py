@@ -196,3 +196,24 @@ def test_deterministic_verify_passes_on_signal_match():
         hist,
     )
     assert ok and "successful tool result" in why
+
+
+def test_rejects_tool_syntax_and_micro_actions_as_plan_steps():
+    agent = _agent2(DispatchChat(), FakeRegistry())
+
+    bad_tool_syntax = [{"step": "ui_control key keys='^a'",
+                        "done_when": "text is selected"}]
+    assert agent._plan_ok(bad_tool_syntax, "select all") is False
+    assert "tool syntax" in agent._plan_gripe
+
+    bad_micro = [{"step": "Find the edit control in Notepad",
+                  "done_when": "the control is found"}]
+    assert agent._plan_ok(bad_micro, "type in notepad") is False
+    assert "micro-action" in agent._plan_gripe
+
+    good = [
+        {"step": "Open Notepad", "done_when": "open_app returns success"},
+        {"step": "Type 'hello' into Notepad",
+         "done_when": "ui_control get shows 'hello' in the editor"},
+    ]
+    assert agent._plan_ok(good, "type hello in notepad") is True

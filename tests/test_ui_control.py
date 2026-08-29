@@ -275,3 +275,33 @@ def test_named_password_field_via_into_is_still_refused():
     out = t.execute({"action": "type", "text": "hunter2", "into": "Password"})
     assert out["status"] == "refused"
     assert not any(c[0] == "type" for c in t._uia.calls)
+
+
+def test_normalise_keys_accepts_what_models_emit():
+    from src.windows.uia import normalise_keys as n
+
+    # lists and human spellings - the shapes that were failing live
+    assert n(["ctrl", "a"]) == "^a"
+    assert n("ctrl+a") == "^a"
+    assert n(["alt", "F4"]) == "%{F4}"
+    assert n("enter") == "{ENTER}"
+    assert n("esc") == "{ESC}"
+    assert n(["ctrl", "shift", "escape"]) == "^+{ESC}"
+    # already-correct pywinauto syntax passes through untouched
+    assert n("^a") == "^a"
+    assert n("{ENTER}") == "{ENTER}"
+    assert n("%{F4}") == "%{F4}"
+    # junk
+    assert n("") == "" and n(None) == "" and n([]) == ""
+
+
+def test_key_action_normalises_a_list():
+    t = _tool()
+    out = t.execute({"action": "key", "keys": ["ctrl", "a"]})
+    assert out["status"] == "success"
+    assert ("key", "^a") in t._uia.calls
+
+
+def test_key_action_reports_a_useful_error():
+    out = _tool().execute({"action": "key"})
+    assert out["status"] == "error" and "ctrl+a" in out["error"]
