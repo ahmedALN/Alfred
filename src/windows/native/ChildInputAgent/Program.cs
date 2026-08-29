@@ -422,6 +422,21 @@ private static string HandleRequest(
                     root
                 );
 
+            case "key":
+                return HandleKey(
+                    root
+                );
+
+            case "scroll":
+                return HandleScroll(
+                    root
+                );
+
+            case "drag":
+                return HandleDrag(
+                    root
+                );
+
             case "capture_start":
                 return HandleCaptureStart();
 
@@ -995,6 +1010,267 @@ private static INPUT CreateUnicodeInput(
                     }
             }
     };
+}
+
+// ================================================================
+// Key combos, scroll, drag
+// ================================================================
+
+private const uint MouseMove = 0x0001;
+private const uint MouseWheel = 0x0800;
+private const int WheelDelta = 120;
+
+private static readonly Dictionary<string, ushort> VkMap =
+    new(StringComparer.OrdinalIgnoreCase)
+{
+    ["enter"] = 0x0D, ["return"] = 0x0D, ["tab"] = 0x09,
+    ["esc"] = 0x1B, ["escape"] = 0x1B, ["space"] = 0x20,
+    ["backspace"] = 0x08, ["delete"] = 0x2E, ["del"] = 0x2E,
+    ["insert"] = 0x2D, ["home"] = 0x24, ["end"] = 0x23,
+    ["pageup"] = 0x21, ["pagedown"] = 0x22,
+    ["up"] = 0x26, ["down"] = 0x28, ["left"] = 0x25, ["right"] = 0x27,
+    ["ctrl"] = 0x11, ["control"] = 0x11, ["alt"] = 0x12,
+    ["shift"] = 0x10, ["win"] = 0x5B, ["super"] = 0x5B,
+    ["f1"] = 0x70, ["f2"] = 0x71, ["f3"] = 0x72, ["f4"] = 0x73,
+    ["f5"] = 0x74, ["f6"] = 0x75, ["f7"] = 0x76, ["f8"] = 0x77,
+    ["f9"] = 0x78, ["f10"] = 0x79, ["f11"] = 0x7A, ["f12"] = 0x7B,
+};
+
+private static bool TryResolveKey(string token, out ushort vk)
+{
+    token = token.Trim();
+
+    if (VkMap.TryGetValue(token, out vk))
+    {
+        return true;
+    }
+
+    if (token.Length == 1)
+    {
+        char c = char.ToUpperInvariant(token[0]);
+        if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
+        {
+            vk = c;
+            return true;
+        }
+    }
+
+    vk = 0;
+    return false;
+}
+
+private static INPUT CreateVkInput(ushort vk, bool keyUp)
+{
+    return new INPUT
+    {
+        Type = InputKeyboard,
+        Union = new InputUnion
+        {
+            Keyboard = new KEYBDINPUT
+            {
+                Vk = vk,
+                Scan = 0,
+                Flags = keyUp ? KeyUp : 0,
+                Time = 0,
+                ExtraInfo = IntPtr.Zero
+            }
+        }
+    };
+}
+
+private static string HandleKey(JsonElement root)
+{
+    var tokens = new List<string>();
+
+    if (root.TryGetProperty("keys", out JsonElement keysElement))
+    {
+        if (keysElement.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement item in keysElement.EnumerateArray())
+            {
+                string? s = item.GetString();
+                if (!string.IsNullOrWhiteSpace(s))
+                {
+                    tokens.Add(s);
+                }
+            }
+        }
+        else
+        {
+            string? s = keysElement.GetString();
+            if (!string.IsNullOrWhiteSpace(s))
+            {
+                foreach (string part in s.Split('+'))
+                {
+                    if (!string.IsNullOrWhiteSpace(part))
+                    {
+                        tokens.Add(part);
+                    }
+                }
+            }
+        }
+    }
+
+    if (tokens.Count == 0)
+    {
+        return Error("missing_keys", "Request must contain 'keys'.");
+    }
+
+    var resolved = new List<ushort>();
+    foreach (string token in tokens)
+    {
+        if (!TryResolveKey(token, out ushort vk))
+        {
+            return Error("unknown_key", $"Unrecognised key '{token}'.");
+        }
+        resolved.Add(vk);
+    }
+
+    // All but the last are treated as held modifiers.
+    var sequence = new List<INPUT>();
+    for (int i = 0; i < resolved.Count - 1; i++)
+    {
+        sequence.Add(CreateVkInput(resolved[i], false));
+    }
+    sequence.Add(CreateVkInput(resolved[^1], false));
+    sequence.Add(CreateVkInput(resolved[^1], true));
+    for (int i = resolved.Count - 2; i >= 0; i--)
+    {
+        sequence.Add(CreateVkInput(resolved[i], true));
+    }
+
+    INPUT[] inputs = sequence.ToArray();
+    uint sent = SendInput(
+        (uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT))
+    );
+
+    if (sent != inputs.Length)
+    {
+        return Error("key_failed", "SendInput failed.");
+    }
+
+    return Success(new
+    {
+        operation = "key",
+        keys = string.Join("+", tokens),
+        session = GetCurrentSessionId()
+    });
+}
+
+private static bool SendMouseFlag(uint flag)
+{
+    INPUT[] inputs =
+    {
+        new INPUT
+        {
+            Type = InputMouse,
+            Union = new InputUnion
+            {
+                Mouse = new MOUSEINPUT
+                {
+                    Dx = 0,
+                    Dy = 0,
+                    MouseData = 0,
+                    Flags = flag,
+                    Time = 0,
+                    ExtraInfo = IntPtr.Zero
+                }
+            }
+        }
+    };
+
+    return SendInput(
+        (uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT))
+    ) == inputs.Length;
+}
+
+private static string HandleScroll(JsonElement root)
+{
+    if (root.TryGetProperty("x", out JsonElement xe) &&
+        root.TryGetProperty("y", out JsonElement ye) &&
+        xe.TryGetInt32(out int x) && ye.TryGetInt32(out int y))
+    {
+        SetCursorPos(x, y);
+    }
+
+    int notches = 3;
+    if (root.TryGetProperty("dy", out JsonElement dye) &&
+        dye.TryGetInt32(out int dy))
+    {
+        notches = dy;
+    }
+
+    INPUT[] inputs =
+    {
+        new INPUT
+        {
+            Type = InputMouse,
+            Union = new InputUnion
+            {
+                Mouse = new MOUSEINPUT
+                {
+                    Dx = 0,
+                    Dy = 0,
+                    MouseData = unchecked((uint)(notches * WheelDelta)),
+                    Flags = MouseWheel,
+                    Time = 0,
+                    ExtraInfo = IntPtr.Zero
+                }
+            }
+        }
+    };
+
+    uint sent = SendInput(
+        (uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT))
+    );
+
+    if (sent != inputs.Length)
+    {
+        return Error("scroll_failed", "SendInput failed.");
+    }
+
+    return Success(new
+    {
+        operation = "scroll",
+        notches,
+        session = GetCurrentSessionId()
+    });
+}
+
+private static string HandleDrag(JsonElement root)
+{
+    if (!root.TryGetProperty("x1", out JsonElement x1e) ||
+        !root.TryGetProperty("y1", out JsonElement y1e) ||
+        !root.TryGetProperty("x2", out JsonElement x2e) ||
+        !root.TryGetProperty("y2", out JsonElement y2e) ||
+        !x1e.TryGetInt32(out int x1) || !y1e.TryGetInt32(out int y1) ||
+        !x2e.TryGetInt32(out int x2) || !y2e.TryGetInt32(out int y2))
+    {
+        return Error("invalid_drag", "Need integer x1,y1,x2,y2.");
+    }
+
+    SetCursorPos(x1, y1);
+    Thread.Sleep(20);
+    SendMouseFlag(MouseLeftDown);
+
+    const int steps = 10;
+    for (int i = 1; i <= steps; i++)
+    {
+        int ix = x1 + (x2 - x1) * i / steps;
+        int iy = y1 + (y2 - y1) * i / steps;
+        SetCursorPos(ix, iy);
+        Thread.Sleep(15);
+    }
+
+    SendMouseFlag(MouseLeftUp);
+
+    return Success(new
+    {
+        operation = "drag",
+        from = new { x = x1, y = y1 },
+        to = new { x = x2, y = y2 },
+        session = GetCurrentSessionId()
+    });
 }
 
 // ================================================================

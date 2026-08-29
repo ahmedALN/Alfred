@@ -456,6 +456,52 @@ class ChildSessionClient:
             }
         )
 
+    def key(
+        self,
+        keys: list[str] | str,
+    ) -> dict[str, Any]:
+        return self._request(
+            {
+                "op": "key",
+                "keys": keys,
+            }
+        )
+
+    def scroll(
+        self,
+        x: int,
+        y: int,
+        dy: int = -3,
+    ) -> dict[str, Any]:
+        return self._request(
+            {
+                "op": "scroll",
+                "x": int(x),
+                "y": int(y),
+                "dy": int(dy),
+            }
+        )
+
+    def drag(
+        self,
+        x1: int,
+        y1: int,
+        x2: int,
+        y2: int,
+    ) -> dict[str, Any]:
+        return self._request(
+            {
+                "op": "drag",
+                "x1": int(x1),
+                "y1": int(y1),
+                "x2": int(x2),
+                "y2": int(y2),
+            }
+        )
+
+    def shutdown(self) -> dict[str, Any]:
+        return self._request({"op": "shutdown"})
+
     # ================================================================
     # Lifecycle
     # ================================================================
