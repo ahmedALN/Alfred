@@ -183,6 +183,7 @@ class TaskAgent:
         self._exec_catalogue = ""
         self._plan_gripe = ""
         self._planned_ever: set[str] = set()
+        self._first_plan_len = 0
         self._deadline = 0.0
         self._cancel_check: "Callable[[], bool]" = lambda: False
 
@@ -252,6 +253,7 @@ class TaskAgent:
         # 1. PLAN
         plan = self._make_plan(goal)
         result.plan = [p["step"] for p in plan]
+        self._first_plan_len = len(plan)
         self._planned_ever.update(result.plan)
         if on_progress is not None:
             on_progress("Plan: " + "; ".join(result.plan[:6]))
@@ -370,6 +372,7 @@ class TaskAgent:
         )
         self._ask_user = ask_user
 
+        self._first_plan_len = 0  # replay has no plan to shrink
         done_when = str(skill.get("verify") or goal)
         result = TaskResult(goal=goal, status="failed", summary="")
         result.plan = [done_when]
@@ -742,18 +745,26 @@ class TaskAgent:
         outstanding = [s for s in current if s not in verified_set]
         n_ok = len(verified_set)
 
+        # If replans shrank the plan below what we first committed to, some
+        # of the original work was quietly dropped - don't call that "done".
+        shrank = 0 < self._first_plan_len and len(current) < self._first_plan_len
+
         if result.status in ("cancelled", "exhausted", "error"):
             base = {
                 "cancelled": "Stopped at your request",
                 "exhausted": "Ran out of time",
                 "error": "Hit an error",
             }[result.status]
-        elif n_ok and not outstanding:
+        elif n_ok and not outstanding and not shrank:
             result.status = "done"
             base = "Done"
         elif n_ok:
             result.status = "partial"
             base = "Partly done"
+            if shrank and not outstanding:
+                result.unverified.append(
+                    "some of the original plan was dropped when I got stuck"
+                )
         else:
             result.status = "failed"
             base = "Couldn't do it"
