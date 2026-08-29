@@ -862,11 +862,20 @@ class AlfredLiveSession:
                 )
                 continue
 
-            result = await asyncio.to_thread(
-                self.registry.execute,
-                call.name,
-                arguments,
-            )
+            try:
+                result = await asyncio.to_thread(
+                    self.registry.execute,
+                    call.name,
+                    arguments,
+                )
+            except Exception as exc:  # noqa: BLE001
+                # A failing tool must never take the whole session
+                # down: report it back to the model and keep going.
+                result = {
+                    "status": "error",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+                print(f"[Tool Error] {call.name}: {result['error']}")
 
             if not isinstance(
                 result,

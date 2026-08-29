@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from google import genai
+
+# The SDK logs a noisy "AFC is not recommended" warning on every plain
+# generate_content call; we use that path deliberately.
+logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 
 from src.ai.gemini import AlfredLiveSession
 from src.ai.providers import build_providers

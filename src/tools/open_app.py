@@ -74,28 +74,19 @@ class OpenAppTool(AlfredTool):
             "alfred",
         )
 
-        if not isinstance(
-            app,
-            str,
-        ):
-            raise ValueError(
-                "'app' must be a string."
-            )
+        if not isinstance(app, str) or not app.strip():
+            return {"status": "error", "error": "'app' must be a non-empty string."}
 
-        if target not in {
-            "alfred",
-            "user",
-            "current",
-        }:
-            raise ValueError(
-                "'target' must be "
-                "'alfred', 'user', or 'current'."
-            )
+        if target not in {"alfred", "user", "current"}:
+            target = "alfred"
 
-        result = self.launcher.open(
-            app_name=app,
-            target=target,
-        )
+        try:
+            result = self.launcher.open(app_name=app, target=target)
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "status": "error",
+                "error": f"Could not open '{app}': {type(exc).__name__}: {exc}",
+            }
 
         return result.as_dict()
 
