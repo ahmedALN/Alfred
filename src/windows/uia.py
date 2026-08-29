@@ -95,16 +95,29 @@ class UiaSession:
             except Exception:  # noqa: BLE001
                 time.sleep(0.3)
 
+    @staticmethod
+    def _descendants(win, max_depth: int) -> list:
+        """Depth-bounded so a browser's enormous a11y tree can't hang the
+        call. pywinauto walks the whole subtree otherwise."""
+        for kwargs in ({"depth": max_depth}, {}):
+            try:
+                return list(win.descendants(**kwargs))
+            except TypeError:
+                continue
+            except Exception as exc:  # noqa: BLE001
+                raise UiaError(f"could not read the control tree: {exc}") from exc
+        return []
+
     # ----------------------------------------------------------------
 
     def tree(
         self,
         title_re: str | None = None,
         pid: int | None = None,
-        limit: int = 120,
+        limit: int = 80,
+        max_depth: int = 14,
     ) -> tuple[str, list[Control]]:
         win = self.window(title_re, pid)
-        self.focus(win)
         self._last_window = win
         self._by_ref.clear()
 
@@ -114,13 +127,16 @@ class UiaSession:
         except Exception:  # noqa: BLE001
             pass
 
+        # Read once without stealing focus (fast, non-disruptive). Many
+        # Chromium/Electron apps only expose their tree when focused, so
+        # if that comes back thin, focus and re-read.
+        descendants = self._descendants(win, max_depth)
+        if len(descendants) < 4:
+            self.focus(win)
+            descendants = self._descendants(win, max_depth)
+
         controls: list[Control] = []
         ref = 0
-        try:
-            descendants = win.descendants()
-        except Exception as exc:  # noqa: BLE001
-            raise UiaError(f"could not read the control tree: {exc}") from exc
-
         seen: set[str] = set()
         for el in descendants:
             try:

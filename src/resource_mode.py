@@ -99,6 +99,7 @@ class ResourceMode:
 
         for provider in (
             getattr(self._providers, "chat", None),
+            getattr(self._providers, "plan_chat", None),
             getattr(self._providers, "vision", None),
             getattr(self._providers, "embedder", None),
         ):

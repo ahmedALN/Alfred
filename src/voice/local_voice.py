@@ -19,7 +19,10 @@ _PIPER_URL = (
 )
 
 _RATE = 16_000
-_STOP_PHRASES = ("switch back", "use gemini", "back to normal", "never mind")
+_STOP_PHRASES = (
+    "switch back", "use gemini", "back to the cloud", "cloud voice",
+    "go back online",
+)
 
 _SYSTEM = """You are Alfred, running offline (the cloud voice is rate limited). \
 You control this Windows PC. Keep spoken answers to one or two sentences.
@@ -228,11 +231,15 @@ class LocalVoiceSession:
 
     # ----------------------------------------------------------------
 
+    async def _say(self, text: str) -> None:
+        # Piper synth + sd.wait() block for seconds - keep them off the loop.
+        await asyncio.to_thread(self.speak, text)
+
     async def run(self, deadline: float) -> None:
         if not self._load():
             return
 
-        self.speak(
+        await self._say(
             "The cloud voice is rate limited, so I've switched to offline "
             "mode for a few minutes."
         )
@@ -253,12 +260,12 @@ class LocalVoiceSession:
             print(f"\nYou (offline): {text}")
 
             if any(p in text.lower() for p in _STOP_PHRASES):
-                self.speak("Okay, trying the cloud voice again.")
+                await self._say("Okay, trying the cloud voice again.")
                 return
 
             reply = await asyncio.to_thread(self._respond, text)
             print(f"Alfred (offline): {reply}")
-            self.speak(reply)
+            await self._say(reply)
 
 
 def _extract_tool_call(raw: str) -> "tuple[str, dict] | None":
