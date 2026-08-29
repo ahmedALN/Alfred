@@ -98,6 +98,7 @@ def build_loop(
         get_session_id=lambda: "sess-1",
         tick_seconds=90.0,
         min_speak_gap_seconds=min_speak_gap,
+        startup_grace_seconds=0.0,
         monotonic=clock,
         fullscreen_probe=lambda: False,
     )
@@ -172,38 +173,38 @@ def test_auto_readonly_action_executes_and_reports(tmp_path):
     audit.close()
 
 
-def test_rate_limit_suppresses_second_speak(tmp_path):
-    clock = Clock()
+def test_multiple_speaks_combine_into_one_message(tmp_path):
     loop, spoken, audit, _ = build_loop(
         tmp_path,
         [
-            Proposal(ProposalKind.SPEAK, "first"),
-            Proposal(ProposalKind.SPEAK, "second"),
-        ],
-        clock=clock,
-    )
-
-    asyncio.run(loop.run_once())
-
-    assert spoken == ["(System: proactive) first"]
-    audit.close()
-
-
-def test_high_urgency_bypasses_rate_limit(tmp_path):
-    loop, spoken, audit, _ = build_loop(
-        tmp_path,
-        [
-            Proposal(ProposalKind.SPEAK, "first"),
-            Proposal(ProposalKind.SPEAK, "urgent", urgency="high"),
+            Proposal(ProposalKind.SPEAK, "disk is low"),
+            Proposal(ProposalKind.SPEAK, "a reboot is pending"),
         ],
     )
 
     asyncio.run(loop.run_once())
 
     assert spoken == [
-        "(System: proactive) first",
-        "(System: proactive) urgent",
+        "(System: proactive) A few things - disk is low; a reboot is pending"
     ]
+    audit.close()
+
+
+def test_urgent_and_minor_in_one_tick_are_said_together_urgent_first(tmp_path):
+    loop, spoken, audit, _ = build_loop(
+        tmp_path,
+        [
+            Proposal(ProposalKind.SPEAK, "minor note"),
+            Proposal(ProposalKind.SPEAK, "battery critical", urgency="high"),
+        ],
+    )
+
+    asyncio.run(loop.run_once())
+
+    assert spoken == [
+        "(System: proactive) A few things - battery critical; minor note"
+    ]
+    audit.close()
     audit.close()
 
 

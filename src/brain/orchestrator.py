@@ -103,6 +103,7 @@ class BrainLoop:
         min_speak_gap_seconds: float = 600.0,
         quiet_hours: str | None = None,
         heartbeat_ticks: int = 0,
+        startup_grace_seconds: float = 60.0,
         monotonic: Callable[[], float] = time.monotonic,
         wallclock: Callable[[], datetime] = datetime.now,
         fullscreen_probe: Callable[[], bool] = is_fullscreen_foreground,
@@ -134,6 +135,11 @@ class BrainLoop:
         self._deferred_summaries: list[str] = []
         self._tick_count = 0
 
+        self._startup_grace = startup_grace_seconds
+        self._started_at = monotonic()
+        self._held_proactive: list[str] = []
+        self._tick_speak: list[tuple[str, str]] = []
+
     # ================================================================
     # Public runtime
     # ================================================================
@@ -156,6 +162,9 @@ class BrainLoop:
         )
 
     async def run(self) -> None:
+        # Start the grace clock now (construction may be much earlier).
+        self._started_at = self._monotonic()
+
         # Small stagger so the brain's first tick doesn't collide with
         # the startup greeting.
         await asyncio.sleep(min(15.0, self._tick_seconds))
@@ -208,6 +217,15 @@ class BrainLoop:
         )
 
         if not notables and not heartbeat:
+            # Nothing new - but deliver anything held from the startup
+            # window if the grace period has now passed.
+            if (
+                not dnd
+                and self._held_proactive
+                and not self._in_startup_grace()
+            ):
+                self._tick_speak = []
+                await self._flush_proactive(force_high=True)
             return
 
         for notable in notables:
@@ -239,8 +257,54 @@ class BrainLoop:
             session_id,
         )
 
+        # Collect this tick's proactive lines so several become one
+        # sentence instead of a burst of interruptions.
+        self._tick_speak: list[tuple[str, str]] = []
+
         for proposal in proposals:
             await self._handle_proposal(proposal, session_id, dnd)
+
+        await self._flush_proactive(force_high=False)
+
+    # ----------------------------------------------------------------
+
+    def _in_startup_grace(self) -> bool:
+        return self._monotonic() - self._started_at < self._startup_grace
+
+    async def _flush_proactive(self, *, force_high: bool) -> None:
+        """
+        Combine everything the brain wants to say into one message.
+        During the startup grace window, hold non-urgent lines; once it
+        passes they go out together.
+        """
+
+        lines = getattr(self, "_tick_speak", [])
+        self._tick_speak = []
+
+        urgent = [t for t, u in lines if u == "high"]
+        normal = [t for t, u in lines if u != "high"]
+
+        # Non-urgent lines wait out the startup window; urgent ones
+        # never do.
+        if self._in_startup_grace():
+            self._held_proactive.extend(normal)
+            normal = []
+        elif self._held_proactive:
+            normal = self._held_proactive + normal
+            self._held_proactive = []
+
+        parts = urgent + normal
+        if not parts:
+            return
+
+        combined = (
+            parts[0] if len(parts) == 1
+            else "A few things - " + "; ".join(parts)
+        )
+        await self._say(
+            f"(System: proactive) {combined}",
+            force=force_high or bool(urgent),
+        )
 
     # ================================================================
     # Proposal handling
@@ -284,10 +348,7 @@ class BrainLoop:
 
         # AUTO
         if proposal.kind is ProposalKind.SPEAK:
-            await self._say(
-                f"(System: proactive) {proposal.message}",
-                force=proposal.urgency == "high",
-            )
+            self._tick_speak.append((proposal.message, proposal.urgency))
             return
 
         await self._execute(proposal, session_id, dnd)

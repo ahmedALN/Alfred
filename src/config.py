@@ -38,6 +38,7 @@ class Settings:
     brain_min_speak_gap_seconds: float
     brain_quiet_hours: str | None
     brain_heartbeat_ticks: int
+    brain_startup_grace_seconds: float
     brain_audit_path: str
     tray_enabled: bool
 
@@ -129,6 +130,9 @@ def load_settings() -> Settings:
         ),
         brain_quiet_hours=quiet_hours,
         brain_heartbeat_ticks=_get_int("ALFRED_BRAIN_HEARTBEAT_TICKS", 0),
+        brain_startup_grace_seconds=_get_float(
+            "ALFRED_BRAIN_STARTUP_GRACE", 60.0
+        ),
         brain_audit_path=os.getenv(
             "ALFRED_BRAIN_AUDIT_DB",
             "alfred_brain_audit.sqlite3",
