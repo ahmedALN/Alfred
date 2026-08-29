@@ -65,6 +65,7 @@ python -m src.memory_cli list        # what it remembers  (search / forget / edi
 python -m src.knowledge seed         # load the built-in Windows playbook into memory (do this once)
 python -m src.skills list            # learned routines  (show / forget / disable / enable)
 python -m src.episodes recent        # what it actually did lately  (search / prune)
+python -m src.apps list              # how to work inside each app  (show / note / forget)
 python -m src.autostart install      # start at login via the watchdog (uninstall / status)
 python -m src.watchdog               # run Alfred with crash-restart supervision
 python -m src.voice.setup_wakeword   # download the model for a custom wake phrase
@@ -76,15 +77,27 @@ model set in `.env` — `ALFRED_AI_PLAN_MODEL` (default
 missing or down it falls back through Gemini to the local model automatically.
 Execution of each step uses the fast local model.
 
-**Getting better:** Alfred starts from a built-in Windows playbook (`python -m
-src.knowledge seed`) — the good way to do common things (how to drive Spotify,
-which cmdlet lists ports, etc.). After it finishes and *verifies* a task, it
-distils the exact tool sequence into a **skill** — the same request next time
-skips planning and just runs (`play a {artist} song on Spotify` learned once,
-replays for any artist). A failed step becomes a "lesson" fact so the same
-mistake isn't repeated. Risky routines are confirmed out loud before being
-saved. It reports only what it could verify — never "done" for a step it
-couldn't confirm.
+**Working inside apps:** "open Spotify and play something by X", "open Steam and
+launch Y" — Alfred drives an app's real controls through the accessibility tree
+(`ui_control`): wait for the app to be usable, read its controls, then click,
+type, select, scroll or use its menus by name. It **will not type passwords,
+PINs or security codes** — for a sign-in it gets you to the login screen and
+hands over.
+
+**Getting better:** four layers, from hand-written to fully learned.
+
+- a built-in Windows **playbook** (`python -m src.knowledge seed`) — the good way
+  to do common things (how to drive Spotify, which cmdlet lists ports)
+- **app memory** — the real window title and the control names that worked in
+  each app, so the *second* task in an app skips the exploration the first one
+  paid for. `python -m src.apps list`
+- **skills** — after a task finishes *and every step verifies*, its tool sequence
+  becomes a template; the same request next time skips planning and just runs
+  (`play a {artist} song on Spotify` learned once, replays for any artist)
+- **lessons** — a failed step becomes a durable correction fact
+
+Risky routines are confirmed out loud before being saved. Alfred reports only
+what it could verify — never "done" for a step it couldn't confirm.
 
 Logs: `logs/alfred.log`. Brain activity: `alfred_brain_audit.jsonl`.
 
