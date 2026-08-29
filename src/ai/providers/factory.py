@@ -30,8 +30,8 @@ SUPPORTED = ("gemini", "ollama", "openai")
 # Per-capability fallback models used when the operator does not set an
 # explicit *_MODEL. Keys are (provider, capability).
 _DEFAULT_MODELS: dict[tuple[str, str], str] = {
-    ("gemini", "embed"): "text-embedding-004",
-    ("gemini", "vision"): "gemini-2.5-flash",
+    ("gemini", "embed"): "gemini-embedding-001",
+    ("gemini", "vision"): "gemini-flash-latest",
     ("ollama", "chat"): "qwen3.5",
     ("ollama", "embed"): "nomic-embed-text",
     ("ollama", "vision"): "moondream",

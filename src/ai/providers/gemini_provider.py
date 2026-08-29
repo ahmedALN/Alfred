@@ -48,7 +48,7 @@ class GeminiChatProvider(ChatProvider):
 class GeminiEmbeddingProvider(EmbeddingProvider):
     name = "gemini"
 
-    def __init__(self, client: Any, model: str = "text-embedding-004") -> None:
+    def __init__(self, client: Any, model: str = "gemini-embedding-001") -> None:
         self._client = client
         self.model = model
 

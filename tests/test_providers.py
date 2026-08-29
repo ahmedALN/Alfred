@@ -13,7 +13,7 @@ from src.ai.providers.openai_provider import OpenAICompatibleChatProvider
 
 def _settings(**overrides):
     base = dict(
-        gemini_text_model="gemini-2.5-flash",
+        gemini_text_model="gemini-flash-latest",
         ai_provider="gemini",
         ai_chat_provider=None,
         ai_embed_provider=None,
@@ -43,8 +43,8 @@ def test_default_is_all_gemini():
     assert bundle.chat.name == "gemini"
     assert bundle.embedder.name == "gemini"
     assert bundle.vision.name == "gemini"
-    assert bundle.chat.model == "gemini-2.5-flash"
-    assert bundle.embedder.model == "text-embedding-004"
+    assert bundle.chat.model == "gemini-flash-latest"
+    assert bundle.embedder.model == "gemini-embedding-001"
 
 
 def test_switch_everything_to_ollama():

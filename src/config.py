@@ -94,7 +94,7 @@ def load_settings() -> Settings:
         ),
         gemini_text_model=os.getenv(
             "GEMINI_TEXT_MODEL",
-            "gemini-2.5-flash",
+            "gemini-flash-latest",
         ),
         default_desktop=int(
             os.getenv("ALFRED_DEFAULT_DESKTOP", "2")
