@@ -25,6 +25,8 @@ from src.brain.agent import TaskAgent
 from src.brain.perception import Perception
 from src.brain.policy import Policy
 from src.brain.reasoner import LLMReasoner
+from src.brain.skill_store import SkillStore
+from src.brain.skills import SkillLibrary
 from src.brain.tasks import TaskQueue
 from src.brain.task_store import TaskStore
 from src.config import load_settings
@@ -115,6 +117,8 @@ async def main() -> None:
     # Background task agent: delegate multi-step jobs (persisted so a
     # job survives an Alfred restart).
     task_store = TaskStore(_ROOT / "alfred_tasks.sqlite3")
+
+    skill_store = SkillStore(settings.skill_db_path)
     task_queue = TaskQueue(store=task_store)
 
     # --------------------------------------------------------------
@@ -179,6 +183,27 @@ async def main() -> None:
         surface="voice",
     )
     session.attach_policy(voice_policy)
+
+    # Skill library: verified task successes are distilled into replayable
+    # routines so repeat requests skip planning. Dangerous routines are
+    # confirmed out loud before being saved.
+    skill_library = SkillLibrary(
+        skill_store,
+        # voice surface: a skill counts as "dangerous" only if a step would
+        # need the user's OK even when they asked for it directly.
+        policy=Policy(
+            autonomy=settings.brain_autonomy,
+            known_tools=set(registry.names()),
+            surface="voice",
+        ),
+        embedder=providers.embedder,
+        enabled=settings.skills_enabled,
+    )
+    task_queue.attach_skills(skill_library)
+    print(
+        f"[Skills] {len(skill_store.all(include_disabled=True))} learned; "
+        f"library {'on' if settings.skills_enabled else 'off'}."
+    )
 
     session.add_background_task(resource_mode.run)
 
@@ -374,6 +399,7 @@ async def main() -> None:
             audit.close()
 
         task_store.close()
+        skill_store.close()
         store.close()
 
         instance_lock.release()

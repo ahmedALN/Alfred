@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from src.brain.agent import TaskAgent, TaskResult
+from src.brain.skills import SkillLibrary
 
 SpeakFn = Callable[[str], Awaitable[None]]
 
@@ -32,12 +33,18 @@ class TaskQueue:
     mouse/keyboard. Results are announced through the live session.
     """
 
-    def __init__(self, max_history: int = 50, store: Any = None) -> None:
+    def __init__(
+        self,
+        max_history: int = 50,
+        store: Any = None,
+        skills: SkillLibrary | None = None,
+    ) -> None:
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._records: dict[str, TaskRecord] = {}
         self._order: list[str] = []
         self._max_history = max_history
         self._store = store
+        self._skills: SkillLibrary | None = skills
         self._gate = asyncio.Event()
         self._gate.set()  # not paused
         self._cancel = threading.Event()
@@ -48,6 +55,9 @@ class TaskQueue:
         self._awaiting_confirm = False
         self._speak_fn: SpeakFn | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+
+    def attach_skills(self, skills: SkillLibrary) -> None:
+        self._skills = skills
 
     # ---- interrupt --------------------------------------------------
 
@@ -192,14 +202,47 @@ class TaskQueue:
             self._cancel.clear()
             self._persist(task_id, "running")
 
-            try:
-                result: TaskResult = await asyncio.to_thread(
-                    lambda r=record: agent.run(
-                        r.goal, get_session_id(),
-                        self._cancel_requested, _progress,
-                        source=r.source, ask_user=self._ask_user,
-                    )
+            def _plan_run(r=record):
+                return agent.run(
+                    r.goal, get_session_id(),
+                    self._cancel_requested, _progress,
+                    source=r.source, ask_user=self._ask_user,
                 )
+
+            try:
+                skill = None
+                if self._skills is not None and record.source == "voice":
+                    skill = await asyncio.to_thread(
+                        self._skills.match, record.goal
+                    )
+
+                if skill is not None:
+                    result: TaskResult = await asyncio.to_thread(
+                        lambda s=skill, r=record: agent.replay(
+                            s, r.goal, get_session_id(),
+                            self._cancel_requested, _progress,
+                            source=r.source, ask_user=self._ask_user,
+                        )
+                    )
+                    if result.status in ("done", "partial"):
+                        self._skills.reward(skill["id"])
+                    else:
+                        self._skills.penalize(skill["id"])
+                        _progress(
+                            "That saved routine didn't work - doing it the "
+                            "long way."
+                        )
+                        result = await asyncio.to_thread(_plan_run)
+                        await asyncio.to_thread(
+                            self._maybe_learn,
+                            record.goal, result, record.source,
+                        )
+                else:
+                    result = await asyncio.to_thread(_plan_run)
+                    await asyncio.to_thread(
+                        self._maybe_learn,
+                        record.goal, result, record.source,
+                    )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
@@ -217,6 +260,44 @@ class TaskQueue:
             self._persist(task_id, result.status, result.summary)
 
             await _safe_speak(speak, _announce(result))
+
+    def _maybe_learn(
+        self, goal: str, result: TaskResult, source: str
+    ) -> None:
+        """After a fully verified user-asked task, distil the tool sequence
+        into a replayable skill. Dangerous routines are confirmed first."""
+        if (
+            self._skills is None
+            or source != "voice"
+            or result.status != "done"
+        ):
+            return
+
+        trace = result.tool_trace()
+        if not trace:
+            return
+
+        try:
+            skill = self._skills.distill(
+                goal, trace,
+                verify="; ".join(result.verified) or goal,
+            )
+            if skill is None:
+                return
+            if self._skills.needs_confirmation(skill):
+                note = skill.get("danger_note") or "a risky step"
+                if not self._ask_user(
+                    f"Sir, this routine includes {note} - "
+                    "save it as a reusable skill?"
+                ):
+                    return
+            self._skills.save(skill)
+            print(
+                f"[Skills] learned '{skill['name']}' "
+                f"({len(skill['steps'])} steps, {skill['tier']})."
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Skills] could not distil a skill: {exc}")
 
     def _persist(self, task_id: str, status: str, summary: str = "") -> None:
         if self._store is not None:

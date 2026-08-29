@@ -1,18 +1,134 @@
 import asyncio
 
-from src.brain.agent import TaskResult
+from src.brain.agent import Step, TaskResult
 from src.brain.tasks import TaskQueue, _announce
 
 
 class FakeAgent:
-    def __init__(self, result: TaskResult):
+    def __init__(self, result: TaskResult, replay_result: TaskResult = None):
         self._result = result
+        self._replay_result = replay_result
         self.calls = []
+        self.replays = []
 
     def run(self, goal, session_id=None, cancel_check=None, on_progress=None,
             *, source="brain", ask_user=None):
         self.calls.append(goal)
         return self._result
+
+    def replay(self, skill, request, session_id=None, cancel_check=None,
+               on_progress=None, *, source="voice", ask_user=None):
+        self.replays.append((skill["id"], request))
+        return self._replay_result or self._result
+
+
+class FakeSkills:
+    def __init__(self, skill=None):
+        self._skill = skill
+        self.rewarded = []
+        self.penalized = []
+        self.learned = []
+
+    def match(self, goal):
+        return self._skill
+
+    def reward(self, skill_id):
+        self.rewarded.append(skill_id)
+
+    def penalize(self, skill_id):
+        self.penalized.append(skill_id)
+
+    def distill(self, goal, trace, verify=""):
+        skill = {"id": "new", "name": "learned", "steps": trace,
+                 "tier": "ordinary", "danger_note": ""}
+        return skill
+
+    def needs_confirmation(self, skill):
+        return False
+
+    def save(self, skill):
+        self.learned.append(skill)
+
+
+def _run_worker(q, agent, tid, timeout=50):
+    async def scenario():
+        async def speak(_text):
+            pass
+
+        worker = asyncio.create_task(q.run(agent, speak, lambda: "sess"))
+        for _ in range(timeout):
+            await asyncio.sleep(0.01)
+            rec = q.record(tid)
+            if rec and rec.status not in ("queued", "running"):
+                break
+        worker.cancel()
+        try:
+            await worker
+        except asyncio.CancelledError:
+            pass
+        return q.record(tid)
+
+    return asyncio.run(scenario())
+
+
+def test_matching_skill_is_replayed_not_planned():
+    q = TaskQueue()
+    skills = FakeSkills(skill={"id": "s1"})
+    q.attach_skills(skills)
+    agent = FakeAgent(
+        TaskResult(goal="g", status="done", summary="planned"),
+        replay_result=TaskResult(goal="g", status="done", summary="replayed"),
+    )
+    tid = q.submit("play drake on spotify", source="voice")
+    rec = _run_worker(q, agent, tid)
+
+    assert rec.summary == "replayed"
+    assert agent.replays == [("s1", "play drake on spotify")]
+    assert agent.calls == []           # planner never ran
+    assert skills.rewarded == ["s1"]
+
+
+def test_failed_replay_falls_back_to_planning():
+    q = TaskQueue()
+    skills = FakeSkills(skill={"id": "s1"})
+    q.attach_skills(skills)
+    agent = FakeAgent(
+        TaskResult(goal="g", status="done", summary="planned"),
+        replay_result=TaskResult(goal="g", status="failed", summary="nope"),
+    )
+    tid = q.submit("play drake on spotify", source="voice")
+    rec = _run_worker(q, agent, tid)
+
+    assert rec.summary == "planned"
+    assert skills.penalized == ["s1"]
+    assert agent.calls == ["play drake on spotify"]
+
+
+def test_verified_voice_task_is_distilled_into_a_skill():
+    q = TaskQueue()
+    skills = FakeSkills(skill=None)
+    q.attach_skills(skills)
+    result = TaskResult(goal="g", status="done", summary="done")
+    result.steps.append(
+        Step(1, "", "open_app", {"name": "spotify"}, "auto",
+             {"status": "ok"}, True)
+    )
+    agent = FakeAgent(result)
+    tid = q.submit("open spotify", source="voice")
+    _run_worker(q, agent, tid)
+
+    assert skills.learned and skills.learned[0]["name"] == "learned"
+
+
+def test_brain_task_is_not_distilled():
+    q = TaskQueue()
+    skills = FakeSkills(skill=None)
+    q.attach_skills(skills)
+    agent = FakeAgent(TaskResult(goal="g", status="done", summary="done"))
+    tid = q.submit("tidy things", source="brain")
+    _run_worker(q, agent, tid)
+
+    assert skills.learned == []
 
 
 def test_submit_creates_queued_record():

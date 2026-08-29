@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from src.ai.providers.base import ChatProvider
 from src.brain.policy import Policy
+from src.brain.skills import align, apply_params
 from src.brain.types import Proposal, ProposalKind, Verdict
 from src.tools.registry import ToolRegistry
 
@@ -91,6 +92,15 @@ class TaskResult:
             "skipped_confirmations": self.skipped_confirmations,
             "elapsed_seconds": round(self.elapsed_seconds, 1),
         }
+
+    def tool_trace(self) -> list[tuple[str, dict[str, Any]]]:
+        """The tool calls that actually ran and succeeded, in order -
+        the raw material for distilling a reusable skill."""
+        return [
+            (s.tool, s.args)
+            for s in self.steps
+            if s.ok and s.verdict == "auto" and s.tool
+        ]
 
 
 class TaskAgent:
@@ -242,6 +252,89 @@ class TaskAgent:
         result.elapsed_seconds = time.monotonic() - started
         self._finalize(result)
         self._log("task_end", result.as_dict(), session_id)
+        return result
+
+    # ----------------------------------------------------------------
+
+    def replay(
+        self,
+        skill: dict[str, Any],
+        request: str,
+        session_id: str | None = None,
+        cancel_check: "Callable[[], bool] | None" = None,
+        on_progress: "Callable[[str], None] | None" = None,
+        *,
+        source: str = "voice",
+        ask_user: "Callable[[str], bool] | None" = None,
+    ) -> TaskResult:
+        """Run a learned skill's steps directly - no planning call. Params
+        are filled from ``request``; the skill's ``verify`` is still checked
+        so a stale skill can't lie."""
+
+        goal = request.strip()
+        started = time.monotonic()
+        self._deadline = started + self._max_seconds
+        self._cancel_check = cancel_check or (lambda: False)
+        self._policy = (
+            self._policy_voice if source == "voice" else self._policy_brain
+        )
+        self._ask_user = ask_user
+
+        done_when = str(skill.get("verify") or goal)
+        result = TaskResult(goal=goal, status="failed", summary="")
+        result.plan = [done_when]
+
+        values = align(str(skill.get("template", "")), goal) or {}
+        missing = [p for p in skill.get("params", []) if p not in values]
+        if missing:
+            result.unverified.append(
+                f"{done_when} (couldn't read {', '.join(missing)} from '{goal}')"
+            )
+            result.elapsed_seconds = time.monotonic() - started
+            self._finalize(result)
+            self._log("skill_replay", result.as_dict(), session_id)
+            return result
+
+        steps = apply_params(list(skill.get("steps", [])), values)
+        history: list[str] = []
+        if on_progress is not None:
+            on_progress(f"Doing '{goal}' from a saved routine.")
+
+        for i, st in enumerate(steps, 1):
+            if self._cancel_check():
+                result.status = "cancelled"
+                break
+            if time.monotonic() > self._deadline:
+                result.status = "exhausted"
+                break
+            decision = {
+                "tool": st.get("tool"),
+                "args": st.get("args", {}),
+                "rationale": f"replay step {i} of '{skill.get('name', 'skill')}'",
+            }
+            step = self._run_tool_step(
+                len(result.steps) + 1, decision, history, result, session_id
+            )
+            result.steps.append(step)
+
+        progressed = any(s.ok for s in result.steps)
+
+        if result.status not in ("cancelled", "exhausted"):
+            if not progressed:
+                result.unverified.append(f"{done_when} (skill ran no actions)")
+            else:
+                ok, evidence = self._verify(
+                    {"step": skill.get("name", goal), "done_when": done_when},
+                    history,
+                )
+                if ok:
+                    result.verified.append(done_when)
+                else:
+                    result.unverified.append(f"{done_when} ({evidence})")
+
+        result.elapsed_seconds = time.monotonic() - started
+        self._finalize(result)
+        self._log("skill_replay", result.as_dict(), session_id)
         return result
 
     # ----------------------------------------------------------------

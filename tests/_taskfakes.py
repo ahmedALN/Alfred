@@ -81,16 +81,22 @@ class FakeRegistry:
         return [
             {"name": "ui_control", "description": "read/click app controls"},
             {"name": "desktop_control", "description": "see and click"},
+            {"name": "open_app", "description": "launch an app"},
             {"name": "system_info", "description": "read system"},
             {"name": "powershell", "description": "run powershell"},
         ]
 
     def names(self) -> list[str]:
-        return ["ui_control", "desktop_control", "system_info", "powershell"]
+        return [
+            "ui_control", "desktop_control", "open_app",
+            "system_info", "powershell",
+        ]
 
     def execute(self, name: str, args: dict[str, Any]) -> Any:
         self.executed.append((name, args))
         return self.results.get(name, {"status": "success"})
 
 
-KNOWN = {"ui_control", "desktop_control", "system_info", "powershell"}
+KNOWN = {
+    "ui_control", "desktop_control", "open_app", "system_info", "powershell",
+}
