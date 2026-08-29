@@ -85,26 +85,51 @@ class ChildSessionClient:
             GENERIC_WRITE = 0x40000000
             OPEN_EXISTING = 3
 
-            handle = CreateFileW(
-                self.PIPE_NAME,
-                GENERIC_READ | GENERIC_WRITE,
-                0,
-                None,
-                OPEN_EXISTING,
-                0,
-                None,
-            )
+            ERROR_FILE_NOT_FOUND = 2
+            ERROR_PIPE_BUSY = 231
 
-            invalid_handle = (
-                ctypes.c_void_p(-1).value
-            )
+            WaitNamedPipeW = kernel32.WaitNamedPipeW
+            WaitNamedPipeW.argtypes = [
+                ctypes.c_wchar_p,
+                ctypes.c_uint32,
+            ]
+            WaitNamedPipeW.restype = ctypes.c_bool
 
-            if (
-                handle is None
-                or handle == invalid_handle
-            ):
+            invalid_handle = ctypes.c_void_p(-1).value
+
+            import time as _time
+
+            handle = None
+            error = 0
+            deadline = _time.monotonic() + 5.0
+
+            while _time.monotonic() < deadline:
+                handle = CreateFileW(
+                    self.PIPE_NAME,
+                    GENERIC_READ | GENERIC_WRITE,
+                    0,
+                    None,
+                    OPEN_EXISTING,
+                    0,
+                    None,
+                )
+
+                if handle and handle != invalid_handle:
+                    break
+
                 error = ctypes.get_last_error()
 
+                if error == ERROR_PIPE_BUSY:
+                    WaitNamedPipeW(self.PIPE_NAME, 2000)
+                    continue
+
+                if error == ERROR_FILE_NOT_FOUND:
+                    _time.sleep(0.3)
+                    continue
+
+                break
+
+            if not handle or handle == invalid_handle:
                 raise ChildSessionError(
                     "Could not connect to ChildInputAgent.\n"
                     "Make sure ChildInputAgent is running "

@@ -16,6 +16,7 @@ from src.config import load_settings
 from src.memory.learner import MemoryLearner
 from src.memory.store import MemoryStore
 from src.tools.computer_screenshot import ComputerScreenshotTool
+from src.tools.desktop_control import DesktopControlTool
 from src.tools.memory_tools import RecallTool, RememberTool
 from src.tools.network_info import NetworkInfoTool
 from src.tools.open_app import OpenAppTool
@@ -23,6 +24,7 @@ from src.tools.powershell import PowerShellTool
 from src.tools.registry import ToolRegistry
 from src.tools.system_info import SystemInfoTool
 from src.windows.child_session import ChildSessionClient
+from src.windows.child_session.bootstrap import ensure_agent_running
 
 
 async def main() -> None:
@@ -62,9 +64,18 @@ async def main() -> None:
     remember_tool = RememberTool(learner)
     recall_tool = RecallTool(learner)
 
+    # Desktop Alfred controls: try to bring up the input/capture agent.
+    agent_status = ensure_agent_running()
+    print(f"[Desktop] ChildInputAgent: {agent_status}")
+
     child_session_client = ChildSessionClient()
 
     screenshot_tool = ComputerScreenshotTool(
+        child_session_client,
+        vision=providers.vision,
+    )
+
+    desktop_control_tool = DesktopControlTool(
         child_session_client,
         vision=providers.vision,
     )
@@ -73,6 +84,7 @@ async def main() -> None:
         powershell_tool,
         open_app_tool,
         screenshot_tool,
+        desktop_control_tool,
         system_info_tool,
         network_info_tool,
         remember_tool,
