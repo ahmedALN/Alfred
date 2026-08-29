@@ -69,8 +69,11 @@ _CANCEL_TASK = re.compile(
     re.I,
 )
 _GOAL = re.compile(
-    r"\b(?:i'?m (?:trying|working) (?:to|on)|i want to|help me|"
-    r"i need to|my goal is to|i'?m going to)\s+(.{4,140})",
+    r"\b(?:i'?m (?:trying|working) (?:to|on)|my goal is to|"
+    r"help me (?:to )?(?:set up|build|configure|install|create|fix|make|"
+    r"write|automate|migrate|clean up|organi[sz]e)|"
+    r"i'?m (?:going to|about to) (?:set up|build|configure|install|"
+    r"create|migrate))\s+(.{4,140})",
     re.I,
 )
 _GOAL_DONE = re.compile(

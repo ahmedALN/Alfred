@@ -62,10 +62,19 @@ Game mode also auto-engages when a fullscreen game holds the foreground
 ```bash
 python -m src.status                 # running? memory, brain + Gemini usage today
 python -m src.memory_cli list        # what it remembers  (search / forget / edit / dedupe / export)
+python -m src.skills list            # learned routines  (show / forget / disable / enable)
+python -m src.episodes recent        # what it actually did lately  (search / prune)
 python -m src.autostart install      # start at login via the watchdog (uninstall / status)
 python -m src.watchdog               # run Alfred with crash-restart supervision
 python -m src.voice.setup_wakeword   # download the model for a custom wake phrase
 ```
+
+**Getting faster:** after Alfred finishes and *verifies* a task you asked for, it
+distils the exact tool sequence into a **skill** — the same request next time
+skips planning and just runs (`play a {artist} song on Spotify` learned once,
+replays for any artist). Risky routines are confirmed out loud before being
+saved. It also reports only what it could verify — never "done" for a step it
+couldn't confirm.
 
 Logs: `logs/alfred.log`. Brain activity: `alfred_brain_audit.jsonl`.
 
