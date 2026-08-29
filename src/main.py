@@ -30,6 +30,7 @@ from src.tools.open_app import OpenAppTool
 from src.tools.powershell import PowerShellTool
 from src.tools.registry import ToolRegistry
 from src.tools.system_info import SystemInfoTool
+from src.singleton import AlreadyRunning, SingleInstance
 from src.tools.task_tool import RunTaskTool, TaskStatusTool
 from src.windows.child_session import ChildSessionClient
 from src.windows.child_session.bootstrap import ensure_agent_running
@@ -37,6 +38,14 @@ from src.windows.child_session.bootstrap import ensure_agent_running
 
 async def main() -> None:
     settings = load_settings()
+
+    # One Alfred at a time - two voice sessions = two voices.
+    instance_lock = SingleInstance()
+    try:
+        instance_lock.acquire()
+    except AlreadyRunning as exc:
+        print(f"\n{exc}\n")
+        return
 
     # --------------------------------------------------------------
     # Long-term memory: persists across every future run of Alfred.
@@ -245,6 +254,8 @@ async def main() -> None:
             audit.close()
 
         store.close()
+
+        instance_lock.release()
 
 
 if __name__ == "__main__":
