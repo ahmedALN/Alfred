@@ -8,12 +8,14 @@ from src.ai.providers.base import ChatProvider, ProviderError
 
 class FallbackChatProvider(ChatProvider):
     """
-    An ordered chain of chat providers. Uses the first that works; when
-    it errors (rate limit, quota, network, bad response) it moves to the
-    next and sticks there, retrying the primary again after a cooldown.
+    An ordered chain of chat providers. Uses the earliest one that works;
+    a provider that errors (rate limit, quota, network, bad response) is
+    put on a per-provider cooldown and skipped until it expires, so a
+    persistently-down rung (e.g. an unentitled NVIDIA key) doesn't cost a
+    failed round-trip on every call.
 
-    Built for: NVIDIA Nemotron (free, credit-limited) -> Gemini flash ->
-    local qwen, so planning keeps working when the good model runs out.
+    Built for: NVIDIA Nemotron -> Gemini flash -> Gemini flash-lite ->
+    local qwen, so planning keeps working when the good models are down.
     """
 
     def __init__(
@@ -30,7 +32,8 @@ class FallbackChatProvider(ChatProvider):
         self._retry_after = retry_primary_after
         self._monotonic = monotonic
         self._active = 0
-        self._primary_failed_at = 0.0
+        # index -> monotonic time the provider is on cooldown until
+        self._cooldown_until: dict[int, float] = {}
 
         self.name = "chain(" + ">".join(
             f"{p.name}:{getattr(p, 'model', '?')}" for p in self._providers
@@ -52,17 +55,15 @@ class FallbackChatProvider(ChatProvider):
         temperature: float = 0.4,
         max_tokens: int | None = None,
     ) -> str:
-        # Enough time passed since the primary failed -> give it another go.
-        if (
-            self._active > 0
-            and self._monotonic() - self._primary_failed_at > self._retry_after
-        ):
-            self._active = 0
-
+        now = self._monotonic()
         errors: list[str] = []
+        tried = False
 
-        for i in range(self._active, len(self._providers)):
-            provider = self._providers[i]
+        for i, provider in enumerate(self._providers):
+            if self._cooldown_until.get(i, 0.0) > now:
+                continue  # still cooling down from a recent failure
+
+            tried = True
             try:
                 out = provider.generate(
                     prompt, system=system, temperature=temperature,
@@ -70,16 +71,30 @@ class FallbackChatProvider(ChatProvider):
                 )
                 if out and out.strip():
                     if i != self._active:
-                        print(f"[Plan] using {provider.name} (fell back from index {self._active})")
+                        print(
+                            f"[Plan] now using {provider.name}:"
+                            f"{getattr(provider, 'model', '?')}"
+                        )
                         self._active = i
                     return out
                 errors.append(f"{provider.name}: empty response")
+                self._cooldown_until[i] = now + 60.0
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{provider.name}: {exc}")
+                self._cooldown_until[i] = now + self._retry_after
                 self._record_failover(provider.name)
 
-            if i == 0:
-                self._primary_failed_at = self._monotonic()
+        if not tried:
+            # Everything is cooling down - clear the cooldowns and try the
+            # last provider (usually the always-available local model).
+            self._cooldown_until.clear()
+            try:
+                return self._providers[-1].generate(
+                    prompt, system=system, temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{self._providers[-1].name}: {exc}")
 
         raise ProviderError(
             "every plan provider failed - " + " | ".join(errors)

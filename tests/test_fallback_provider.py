@@ -82,3 +82,38 @@ def test_empty_answer_is_treated_as_failure():
 def test_needs_at_least_one_provider():
     with pytest.raises(ProviderError):
         FallbackChatProvider([])
+
+
+def test_dead_rung_is_skipped_on_the_next_call():
+    clk = Clock()
+    a = P("a", error=ProviderError("403 forbidden"))
+    b = P("b", "from b")
+    chain = FallbackChatProvider([a, b], retry_primary_after=600, monotonic=clk)
+
+    assert chain.generate("x") == "from b"
+    assert a.calls == 1
+    clk.t = 5
+    assert chain.generate("x") == "from b"
+    assert a.calls == 1  # not retried - still on cooldown
+
+
+def test_everything_cooling_down_falls_back_to_last():
+    clk = Clock()
+    a = P("a", error=ProviderError("down"))
+    b = P("b", error=ProviderError("down"))
+    c = P("c", "local model")
+    chain = FallbackChatProvider([a, b, c], retry_primary_after=600, monotonic=clk)
+
+    assert chain.generate("x") == "local model"
+    # a and b cooled down; c is fine. next call skips a and b, hits c.
+    a.calls = b.calls = c.calls = 0
+    clk.t = 10
+    # force c onto cooldown too
+    c._error = ProviderError("blip")
+    with pytest.raises(ProviderError):
+        chain.generate("x")
+    # now everything is cooling; recovery path clears cooldowns and tries last
+    c._error = None
+    c._answer = "recovered"
+    clk.t = 20
+    assert chain.generate("x") == "recovered"

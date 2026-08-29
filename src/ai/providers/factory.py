@@ -171,6 +171,11 @@ def build_plan_chat(
                 chain.append(
                     GeminiChatProvider(gemini_client, settings.gemini_text_model)
                 )
+                # A lighter, less-contended rung: flash-latest often 503s
+                # under load while flash-lite stays up.
+                lite = "gemini-flash-lite-latest"
+                if settings.gemini_text_model != lite:
+                    chain.append(GeminiChatProvider(gemini_client, lite))
             elif name == "ollama":
                 model = settings.ai_chat_model or _DEFAULT_MODELS[("ollama", "chat")]
                 chain.append(OllamaChatProvider(model, settings.ollama_base_url))

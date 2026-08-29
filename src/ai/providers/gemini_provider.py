@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from google.genai import types
@@ -11,6 +12,15 @@ from src.ai.providers.base import (
     VisionProvider,
 )
 from src.usage import USAGE, record_response
+
+# Transient Gemini failures worth one quick retry before failing over.
+_RETRYABLE_HINTS = ("503", "unavailable", "429", "resource_exhausted",
+                    "high demand", "overloaded", "500", "internal")
+
+
+def _is_retryable(exc: Exception) -> bool:
+    t = f"{exc}".lower()
+    return any(h in t for h in _RETRYABLE_HINTS)
 
 
 class GeminiChatProvider(ChatProvider):
@@ -34,17 +44,24 @@ class GeminiChatProvider(ChatProvider):
             max_output_tokens=max_tokens,
         )
 
-        try:
-            response = self._client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config=config,
-            )
-        except Exception as exc:  # noqa: BLE001
-            raise ProviderError(f"Gemini generate_content failed: {exc}") from exc
+        last: Exception | None = None
+        for attempt in range(3):
+            try:
+                response = self._client.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                    config=config,
+                )
+                record_response(response)
+                return (getattr(response, "text", None) or "").strip()
+            except Exception as exc:  # noqa: BLE001
+                last = exc
+                if attempt < 2 and _is_retryable(exc):
+                    time.sleep(2.0 * (attempt + 1))
+                    continue
+                break
 
-        record_response(response)
-        return (getattr(response, "text", None) or "").strip()
+        raise ProviderError(f"Gemini generate_content failed: {last}") from last
 
 
 class GeminiEmbeddingProvider(EmbeddingProvider):
