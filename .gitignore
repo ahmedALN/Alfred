@@ -19,7 +19,14 @@ screenshots/
 recordings/
 
 *.sqlite
+*.sqlite3
 *.db
+
+# Alfred runtime state
+alfred_memory.sqlite3
+alfred_brain_audit.sqlite3
+alfred_brain_audit.jsonl
+*.jsonl
 
 .idea/
 src/windows/native/ChildScreenCapture/child-capture.png
