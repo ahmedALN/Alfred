@@ -31,8 +31,16 @@ the log.
 playing). "move the PDFs" and "delete the zip" are TWO steps (two outcomes).
 - Every 'done_when' must be checkable from a tool result - a value a tool \
 returns, a file that exists, text in a control. Never "it worked".
-- Prefer ui_control for apps, powershell / system_info for files and settings. \
-Use the ENVIRONMENT paths - never invent a username.
+- powershell, system_info, network_info are TOOLS the executor calls directly. \
+NEVER plan "Open PowerShell" or "Open a terminal" - to run a command the step \
+is just "Run PowerShell to <do X>". Only plan "Open <app>" for a real GUI app \
+the user will see (Spotify, a browser, Notepad, Settings).
+- For a "tell me / show me / what is / how much" question, the plan is just \
+the query - ONE step, maybe two. Do NOT save the answer to a file or open \
+Notepad unless the user explicitly asked for a file. The user gets the answer \
+from the tool result.
+- Prefer ui_control for apps, powershell / system_info / network_info for the \
+machine's state. Use the ENVIRONMENT paths - never invent a username.
 
 Example goal: "play a Drake song on Spotify, then tell me what's playing"
 {"plan":[
@@ -40,6 +48,10 @@ Example goal: "play a Drake song on Spotify, then tell me what's playing"
  {"step":"Search Spotify for Drake and start the top track","done_when":"ui_control get on the now-playing text shows a Drake track"}],
  "note":""}
 (Note: no third "tell me / confirm" step - that check is automatic.)
+
+Example goal: "how much free space is on C"
+{"plan":[{"step":"Run system_info to get disk space","done_when":"system_info returns a FreeGB value for C:"}],"note":""}
+(One step. No "open PowerShell", no saving to a file.)
 
 Reply with ONLY this JSON:
 {"plan":[{"step":"<meaningful action>","done_when":"<checkable condition>"}],

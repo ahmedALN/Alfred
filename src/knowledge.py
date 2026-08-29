@@ -152,8 +152,10 @@ WINDOWS_PLAYBOOK: list[tuple[str, str]] = [
      "Get-Process | Sort WS -Descending | Select -First 10 Name, "
      "@{N='RAM_MB';E={[int]($_.WS/1MB)}}, CPU."),
     ("system", "Recent errors: Get-WinEvent -FilterHashtable "
-     "@{LogName='System'; Level=1,2; StartTime=(Get-Date).AddHours(-24)} | "
-     "Select -First 20 TimeCreated, Id, Message."),
+     "@{LogName='System'; Level=2; StartTime=(Get-Date).AddHours(-24)} | "
+     "Select -First 20 TimeCreated, Id, Message. Level 1=Critical, "
+     "2=Error, 3=Warning. FilterHashtable Level takes ONE integer - for "
+     "several levels pipe to Where-Object { $_.Level -in 1,2 } instead."),
 
     # --- window / desktop management --------------------------
     ("system", "Alfred's own apps live on virtual desktop 2 so they don't "

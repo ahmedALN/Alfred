@@ -413,7 +413,12 @@ class AppLauncher:
             actual = int(result.get("actual_desktop", current))
             return actual == target_desktop, actual
         except Exception as exc:  # noqa: BLE001
-            print(f"[Apps] could not move window: {exc}")
+            # Windows won't let us move a window owned by another process
+            # onto another virtual desktop (E_ACCESSDENIED). Common and
+            # harmless - the app is still open, just on this desktop.
+            if not getattr(self, "_move_warned", False):
+                print(f"[Apps] windows stay on this desktop ({exc})")
+                self._move_warned = True
             return False, None
 
     # ================================================================
