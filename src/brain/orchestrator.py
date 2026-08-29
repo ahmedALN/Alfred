@@ -120,6 +120,17 @@ class BrainLoop:
     # Public runtime
     # ================================================================
 
+    @property
+    def is_paused(self) -> bool:
+        return self._paused
+
+    def set_paused(self, value: bool) -> None:
+        self._paused = bool(value)
+        self._audit.record(
+            "tick",
+            {"note": f"brain {'paused' if value else 'resumed'} (tray)"},
+        )
+
     async def run(self) -> None:
         # Small stagger so the brain's first tick doesn't collide with
         # the startup greeting.

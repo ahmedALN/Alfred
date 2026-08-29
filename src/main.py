@@ -185,6 +185,28 @@ async def main() -> None:
     else:
         print("[Brain] disabled.")
 
+    # --------------------------------------------------------------
+    # System tray presence (pause/resume awareness, open logs, quit).
+    # --------------------------------------------------------------
+    tray = None
+
+    if settings.tray_enabled:
+        from pathlib import Path
+
+        from src.tray import TrayIcon
+
+        tray = TrayIcon(
+            is_brain_paused=(
+                (lambda: brain.is_paused) if brain is not None else (lambda: False)
+            ),
+            set_brain_paused=(
+                brain.set_paused if brain is not None else (lambda _v: None)
+            ),
+            logs_dir=Path(settings.brain_audit_path).resolve().parent,
+            tooltip=f"{settings.alfred_name} — running",
+        )
+        tray.start()
+
     try:
         await session.connect()
 
@@ -205,6 +227,9 @@ async def main() -> None:
         )
 
     finally:
+        if tray is not None:
+            tray.stop()
+
         await session.close()
 
         child_session_client.close()

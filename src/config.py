@@ -39,6 +39,7 @@ class Settings:
     brain_quiet_hours: str | None
     brain_heartbeat_ticks: int
     brain_audit_path: str
+    tray_enabled: bool
 
 
 def _get_bool(name: str, default: bool) -> bool:
@@ -117,6 +118,7 @@ def load_settings() -> Settings:
             "ALFRED_BRAIN_AUDIT_DB",
             "alfred_brain_audit.sqlite3",
         ),
+        tray_enabled=_get_bool("ALFRED_TRAY_ENABLED", True),
         ai_provider=os.getenv("ALFRED_AI_PROVIDER", "gemini").strip().lower()
         or "gemini",
         ai_chat_provider=_opt("ALFRED_AI_CHAT_PROVIDER"),
