@@ -4,9 +4,15 @@ sounddevice>=0.4.6
 numpy>=1.24
 python-dotenv>=1.0.1
 
-# Wake word ("Hey Alfred" / "Hey Jarvis")
+# Wake word: openWakeWord ("hey jarvis" + custom .onnx),
+# Vosk (custom phrase, no training)
 openwakeword>=0.6.0
 onnxruntime>=1.16
+vosk>=0.3.45
+
+# Local voice fallback when the Gemini quota is hit
+faster-whisper>=1.0
+piper-tts>=1.2
 
 # Windows desktop control (Windows-only)
 psutil>=5.9.8

@@ -190,6 +190,7 @@ async def main() -> None:
         if settings.wake_enabled:
             wake_listener = WakeListener(
                 on_detect=_woken,
+                phrase=settings.wake_phrase or None,
                 model_path=settings.wake_model or None,
                 threshold=settings.wake_threshold,
             )

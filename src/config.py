@@ -44,6 +44,7 @@ class Settings:
 
     # --- Activation: wake word / hotkey / conversation window ---
     wake_enabled: bool
+    wake_phrase: str
     wake_model: str
     wake_threshold: float
     hotkey: str
@@ -139,6 +140,7 @@ def load_settings() -> Settings:
         ),
         tray_enabled=_get_bool("ALFRED_TRAY_ENABLED", True),
         wake_enabled=_get_bool("ALFRED_WAKE_ENABLED", True),
+        wake_phrase=os.getenv("ALFRED_WAKE_PHRASE", "").strip().lower(),
         wake_model=os.getenv("ALFRED_WAKE_MODEL", "").strip(),
         wake_threshold=_get_float("ALFRED_WAKE_THRESHOLD", 0.5),
         hotkey=os.getenv("ALFRED_HOTKEY", "ctrl+alt+k").strip().lower(),
