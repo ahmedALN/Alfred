@@ -205,8 +205,12 @@ class MemoryLearner:
             return None
 
     def recall(self, query: str, top_k: int = 5) -> list[Fact]:
-        query_embedding = self._embed(query)
         facts = self._store.all_facts()
+
+        if not facts:
+            return []
+
+        query_embedding = self._embed(query)
 
         if query_embedding is None:
             return facts[:top_k]
