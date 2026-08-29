@@ -3,7 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from src.brain.reasoner import Reasoner
-from src.brain.types import DeliberationContext, Notable, Proposal
+from src.brain.types import (
+    DeliberationContext,
+    Notable,
+    Proposal,
+    ProposalKind,
+)
 from src.memory.learner import MemoryLearner
 from src.memory.store import MemoryStore
 
@@ -11,6 +16,25 @@ from src.memory.store import MemoryStore
 # proactively raising this topic". They are surfaced to the reasoner as
 # hard suppressions and also checked by policy.
 SUPPRESS_PREFIX = "SUPPRESS:"
+
+
+_STOPWORDS = {
+    "the", "a", "an", "is", "of", "on", "at", "and", "to", "in", "was",
+    "now", "has", "your", "you", "it", "for", "with", "that", "this",
+}
+
+
+def _keywords(text: str) -> set[str]:
+    return {
+        w.strip(".,:;()%")
+        for w in text.lower().split()
+        if len(w) > 3 and w not in _STOPWORDS
+    }
+
+
+def _shares_keywords(a: str, b: str) -> bool:
+    ka, kb = _keywords(a), _keywords(b)
+    return bool(ka and kb and (ka & kb))
 
 
 def collect_suppressions(store: MemoryStore) -> list[str]:
@@ -102,5 +126,37 @@ class Deliberator:
                 continue
 
             kept.append(proposal)
+
+        # Safety net: a small local model often just returns []. Make
+        # sure anything the perception layer flagged as warn/critical is
+        # still voiced, unless the user suppressed that topic or the
+        # reasoner already covered it.
+        spoken_text = " ".join(
+            f"{p.message} {p.rationale}" for p in kept
+        ).lower()
+
+        for notable in notables:
+            if notable.severity not in ("warn", "critical"):
+                continue
+
+            summary_l = notable.summary.lower()
+
+            if any(topic in summary_l for topic in suppressed if topic):
+                continue
+
+            key_hint = notable.key.split(".")[0].lower()
+            if key_hint and key_hint in spoken_text:
+                continue
+            if _shares_keywords(summary_l, spoken_text):
+                continue
+
+            kept.append(
+                Proposal(
+                    kind=ProposalKind.SPEAK,
+                    message=notable.summary,
+                    rationale="flagged by perception; reasoner was silent",
+                    urgency="high" if notable.severity == "critical" else "normal",
+                )
+            )
 
         return kept

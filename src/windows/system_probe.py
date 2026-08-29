@@ -236,9 +236,13 @@ def foreground_app() -> str | None:
 
 def is_fullscreen_foreground() -> bool:
     """
-    True when the foreground window covers an entire monitor and is
-    not the desktop or shell. Used to suppress proactive speech during
-    video / games / presentations.
+    True only when the foreground window is a real borderless fullscreen
+    surface (video, game, slideshow) - NOT merely maximised. Used to
+    hold back proactive speech.
+
+    A maximised window covers the monitor's work area but keeps its
+    caption/frame styles and leaves the taskbar visible; a true
+    fullscreen window drops those styles and covers the taskbar too.
     """
 
     try:
@@ -253,17 +257,26 @@ def is_fullscreen_foreground() -> bool:
 
         class_name = win32gui.GetClassName(hwnd)
 
-        if class_name in {"Progman", "WorkerW", "Shell_TrayWnd"}:
+        if class_name in {"Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"}:
+            return False
+
+        style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+
+        # Maximised, or has a title bar / sizing border -> it's a normal
+        # window, not fullscreen, regardless of how big it is.
+        if style & win32con.WS_MAXIMIZE:
+            return False
+        if style & (win32con.WS_CAPTION | win32con.WS_THICKFRAME):
             return False
 
         left, top, right, bottom = win32gui.GetWindowRect(hwnd)
 
         monitor = win32api.MonitorFromWindow(
-            hwnd,
-            win32con.MONITOR_DEFAULTTONEAREST,
+            hwnd, win32con.MONITOR_DEFAULTTONEAREST
         )
-
         info = win32api.GetMonitorInfo(monitor)
+        # Compare against the FULL monitor bounds (not the work area):
+        # a fullscreen surface covers the taskbar.
         m_left, m_top, m_right, m_bottom = info["Monitor"]
 
         return (

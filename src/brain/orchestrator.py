@@ -202,6 +202,19 @@ class BrainLoop:
             self._deliberator.deliberate, notables, session_id
         )
 
+        self._audit.record(
+            "deliberation",
+            {
+                "dnd": dnd,
+                "proposals": [
+                    {"kind": p.kind.value, "message": p.message,
+                     "urgency": p.urgency}
+                    for p in proposals
+                ],
+            },
+            session_id,
+        )
+
         for proposal in proposals:
             await self._handle_proposal(proposal, session_id, dnd)
 
