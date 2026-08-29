@@ -488,6 +488,10 @@ class TaskAgent:
         if len(steps) > 8:
             self._plan_gripe = "too many steps"
             return False
+        norm = [" ".join(s["step"].lower().split()) for s in steps]
+        if len(set(norm)) < len(norm):
+            self._plan_gripe = "the plan repeats a step - each step must be distinct"
+            return False
         for s in steps:
             text = s["step"]
             # identifier-like ("search_spotify_top_track") or one bare word

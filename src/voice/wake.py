@@ -59,10 +59,25 @@ class WakeListener:
             print(f"[Wake] disabled (missing dependency): {exc}")
             return False
 
-        target = self._run_vosk if self._phrase else self._run_oww
+        inner = self._run_vosk if self._phrase else self._run_oww
+
+        def _supervised() -> None:
+            # A dropped audio device or a transient stream error must not
+            # silently kill the wake word for the rest of the session.
+            backoff = 3.0
+            while not self._stop.is_set():
+                try:
+                    inner()
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[Wake] listener crashed: {exc}")
+                if self._stop.is_set():
+                    return
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 30.0)
+                print("[Wake] restarting listener...")
 
         self._thread = threading.Thread(
-            target=target, name="alfred-wake", daemon=True
+            target=_supervised, name="alfred-wake", daemon=True
         )
         self._thread.start()
         return True
