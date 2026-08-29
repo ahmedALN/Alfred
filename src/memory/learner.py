@@ -154,7 +154,20 @@ class MemoryLearner:
     # Recall
     # ----------------------------------------------------------------
 
-    def recall_context(self, max_facts: int = 12) -> str:
+    def core_fact_ids(self, max_facts: int = 6) -> set[int]:
+        """Ids of the always-on facts injected at connect time."""
+
+        facts = self._store.all_facts()
+
+        ranked = sorted(
+            facts,
+            key=lambda f: (f.times_reinforced, f.confidence, f.updated_at),
+            reverse=True,
+        )[:max_facts]
+
+        return {f.id for f in ranked}
+
+    def recall_context(self, max_facts: int = 6) -> str:
         """
         Build the block of remembered facts to inject into the
         system prompt. Falls back to the most recently reinforced

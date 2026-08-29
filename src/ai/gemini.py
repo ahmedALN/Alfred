@@ -3,6 +3,7 @@
 import asyncio
 import queue
 import threading
+import time
 import uuid
 from typing import Any
 
@@ -65,6 +66,11 @@ class AlfredLiveSession:
         # Partial input-transcription fragments for the current user
         # turn, joined and handed to the brain on turn completion.
         self._input_transcript_parts: list[str] = []
+
+        # Turn-time memory recall: facts already shown this session, and
+        # a simple gap so we surface at most one memory block per window.
+        self._surfaced_fact_ids: set[int] = set()
+        self._last_memory_surface = 0.0
 
         self.session: Any = None
         self._connection: Any = None
@@ -163,6 +169,54 @@ class AlfredLiveSession:
                 '"_confirmed": true. If they decline, drop it.'
             ),
         }
+
+    async def _surface_relevant_memory(self, utterance: str) -> None:
+        """
+        After a user turn, pull up stored facts relevant to what they
+        just said (beyond the always-on core already in the system
+        prompt) and hand them to the model as context for the next
+        exchange. Cheap, rate-limited, best-effort.
+        """
+
+        if self._learner is None or self.session is None:
+            return
+
+        if len(utterance.split()) < 4:
+            return
+
+        now = time.monotonic()
+
+        if now - self._last_memory_surface < 20.0:
+            return
+
+        try:
+            core = await asyncio.to_thread(self._learner.core_fact_ids)
+            facts = await asyncio.to_thread(
+                self._learner.recall, utterance, 3
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Memory] turn-time recall failed: {exc}")
+            return
+
+        fresh = [
+            fact
+            for fact in facts
+            if fact.id not in core and fact.id not in self._surfaced_fact_ids
+        ]
+
+        if not fresh:
+            return
+
+        self._last_memory_surface = now
+
+        for fact in fresh:
+            self._surfaced_fact_ids.add(fact.id)
+
+        block = "; ".join(fact.content for fact in fresh)
+
+        await self.inject_system_prompt(
+            f"(System: possibly relevant memory — {block})"
+        )
 
     async def inject_system_prompt(self, text: str) -> None:
         """
@@ -736,6 +790,11 @@ class AlfredLiveSession:
                             print(
                                 f"[Brain] note_user_reply failed: {exc}"
                             )
+
+                    if user_utterance and self._learner is not None:
+                        asyncio.create_task(
+                            self._surface_relevant_memory(user_utterance)
+                        )
 
             await asyncio.sleep(0)
 
