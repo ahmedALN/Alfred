@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from src.ai.providers.base import ProviderError, VisionProvider
-from src.ai.vision import screenshot_prompt
+from src.ai.vision import annotate_grid, screenshot_prompt
+from src.config import load_settings
 from src.tools.base import AlfredTool
 from src.windows.child_session import (
     ChildSessionClient,
@@ -41,9 +42,11 @@ class ComputerScreenshotTool(AlfredTool):
         self,
         client: ChildSessionClient,
         vision: VisionProvider,
+        grid: bool | None = None,
     ) -> None:
         self._client = client
         self._vision = vision
+        self._grid = load_settings().desktop_grid if grid is None else grid
 
     def execute(
         self,
@@ -61,10 +64,15 @@ class ComputerScreenshotTool(AlfredTool):
                 f"from Session {screenshot.session}."
             )
 
+            image = screenshot.png_bytes
+            if self._grid:
+                image = annotate_grid(image)
+
             analysis = self._vision.analyze(
-                screenshot.png_bytes,
+                image,
                 screenshot_prompt(
-                    screenshot.width, screenshot.height, isolated=True
+                    screenshot.width, screenshot.height,
+                    isolated=True, gridded=self._grid,
                 ),
             )
 

@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from src.ai.providers.base import ProviderError, VisionProvider
-from src.ai.vision import screenshot_prompt
+from src.ai.vision import annotate_grid, screenshot_prompt
 from src.config import load_settings
 from src.tools.base import AlfredTool
 from src.windows.child_session import ChildSessionClient, ChildSessionError
@@ -89,15 +89,18 @@ class DesktopControlTool(AlfredTool):
         vision: VisionProvider,
         desktop_manager: DesktopManager | None = None,
         alfred_desktop: int | None = None,
+        grid: bool | None = None,
     ) -> None:
         self._client = client
         self._vision = vision
         self._desktops = desktop_manager or DesktopManager()
+        settings = load_settings()
         self._alfred_desktop = (
             alfred_desktop
             if alfred_desktop is not None
-            else load_settings().default_desktop
+            else settings.default_desktop
         )
+        self._grid = settings.desktop_grid if grid is None else grid
 
     # ----------------------------------------------------------------
 
@@ -189,9 +192,14 @@ class DesktopControlTool(AlfredTool):
 
     def _look(self) -> dict[str, Any]:
         shot = self._client.screenshot()
+        image = shot.png_bytes
+        if self._grid:
+            image = annotate_grid(image)
         analysis = self._vision.analyze(
-            shot.png_bytes,
-            screenshot_prompt(shot.width, shot.height, isolated=True),
+            image,
+            screenshot_prompt(
+                shot.width, shot.height, isolated=True, gridded=self._grid
+            ),
         )
         return {
             "status": "success",

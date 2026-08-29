@@ -53,6 +53,9 @@ class Settings:
     game_autodetect: bool
     game_detect_seconds: float
 
+    # --- Desktop control ---
+    desktop_grid: bool
+
 
 def _get_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
@@ -139,6 +142,7 @@ def load_settings() -> Settings:
         half_duplex=_get_bool("ALFRED_HALF_DUPLEX", True),
         game_autodetect=_get_bool("ALFRED_GAME_AUTODETECT", True),
         game_detect_seconds=_get_float("ALFRED_GAME_DETECT_SECONDS", 30.0),
+        desktop_grid=_get_bool("ALFRED_DESKTOP_GRID", True),
         ai_provider=os.getenv("ALFRED_AI_PROVIDER", "gemini").strip().lower()
         or "gemini",
         ai_chat_provider=_opt("ALFRED_AI_CHAT_PROVIDER"),
