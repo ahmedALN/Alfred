@@ -1,7 +1,12 @@
 # Core AI / voice
 google-genai>=0.3.0
 sounddevice>=0.4.6
+numpy>=1.24
 python-dotenv>=1.0.1
+
+# Wake word ("Hey Alfred" / "Hey Jarvis")
+openwakeword>=0.6.0
+onnxruntime>=1.16
 
 # Windows desktop control (Windows-only)
 psutil>=5.9.8
@@ -10,3 +15,7 @@ pywin32>=306; sys_platform == "win32"
 
 # Dev / test
 pytest>=8.0.0
+
+# External (not pip): .NET 8+ SDK for the native helpers, and Ollama
+# (https://ollama.com) if ALFRED_AI_PROVIDER=ollama. Custom wake-word
+# training also needs: torch, openwakeword[train], piper-sample-generator.

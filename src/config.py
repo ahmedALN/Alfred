@@ -41,6 +41,18 @@ class Settings:
     brain_audit_path: str
     tray_enabled: bool
 
+    # --- Activation: wake word / hotkey / conversation window ---
+    wake_enabled: bool
+    wake_model: str
+    wake_threshold: float
+    hotkey: str
+    listen_idle_seconds: float
+    half_duplex: bool
+
+    # --- Game / low-resource mode ---
+    game_autodetect: bool
+    game_detect_seconds: float
+
 
 def _get_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
@@ -119,6 +131,14 @@ def load_settings() -> Settings:
             "alfred_brain_audit.sqlite3",
         ),
         tray_enabled=_get_bool("ALFRED_TRAY_ENABLED", True),
+        wake_enabled=_get_bool("ALFRED_WAKE_ENABLED", True),
+        wake_model=os.getenv("ALFRED_WAKE_MODEL", "").strip(),
+        wake_threshold=_get_float("ALFRED_WAKE_THRESHOLD", 0.5),
+        hotkey=os.getenv("ALFRED_HOTKEY", "ctrl+alt+k").strip().lower(),
+        listen_idle_seconds=_get_float("ALFRED_LISTEN_IDLE_SECONDS", 30.0),
+        half_duplex=_get_bool("ALFRED_HALF_DUPLEX", True),
+        game_autodetect=_get_bool("ALFRED_GAME_AUTODETECT", True),
+        game_detect_seconds=_get_float("ALFRED_GAME_DETECT_SECONDS", 30.0),
         ai_provider=os.getenv("ALFRED_AI_PROVIDER", "gemini").strip().lower()
         or "gemini",
         ai_chat_provider=_opt("ALFRED_AI_CHAT_PROVIDER"),

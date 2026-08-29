@@ -120,12 +120,56 @@ async def main() -> None:
         surface="voice",
     )
 
+    # --------------------------------------------------------------
+    # Activation: wake word + hotkey + conversation window.
+    # --------------------------------------------------------------
+    from src.voice import ActivationController, HotkeyListener, WakeListener
+
+    wake_gated = settings.wake_enabled or bool(settings.hotkey)
+    activation = ActivationController(
+        idle_seconds=settings.listen_idle_seconds,
+        always_on=not wake_gated,
+    )
+
     session = AlfredLiveSession(
         registry,
         store=store,
         learner=learner,
         policy=voice_policy,
+        activation=activation,
+        half_duplex=settings.half_duplex,
     )
+
+    wake_listener: WakeListener | None = None
+    hotkey_listener: HotkeyListener | None = None
+
+    if wake_gated:
+        def _woken(*_a: object) -> None:
+            activation.wake("wake/hotkey")
+            session.notify_woken()
+
+        if settings.wake_enabled:
+            wake_listener = WakeListener(
+                on_detect=_woken,
+                model_path=settings.wake_model or None,
+                threshold=settings.wake_threshold,
+            )
+            wake_listener.start()
+
+        if settings.hotkey:
+            hotkey_listener = HotkeyListener(
+                on_press=lambda: _woken(), spec=settings.hotkey
+            )
+            hotkey_listener.start()
+
+        # No point running wake detection while Alfred is already
+        # active - and it stops Alfred re-triggering itself.
+        def _on_listen_change(listening: bool) -> None:
+            if wake_listener is None:
+                return
+            wake_listener.pause() if listening else wake_listener.resume()
+
+        activation.on_state_change = _on_listen_change
 
     task_agent = TaskAgent(
         chat=providers.chat,
@@ -243,6 +287,12 @@ async def main() -> None:
     finally:
         if tray is not None:
             tray.stop()
+
+        if wake_listener is not None:
+            wake_listener.stop()
+
+        if hotkey_listener is not None:
+            hotkey_listener.stop()
 
         await session.close()
 

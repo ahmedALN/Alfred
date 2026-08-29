@@ -43,6 +43,8 @@ class AlfredLiveSession:
         learner: MemoryLearner | None = None,
         brain: Any = None,
         policy: Any = None,
+        activation: Any = None,
+        half_duplex: bool = True,
     ) -> None:
         settings = load_settings()
 
@@ -57,6 +59,9 @@ class AlfredLiveSession:
         self._learner = learner
         self._brain = brain
         self._policy = policy
+        self._activation = activation
+        self._half_duplex = half_duplex
+        self._last_audio_queued_at = 0.0
         self._session_id = uuid.uuid4().hex
 
         # Extra long-lived coroutines to run alongside the session
@@ -113,6 +118,32 @@ class AlfredLiveSession:
         """
 
         self._background_factories.append(factory)
+
+    def notify_woken(self) -> None:
+        """
+        Thread-safe: called from the wake-word / hotkey listener to have
+        Alfred give a brief spoken acknowledgement.
+        """
+
+        loop = self._mic_loop
+
+        if loop is None or self.session is None:
+            return
+
+        def _schedule() -> None:
+            asyncio.create_task(
+                self.inject_system_prompt(
+                    "(System: the user just activated you with the wake "
+                    "word or hotkey. Reply with a very short "
+                    "acknowledgement - 'Yes?' or 'Go ahead.' - then wait "
+                    "for their request.)"
+                )
+            )
+
+        try:
+            loop.call_soon_threadsafe(_schedule)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Alfred] notify_woken failed: {exc}")
 
     def _gate_tool_call(
         self,
@@ -422,9 +453,17 @@ class AlfredLiveSession:
         if not audio_data:
             return
 
+        self._last_audio_queued_at = time.monotonic()
         self._speaker_queue.put_nowait(
             audio_data
         )
+
+    def _alfred_is_speaking(self) -> bool:
+        """True while Alfred's own audio is playing (or just finished)."""
+
+        if not self._speaker_queue.empty():
+            return True
+        return (time.monotonic() - self._last_audio_queued_at) < 0.35
 
     def _stop_audio_output(self) -> None:
         self._speaker_stop.set()
@@ -599,6 +638,11 @@ class AlfredLiveSession:
         if self.session is None:
             return
 
+        # If Alfred is wake-word gated, stay quiet until spoken to.
+        if self._activation is not None and not self._activation.is_listening:
+            print("[Alfred] ready - say the wake word or press the hotkey.")
+            return
+
         try:
             await self.session.send_client_content(
                 turns=types.Content(
@@ -648,6 +692,20 @@ class AlfredLiveSession:
 
             if not running:
                 return
+
+            # Conversation window: only stream to the model while
+            # Alfred is actually listening (woken by "Hey Alfred" or
+            # the hotkey). Outside that, drop the audio.
+            if (
+                self._activation is not None
+                and not self._activation.is_listening
+            ):
+                continue
+
+            # Half-duplex: don't feed Alfred's own voice (picked up by
+            # the mic on a speaker setup) back into the model.
+            if self._half_duplex and self._alfred_is_speaking():
+                continue
 
             await self.session.send_realtime_input(
                 audio=types.Blob(
@@ -780,6 +838,9 @@ class AlfredLiveSession:
                     ).strip()
 
                     self._input_transcript_parts.clear()
+
+                    if user_utterance and self._activation is not None:
+                        self._activation.note_activity()
 
                     if user_utterance and self._brain is not None:
                         try:
@@ -940,6 +1001,9 @@ class AlfredLiveSession:
         if self._brain is not None:
             brain_task = asyncio.create_task(self._brain.run())
             tasks.add(brain_task)
+
+        if self._activation is not None and not self._activation.always_on:
+            tasks.add(asyncio.create_task(self._activation.run()))
 
         for factory in self._background_factories:
             tasks.add(asyncio.create_task(factory()))
