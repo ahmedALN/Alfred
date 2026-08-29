@@ -35,6 +35,7 @@ from src.resource_mode import ResourceMode
 from src.tools.resource_tool import ResourceModeTool
 from src.tools.computer_screenshot import ComputerScreenshotTool
 from src.tools.desktop_control import DesktopControlTool
+from src.tools.ui_control import UIControlTool
 from src.tools.memory_tools import ForgetTool, RecallTool, RememberTool
 from src.tools.network_info import NetworkInfoTool
 from src.tools.open_app import OpenAppTool
@@ -109,6 +110,8 @@ async def main() -> None:
         vision=providers.vision,
     )
 
+    ui_control_tool = UIControlTool()
+
     # Background task agent: delegate multi-step jobs (persisted so a
     # job survives an Alfred restart).
     task_store = TaskStore(_ROOT / "alfred_tasks.sqlite3")
@@ -149,6 +152,7 @@ async def main() -> None:
         powershell_tool,
         open_app_tool,
         screenshot_tool,
+        ui_control_tool,
         desktop_control_tool,
         system_info_tool,
         network_info_tool,

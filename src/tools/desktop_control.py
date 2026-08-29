@@ -44,7 +44,10 @@ class DesktopControlTool(AlfredTool):
     name = "desktop_control"
 
     description = (
-        "See and control Alfred's own desktop (separate from the user's). "
+        "FALLBACK visual control - prefer ui_control for normal apps "
+        "(it reads controls by name, exactly). Use this only when "
+        "ui_control 'tree' returns nothing useful (some games, bespoke "
+        "renderers). "
         "action='look' returns a screenshot analysis with pixel "
         "coordinates of windows and controls - always look before acting, "
         "and look again afterwards to confirm. Pass hwnd (from open_app) to "
