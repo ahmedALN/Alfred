@@ -62,6 +62,7 @@ Game mode also auto-engages when a fullscreen game holds the foreground
 ```bash
 python -m src.status                 # running? memory, brain + Gemini usage today
 python -m src.memory_cli list        # what it remembers  (search / forget / edit / dedupe / export)
+python -m src.knowledge seed         # load the built-in Windows playbook into memory (do this once)
 python -m src.skills list            # learned routines  (show / forget / disable / enable)
 python -m src.episodes recent        # what it actually did lately  (search / prune)
 python -m src.autostart install      # start at login via the watchdog (uninstall / status)
@@ -69,11 +70,20 @@ python -m src.watchdog               # run Alfred with crash-restart supervision
 python -m src.voice.setup_wakeword   # download the model for a custom wake phrase
 ```
 
-**Getting faster:** after Alfred finishes and *verifies* a task you asked for, it
+**Planning model:** multi-step tasks are planned (and re-planned) by a stronger
+model set in `.env` — `ALFRED_AI_PLAN_MODEL` (default
+`nvidia/nemotron-3-super-120b-a12b`, free at build.nvidia.com). If that key is
+missing or down it falls back through Gemini to the local model automatically.
+Execution of each step uses the fast local model.
+
+**Getting better:** Alfred starts from a built-in Windows playbook (`python -m
+src.knowledge seed`) — the good way to do common things (how to drive Spotify,
+which cmdlet lists ports, etc.). After it finishes and *verifies* a task, it
 distils the exact tool sequence into a **skill** — the same request next time
 skips planning and just runs (`play a {artist} song on Spotify` learned once,
-replays for any artist). Risky routines are confirmed out loud before being
-saved. It also reports only what it could verify — never "done" for a step it
+replays for any artist). A failed step becomes a "lesson" fact so the same
+mistake isn't repeated. Risky routines are confirmed out loud before being
+saved. It reports only what it could verify — never "done" for a step it
 couldn't confirm.
 
 Logs: `logs/alfred.log`. Brain activity: `alfred_brain_audit.jsonl`.

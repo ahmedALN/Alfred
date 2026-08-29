@@ -111,6 +111,87 @@ WINDOWS_PLAYBOOK: list[tuple[str, str]] = [
      "tasks, editing HKLM, bulk-deleting or bulk-moving files, and "
      "shutting down or restarting the PC all need the user's explicit "
      "OK first, even when they asked for the task."),
+
+    # --- networking & diagnostics -------------------------------
+    ("system", "IP config: Get-NetIPConfiguration, or Get-NetIPAddress "
+     "-AddressFamily IPv4. Public IP needs a web call - "
+     "(Invoke-RestMethod ifconfig.me/ip)."),
+    ("system", "Wi-Fi: netsh wlan show interfaces (SSID, signal, channel); "
+     "netsh wlan show profiles lists saved networks; Get-NetAdapter shows "
+     "all adapters and their status."),
+    ("system", "Test connectivity: Test-NetConnection <host> -Port <n> "
+     "(TCP + latency + route). Test-Connection <host> is ping. "
+     "Resolve-DnsName <host> for DNS."),
+    ("system", "Flush DNS: Clear-DnsClientCache. Renew DHCP: "
+     "ipconfig /release then ipconfig /renew (both need admin)."),
+    ("system", "What's using a port: Get-NetTCPConnection -LocalPort <n> | "
+     "ForEach-Object { Get-Process -Id $_.OwningProcess }."),
+    ("system", "Windows/build version: Get-ComputerInfo | Select "
+     "WindowsProductName, OsVersion, WindowsVersion; or [System."
+     "Environment]::OSVersion; or 'winver' opens the dialog."),
+    ("system", "Installed apps: Get-Package, or Get-ItemProperty "
+     "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\* | "
+     "Select DisplayName, DisplayVersion. winget list also works."),
+    ("system", "Battery / power: Get-CimInstance Win32_Battery; "
+     "powercfg /batteryreport writes an HTML report; powercfg /list shows "
+     "power plans."),
+    ("system", "Uptime: (Get-Date) - (Get-CimInstance Win32_OperatingSystem)"
+     ".LastBootUpTime, or system_info query='overview'."),
+
+    # --- troubleshooting ----------------------------------------
+    ("system", "App is frozen: Get-Process <name> to find it, then "
+     "Stop-Process -Name <name> -Force (ask the user first). Restart it "
+     "with open_app."),
+    ("system", "Disk nearly full: check big folders with Get-ChildItem "
+     "<path> -Recurse -File | Sort Length -Descending | Select -First 20. "
+     "The usual culprits are Downloads, %TEMP%, and old Windows.old."),
+    ("system", "Clear temp files: Remove-Item $env:TEMP\\* -Recurse -Force "
+     "-ErrorAction SilentlyContinue (safe; skips locked files). This "
+     "needs the user's OK as a bulk delete."),
+    ("system", "High CPU/RAM: system_info query='top_processes' or "
+     "Get-Process | Sort WS -Descending | Select -First 10 Name, "
+     "@{N='RAM_MB';E={[int]($_.WS/1MB)}}, CPU."),
+    ("system", "Recent errors: Get-WinEvent -FilterHashtable "
+     "@{LogName='System'; Level=1,2; StartTime=(Get-Date).AddHours(-24)} | "
+     "Select -First 20 TimeCreated, Id, Message."),
+
+    # --- window / desktop management --------------------------
+    ("system", "Alfred's own apps live on virtual desktop 2 so they don't "
+     "cover the user's work. open_app puts them there; desktop_control "
+     "borrows focus there for ~100ms then returns it."),
+    ("system", "To bring a window forward: ui_control focus_window "
+     "title=<substring>, or the app-specific activate. Alt+Tab is not "
+     "reliable to script."),
+
+    # --- more app recipes -----------------------------------
+    ("system", "Windows Terminal / PowerShell window: open_app 'windows "
+     "terminal' or 'powershell'; then ui_control type the command and key "
+     "'{ENTER}'. Or just use the powershell tool directly - faster and "
+     "structured."),
+    ("system", "Calculator, Notepad, Paint, Snipping Tool, Task Manager, "
+     "Control Panel, Settings all open by those plain names via open_app."),
+    ("system", "Take a screenshot of the user's screen: that's not "
+     "possible - computer_screenshot only sees Alfred's isolated desktop. "
+     "Tell the user to press Win+Shift+S themselves."),
+    ("system", "Volume: media keys via ui_control key "
+     "'{VOLUME_UP}' / '{VOLUME_DOWN}' / '{VOLUME_MUTE}', or the app's own "
+     "control. System volume also: (New-Object -ComObject WScript.Shell)."
+     "SendKeys is unreliable - prefer the media keys."),
+    ("system", "Open a URL in the default browser: Start-Process "
+     "'https://...'. Open a file or folder: Start-Process '<path>' or "
+     "explorer '<path>'."),
+
+    # --- Alfred operational -------------------------------
+    ("correction", "run_task is for jobs that need several ordered steps. "
+     "For a single quick action (open one app, one powershell query, one "
+     "click) just do it directly - don't spin up a task."),
+    ("correction", "If a tool result is status='needs_confirmation', tell "
+     "the user what it does and the risk, and only call the tool again "
+     "with _confirmed:true if they agree. status='refused' means never - "
+     "explain and suggest they do it by hand."),
+    ("system", "After a multi-step task, Alfred reports only what it "
+     "actually verified. 'Partly done' with a reason is honest - it does "
+     "not mean nothing happened."),
 ]
 
 
