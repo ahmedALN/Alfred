@@ -402,6 +402,11 @@ class BrainLoop:
         if not text:
             return
 
+        # A running task may be blocked on "go ahead, sir?" - a yes/no
+        # here answers it and nothing else should consume the reply.
+        if self._task_queue is not None and self._task_queue.answer_pending(text):
+            return
+
         if _PAUSE.search(text):
             self._paused = True
             self._audit.record("tick", {"note": "brain paused by user"})

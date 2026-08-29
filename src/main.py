@@ -228,15 +228,21 @@ async def main() -> None:
 
         activation.on_state_change = _on_listen_change
 
+    _agent_tools = set(registry.names()) - {"run_task", "task_status"}
     task_agent = TaskAgent(
         chat=providers.chat,
         plan_chat=providers.plan_chat,
         registry=registry,
         policy=Policy(
             autonomy=settings.brain_autonomy,
-            # the task agent must not enqueue more tasks
-            known_tools=set(registry.names()) - {"run_task", "task_status"},
+            known_tools=_agent_tools,
             surface="brain",
+        ),
+        # user-asked tasks: run ordinary steps, ask out loud on dangerous
+        policy_voice=Policy(
+            autonomy=settings.brain_autonomy,
+            known_tools=_agent_tools,
+            surface="voice",
         ),
         audit=None,  # set below once the audit log exists
     )

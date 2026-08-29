@@ -74,6 +74,14 @@ DANGEROUS_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\b(rd|rmdir)\b.*/s", re.I),
     re.compile(r"\bdel\b.*/[sq]", re.I),
     re.compile(r"clear-recyclebin\b|clear-content\b", re.I),
+    # Bulk file moves / copies / renames (can clobber, ask first)
+    re.compile(r"(move|rename)-item\b.*-recurse", re.I),
+    re.compile(
+        r"get-childitem\b.*-recurse.*\|\s*(move|remove|copy|rename)-item",
+        re.I,
+    ),
+    re.compile(r"\brobocopy\b.*/(mov|move|mir|purge)", re.I),
+    re.compile(r"\b(move|xcopy)\b.*/[esy]", re.I),
 ]
 
 # Read-only cmdlets the brain may run unattended (whole pipeline must

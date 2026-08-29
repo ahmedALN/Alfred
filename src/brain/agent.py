@@ -74,6 +74,7 @@ class TaskAgent:
         registry: ToolRegistry,
         policy: Policy,
         *,
+        policy_voice: Policy | None = None,
         plan_chat: ChatProvider | None = None,
         max_steps: int = 20,
         max_seconds: float = 360.0,
@@ -82,7 +83,10 @@ class TaskAgent:
         self._chat = chat
         self._plan_chat = plan_chat or chat
         self._registry = registry
-        self._policy = policy
+        self._policy_brain = policy
+        self._policy_voice = policy_voice or policy
+        self._policy = policy  # active policy, set per run()
+        self._ask_user: "Callable[[str], bool] | None" = None
         self._max_steps = max_steps
         self._max_seconds = max_seconds
         self._audit = audit
@@ -95,10 +99,18 @@ class TaskAgent:
         session_id: str | None = None,
         cancel_check: "Callable[[], bool] | None" = None,
         on_progress: "Callable[[str], None] | None" = None,
+        *,
+        source: str = "brain",
+        ask_user: "Callable[[str], bool] | None" = None,
     ) -> TaskResult:
         goal = goal.strip()
         started = time.monotonic()
         last_progress = started
+
+        self._policy = (
+            self._policy_voice if source == "voice" else self._policy_brain
+        )
+        self._ask_user = ask_user
 
         result = TaskResult(goal=goal, status="exhausted", summary="")
 
@@ -214,14 +226,37 @@ class TaskAgent:
                         {"refused": verdict.reason}, False)
 
         if verdict.verdict is Verdict.CONFIRM:
-            note = f"{tool} ({thought or 'no rationale'})"
-            result.skipped_confirmations.append(note)
-            history.append(
-                f"[step {index}] SKIPPED {tool}: needs the user's OK "
-                f"({verdict.reason}). Continue with other steps."
-            )
-            return Step(index, thought, tool, args, "confirm",
-                        {"skipped": verdict.reason}, False)
+            if self._ask_user is not None:
+                question = (
+                    f"Sir, this step ({thought or tool}) is a bit risky - "
+                    f"{verdict.reason}. Do you want me to go ahead?"
+                )
+                try:
+                    approved = bool(self._ask_user(question))
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[Task] ask_user failed: {exc}")
+                    approved = False
+
+                if not approved:
+                    result.skipped_confirmations.append(
+                        f"{tool} ({thought or 'no rationale'}) - you said no"
+                    )
+                    history.append(
+                        f"[step {index}] {tool}: user declined. Skip it."
+                    )
+                    return Step(index, thought, tool, args, "declined",
+                                {"declined": verdict.reason}, False)
+                history.append(f"[step {index}] {tool}: user approved.")
+                # fall through and execute
+            else:
+                note = f"{tool} ({thought or 'no rationale'})"
+                result.skipped_confirmations.append(note)
+                history.append(
+                    f"[step {index}] SKIPPED {tool}: needs the user's OK "
+                    f"({verdict.reason}). Continue with other steps."
+                )
+                return Step(index, thought, tool, args, "confirm",
+                            {"skipped": verdict.reason}, False)
 
         try:
             outcome = self._registry.execute(tool, args)

@@ -44,14 +44,15 @@ class RunTaskTool(AlfredTool):
         if not isinstance(goal, str) or not goal.strip():
             return {"status": "error", "error": "'goal' must be a non-empty string."}
 
-        task_id = self._queue.submit(goal)
+        task_id = self._queue.submit(goal, source="voice")
 
         return {
             "status": "started",
             "task_id": task_id,
             "note": (
                 "Working on it in the background. Tell the user you've "
-                "started and will report back; don't wait."
+                "started and will report back; don't wait. If a step is "
+                "risky I'll ask them out loud before doing it."
             ),
         }
 

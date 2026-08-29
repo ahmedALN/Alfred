@@ -9,7 +9,8 @@ class FakeAgent:
         self._result = result
         self.calls = []
 
-    def run(self, goal, session_id=None, cancel_check=None, on_progress=None):
+    def run(self, goal, session_id=None, cancel_check=None, on_progress=None,
+            *, source="brain", ask_user=None):
         self.calls.append(goal)
         return self._result
 

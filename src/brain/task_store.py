@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     goal        TEXT NOT NULL,
     status      TEXT NOT NULL,
     summary     TEXT NOT NULL DEFAULT '',
+    source      TEXT NOT NULL DEFAULT 'voice',
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
@@ -38,14 +39,14 @@ class TaskStore:
             self._conn.executescript(_SCHEMA)
             self._conn.commit()
 
-    def add(self, task_id: str, goal: str) -> None:
+    def add(self, task_id: str, goal: str, source: str = "voice") -> None:
         now = _now()
         with self._lock:
             self._conn.execute(
                 "INSERT OR REPLACE INTO tasks "
-                "(id, goal, status, summary, created_at, updated_at) "
-                "VALUES (?, ?, 'queued', '', ?, ?)",
-                (task_id, goal, now, now),
+                "(id, goal, status, summary, source, created_at, updated_at) "
+                "VALUES (?, ?, 'queued', '', ?, ?, ?)",
+                (task_id, goal, source, now, now),
             )
             self._conn.commit()
 
@@ -62,7 +63,7 @@ class TaskStore:
         cutoff = datetime.now(timezone.utc).timestamp() - max_age_hours * 3600
         with self._lock:
             rows = self._conn.execute(
-                "SELECT id, goal, status, created_at FROM tasks "
+                "SELECT id, goal, status, source, created_at FROM tasks "
                 "WHERE status IN ('queued', 'running') ORDER BY created_at ASC"
             ).fetchall()
 
