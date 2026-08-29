@@ -74,11 +74,13 @@ class TaskAgent:
         registry: ToolRegistry,
         policy: Policy,
         *,
-        max_steps: int = 12,
-        max_seconds: float = 240.0,
+        plan_chat: ChatProvider | None = None,
+        max_steps: int = 20,
+        max_seconds: float = 360.0,
         audit: Any = None,
     ) -> None:
         self._chat = chat
+        self._plan_chat = plan_chat or chat
         self._registry = registry
         self._policy = policy
         self._max_steps = max_steps

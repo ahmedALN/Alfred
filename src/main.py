@@ -226,6 +226,7 @@ async def main() -> None:
 
     task_agent = TaskAgent(
         chat=providers.chat,
+        plan_chat=providers.plan_chat,
         registry=registry,
         policy=Policy(
             autonomy=settings.brain_autonomy,

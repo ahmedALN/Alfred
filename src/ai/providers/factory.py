@@ -43,12 +43,14 @@ class ProviderBundle:
     chat: ChatProvider
     embedder: EmbeddingProvider
     vision: VisionProvider
+    plan_chat: ChatProvider
 
     def describe(self) -> str:
         return (
             f"chat={self.chat.name}:{self.chat.model or '?'} "
             f"embed={self.embedder.name}:{self.embedder.model or '?'} "
-            f"vision={self.vision.name}:{self.vision.model or '?'}"
+            f"vision={self.vision.name}:{self.vision.model or '?'} "
+            f"plan={self.plan_chat.name}"
         )
 
 
@@ -126,7 +128,59 @@ def build_providers(settings: Any, gemini_client: Any) -> ProviderBundle:
         gemini_client,
     )
 
-    return ProviderBundle(chat=chat, embedder=embedder, vision=vision)
+    return ProviderBundle(
+        chat=chat, embedder=embedder, vision=vision,
+        plan_chat=build_plan_chat(settings, gemini_client, chat),
+    )
+
+
+def build_plan_chat(
+    settings: Any, gemini_client: Any, local_chat: ChatProvider
+) -> ChatProvider:
+    """
+    The chat provider used for task PLANNING: the configured plan
+    provider (NVIDIA Nemotron by default) with an automatic fallback
+    chain to the listed backends, ending at the fast local model.
+    """
+
+    from src.ai.providers.fallback import FallbackChatProvider
+
+    chain: list[ChatProvider] = []
+
+    primary = _resolve(settings.ai_plan_provider, "openai")
+    have_primary = not (primary == "openai" and not settings.openai_api_key)
+
+    if have_primary:
+        try:
+            chain.append(
+                _build_chat(
+                    primary, settings.ai_plan_model, settings, gemini_client
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Plan] primary planner unavailable ({exc}); using fallbacks.")
+    else:
+        print(
+            "[Plan] no ALFRED_OPENAI_API_KEY set - planning uses "
+            f"{settings.ai_plan_fallbacks[0] if settings.ai_plan_fallbacks else 'local'}."
+        )
+
+    for name in settings.ai_plan_fallbacks:
+        try:
+            if name == "gemini":
+                chain.append(
+                    GeminiChatProvider(gemini_client, settings.gemini_text_model)
+                )
+            elif name == "ollama":
+                model = settings.ai_chat_model or _DEFAULT_MODELS[("ollama", "chat")]
+                chain.append(OllamaChatProvider(model, settings.ollama_base_url))
+        except Exception:  # noqa: BLE001
+            pass
+
+    if not chain:
+        chain.append(local_chat)
+
+    return FallbackChatProvider(chain) if len(chain) > 1 else chain[0]
 
 
 def _build_chat(

@@ -157,11 +157,42 @@ def offer_extras() -> None:
         subprocess.run([sys.executable, "-m", "src.voice.train_wakeword", "record"])
 
 
-def main() -> int:
+def sync_env() -> int:
+    """Add any keys present in .env.example but missing from .env."""
+    if not _ENV.exists():
+        return ensure_env() or 0
+
+    def keys(path: Path) -> set[str]:
+        return {
+            line.split("=", 1)[0].strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if "=" in line and not line.lstrip().startswith("#")
+        }
+
+    have = keys(_ENV)
+    added = []
+    lines = _ENV_EXAMPLE.read_text(encoding="utf-8").splitlines()
+    with open(_ENV, "a", encoding="utf-8") as fh:
+        for line in lines:
+            if "=" in line and not line.lstrip().startswith("#"):
+                k = line.split("=", 1)[0].strip()
+                if k not in have:
+                    fh.write(f"\n{line}")
+                    added.append(k)
+    print(f"{_OK} .env synced" + (f" (+{', '.join(added)})" if added else " (nothing to add)"))
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = argv or []
+    if "--sync" in argv:
+        return sync_env()
+
     print("Alfred setup")
     print("=" * 40)
     check_python_deps()
     ensure_env()
+    sync_env()
     check_ollama()
     build_native()
     offer_extras()
@@ -170,4 +201,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    import sys
+
+    raise SystemExit(main(sys.argv[1:]))

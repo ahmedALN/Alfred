@@ -27,6 +27,9 @@ class Settings:
     ai_chat_model: str | None
     ai_embed_model: str | None
     ai_vision_model: str | None
+    ai_plan_provider: str
+    ai_plan_model: str
+    ai_plan_fallbacks: list[str]
     ollama_base_url: str
     openai_base_url: str | None
     openai_api_key: str | None
@@ -173,9 +176,23 @@ def load_settings() -> Settings:
         ai_chat_model=_opt("ALFRED_AI_CHAT_MODEL"),
         ai_embed_model=_opt("ALFRED_AI_EMBED_MODEL"),
         ai_vision_model=_opt("ALFRED_AI_VISION_MODEL"),
+        ai_plan_provider=os.getenv(
+            "ALFRED_AI_PLAN_PROVIDER", "openai"
+        ).strip().lower() or "openai",
+        ai_plan_model=os.getenv(
+            "ALFRED_AI_PLAN_MODEL", "nvidia/nemotron-3-ultra-550b-a55b"
+        ).strip(),
+        ai_plan_fallbacks=[
+            p.strip().lower()
+            for p in os.getenv("ALFRED_AI_PLAN_FALLBACKS", "gemini,ollama").split(",")
+            if p.strip()
+        ],
         ollama_base_url=os.getenv(
             "ALFRED_OLLAMA_BASE_URL", "http://localhost:11434"
         ),
-        openai_base_url=_opt("ALFRED_OPENAI_BASE_URL"),
+        openai_base_url=os.getenv(
+            "ALFRED_OPENAI_BASE_URL",
+            "https://integrate.api.nvidia.com/v1",
+        ).strip() or None,
         openai_api_key=_opt("ALFRED_OPENAI_API_KEY"),
     )
