@@ -78,6 +78,11 @@ or clearly shows the opposite of 'done_when'.
 Reply with exactly one line: 'VERIFIED: <which log line shows it>' or \
 'UNVERIFIED: <what is missing or failed>'."""
 
+_THINKING_OFF = (
+    "detailed thinking off. Output only what the user's message asks for - "
+    "no analysis, no preamble, no explanation."
+)
+
 _REFLECT_SYSTEM = """You are Alfred reviewing a task you just finished, to get \
 better next time.
 
@@ -465,7 +470,8 @@ class TaskAgent:
             )
             try:
                 raw = self._plan_chat.generate(
-                    prompt, temperature=0.2, max_tokens=700
+                    prompt, system=_THINKING_OFF,
+                    temperature=0.2, max_tokens=2000,
                 )
             except Exception as exc:  # noqa: BLE001
                 print(f"[Task] planner failed ({exc}); using a single step.")
@@ -544,7 +550,7 @@ class TaskAgent:
         )
         try:
             line = self._plan_chat.generate(
-                prompt, temperature=0.2, max_tokens=120
+                prompt, system=_THINKING_OFF, temperature=0.2, max_tokens=500
             ).strip()
         except Exception as exc:  # noqa: BLE001
             return f"(reflection failed: {exc})"
@@ -751,14 +757,14 @@ class TaskAgent:
         )
         try:
             raw = self._verify_chat.generate(
-                prompt, temperature=0.0, max_tokens=160
+                prompt, system=_THINKING_OFF, temperature=0.0, max_tokens=600
             ).strip()
         except Exception as exc:  # noqa: BLE001
             # Verifier unavailable: fall back to the fast model, then to a
             # lenient "a relevant tool call succeeded" heuristic.
             try:
                 raw = self._chat.generate(
-                    prompt, temperature=0.0, max_tokens=160
+                    prompt, temperature=0.0, max_tokens=300
                 ).strip()
             except Exception:  # noqa: BLE001
                 ok = any("-> ok:" in h for h in history[-6:])
@@ -766,10 +772,19 @@ class TaskAgent:
                     f"could not verify: {exc}"
                 )
 
-        line = raw.splitlines()[0] if raw else ""
-        if line.upper().startswith("VERIFIED"):
-            return True, line.split(":", 1)[-1].strip()[:200]
-        return False, line.split(":", 1)[-1].strip()[:200] or "no evidence"
+        # Find the verdict line anywhere (a reasoning model may preface it).
+        verdict_line = ""
+        for ln in raw.splitlines():
+            u = ln.strip().upper()
+            if u.startswith(("VERIFIED", "UNVERIFIED")):
+                verdict_line = ln.strip()
+                break
+        if not verdict_line:
+            verdict_line = raw.splitlines()[-1].strip() if raw else ""
+
+        if verdict_line.upper().startswith("VERIFIED"):
+            return True, verdict_line.split(":", 1)[-1].strip()[:200]
+        return False, verdict_line.split(":", 1)[-1].strip()[:200] or "no evidence"
 
     def _deterministic_verify(
         self, done_when: str, history: list[str]
