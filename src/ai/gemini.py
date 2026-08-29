@@ -92,6 +92,10 @@ class AlfredLiveSession:
         self._half_duplex = half_duplex
         self._last_audio_queued_at = 0.0
         self._reconnect_backoff_base = 2.0
+
+        self._passphrase = settings.voice_passphrase
+        self._passphrase_window = settings.voice_passphrase_window
+        self._passphrase_ok_until = 0.0
         self._session_id = uuid.uuid4().hex
 
         # Extra long-lived coroutines to run alongside the session
@@ -219,7 +223,19 @@ class AlfredLiveSession:
                 ),
             }
 
-        # CONFIRM
+        # CONFIRM (a "dangerous" action). Optionally gate on a spoken
+        # passphrase so someone else's voice can't drive these.
+        if self._passphrase and time.monotonic() > self._passphrase_ok_until:
+            return {
+                "status": "needs_passphrase",
+                "reason": decision.reason,
+                "instruction": (
+                    "This is a protected action. Tell the user it needs the "
+                    "passphrase - ask them to say it, then try again. Do NOT "
+                    "reveal or hint at the passphrase."
+                ),
+            }
+
         if pre_confirmed:
             return None
 
@@ -383,7 +399,10 @@ class AlfredLiveSession:
             "returns status 'needs_confirmation', follow its instruction: "
             "tell the user what the action does and the risk, and only "
             "if they agree, call the same tool again with '_confirmed': "
-            "true. If a tool returns status 'refused', do not retry - "
+            "true. If a tool returns 'needs_passphrase', tell the user "
+            "the action is protected and ask them to say the passphrase "
+            "(never say the passphrase yourself), then retry. If a tool "
+            "returns status 'refused', do not retry - "
             "explain why and suggest they do it manually."
         )
 
@@ -886,6 +905,16 @@ class AlfredLiveSession:
 
                     if user_utterance and self._activation is not None:
                         self._activation.note_activity()
+
+                    if (
+                        user_utterance
+                        and self._passphrase
+                        and self._passphrase in user_utterance.lower()
+                    ):
+                        self._passphrase_ok_until = (
+                            time.monotonic() + self._passphrase_window
+                        )
+                        print("[Alfred] passphrase accepted.")
 
                     if user_utterance and self._brain is not None:
                         try:

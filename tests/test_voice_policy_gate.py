@@ -62,3 +62,34 @@ def test_no_policy_means_no_gate():
     assert session._gate_tool_call(
         "powershell", {"command": "Format-Volume -DriveLetter D"}, False
     ) is None
+
+
+def test_passphrase_gate_blocks_dangerous_until_spoken(monkeypatch):
+    session = _session()
+    session._passphrase = "open sesame"
+    session._passphrase_window = 300.0
+    session._passphrase_ok_until = 0.0
+
+    danger = {"command": "Stop-Service -Name Spooler"}
+
+    gate = session._gate_tool_call("powershell", danger, False)
+    assert gate["status"] == "needs_passphrase"
+
+    # user says the passphrase -> window opens
+    import time as _t
+    session._passphrase_ok_until = _t.monotonic() + 300
+
+    gate = session._gate_tool_call("powershell", danger, False)
+    assert gate["status"] == "needs_confirmation"  # normal flow resumes
+
+
+def test_passphrase_does_not_unlock_catastrophic():
+    session = _session()
+    session._passphrase = "open sesame"
+    import time as _t
+    session._passphrase_ok_until = _t.monotonic() + 300
+
+    gate = session._gate_tool_call(
+        "powershell", {"command": "Format-Volume -DriveLetter D -Force"}, True
+    )
+    assert gate["status"] == "refused"

@@ -50,6 +50,8 @@ class Settings:
     hotkey: str
     listen_idle_seconds: float
     half_duplex: bool
+    voice_passphrase: str
+    voice_passphrase_window: float
 
     # --- Game / low-resource mode ---
     game_autodetect: bool
@@ -146,6 +148,10 @@ def load_settings() -> Settings:
         hotkey=os.getenv("ALFRED_HOTKEY", "ctrl+alt+k").strip().lower(),
         listen_idle_seconds=_get_float("ALFRED_LISTEN_IDLE_SECONDS", 30.0),
         half_duplex=_get_bool("ALFRED_HALF_DUPLEX", True),
+        voice_passphrase=os.getenv("ALFRED_VOICE_PASSPHRASE", "").strip().lower(),
+        voice_passphrase_window=_get_float(
+            "ALFRED_VOICE_PASSPHRASE_WINDOW", 300.0
+        ),
         game_autodetect=_get_bool("ALFRED_GAME_AUTODETECT", True),
         game_detect_seconds=_get_float("ALFRED_GAME_DETECT_SECONDS", 30.0),
         desktop_grid=_get_bool("ALFRED_DESKTOP_GRID", True),
