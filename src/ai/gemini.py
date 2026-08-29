@@ -46,6 +46,25 @@ def _is_connection_error(exc: BaseException) -> bool:
     return any(h in text for h in _CONNECTION_ERROR_HINTS)
 
 
+async def _supervise(name: str, make_coro) -> None:
+    """Keep a long-lived background coroutine alive: if it crashes, log
+    and restart it with backoff. Cancellation still propagates so
+    shutdown works. Prevents one buggy loop (brain, task queue) from
+    taking the whole voice session down with it."""
+    backoff = 2.0
+    while True:
+        try:
+            await make_coro()
+            return  # clean exit - it's done on purpose
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            print(f"[{name}] background loop crashed ({exc!r}); "
+                  f"restarting in {backoff:.0f}s")
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 60.0)
+
+
 class AlfredLiveSession:
     """
     Persistent Gemini Live session for Alfred.
@@ -1009,10 +1028,15 @@ class AlfredLiveSession:
         for call in tool_call.function_calls:
 
             if not call.name:
-                raise RuntimeError(
-                    "Gemini returned a function call "
-                    "without a name."
+                print("[Tool] skipped a function call with no name")
+                function_responses.append(
+                    types.FunctionResponse(
+                        name="unknown",
+                        id=getattr(call, "id", None),
+                        response={"status": "error", "error": "no tool name"},
+                    )
                 )
+                continue
 
             arguments = dict(
                 call.args or {}
@@ -1149,13 +1173,21 @@ class AlfredLiveSession:
         background: set[asyncio.Task[None]] = set()
 
         if self._brain is not None:
-            background.add(asyncio.create_task(self._brain.run()))
+            background.add(
+                asyncio.create_task(_supervise("brain", self._brain.run))
+            )
 
         if self._activation is not None and not self._activation.always_on:
-            background.add(asyncio.create_task(self._activation.run()))
+            background.add(
+                asyncio.create_task(
+                    _supervise("activation", self._activation.run)
+                )
+            )
 
-        for factory in self._background_factories:
-            background.add(asyncio.create_task(factory()))
+        for i, factory in enumerate(self._background_factories):
+            background.add(
+                asyncio.create_task(_supervise(f"bg{i}", factory))
+            )
 
         backoff = self._reconnect_backoff_base
         consecutive_failures = 0
@@ -1171,29 +1203,33 @@ class AlfredLiveSession:
                     asyncio.create_task(self._receive()),
                 }
 
-                done, _ = await asyncio.wait(
-                    voice | background,
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-
-                # A background task ending (it shouldn't) is not
-                # recoverable here.
-                for task in done:
-                    if task in background:
-                        bg_exc = task.exception()
-                        if bg_exc is not None:
-                            raise bg_exc
-                        raise RuntimeError(
-                            "A background task exited unexpectedly."
-                        )
+                # Wait until a VOICE task finishes. Supervised background
+                # tasks restart themselves; a bg task surfacing here means
+                # it exited cleanly (drop it) or was cancelled (shutdown).
+                pending = voice | background
+                voice_done: set = set()
+                while not voice_done:
+                    done, pending = await asyncio.wait(
+                        pending, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    for task in done:
+                        if task in background:
+                            bg_exc = task.exception()
+                            if isinstance(bg_exc, asyncio.CancelledError):
+                                raise bg_exc
+                            if bg_exc is not None:
+                                print(f"[Session] bg task error: {bg_exc!r}")
+                            background.discard(task)
+                        else:
+                            voice_done.add(task)
 
                 for task in voice:
                     task.cancel()
                 await asyncio.gather(*voice, return_exceptions=True)
 
                 exc = next(
-                    (t.exception() for t in done
-                     if t in voice and t.exception() is not None),
+                    (t.exception() for t in voice_done
+                     if t.exception() is not None),
                     None,
                 )
 
