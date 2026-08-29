@@ -1,11 +1,9 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
-import base64
 from typing import Any
 
-from google import genai
-
-from src.config import load_settings
+from src.ai.providers.base import ProviderError, VisionProvider
+from src.ai.vision import screenshot_prompt
 from src.tools.base import AlfredTool
 from src.windows.child_session import (
     ChildSessionClient,
@@ -15,8 +13,8 @@ from src.windows.child_session import (
 
 class ComputerScreenshotTool(AlfredTool):
     """
-    Capture and deterministically analyze the complete
-    Alfred child-session desktop.
+    Capture and deterministically analyze the complete desktop Alfred
+    controls (its isolated child session).
     """
 
     name = "computer_screenshot"
@@ -24,11 +22,11 @@ class ComputerScreenshotTool(AlfredTool):
     description = (
         "Capture the complete current desktop inside Alfred's "
         "isolated child Windows session and analyze exactly "
-        "what is visibly present. Use this when visual "
-        "inspection of the child desktop is needed."
+        "what is visibly present, including approximate pixel "
+        "coordinates of windows and clickable controls. Use this "
+        "when visual inspection of the controlled desktop is needed, "
+        "or before clicking/typing so coordinates are accurate."
     )
-
-    VISION_MODEL = "gemini-3.5-flash-lite"
 
     @property
     def parameters_schema(
@@ -42,14 +40,10 @@ class ComputerScreenshotTool(AlfredTool):
     def __init__(
         self,
         client: ChildSessionClient,
+        vision: VisionProvider,
     ) -> None:
         self._client = client
-
-        settings = load_settings()
-
-        self._vision_client = genai.Client(
-            api_key=settings.gemini_api_key
-        )
+        self._vision = vision
 
     def execute(
         self,
@@ -67,15 +61,14 @@ class ComputerScreenshotTool(AlfredTool):
                 f"from Session {screenshot.session}."
             )
 
-            analysis = self._analyze(
+            analysis = self._vision.analyze(
                 screenshot.png_bytes,
-                screenshot.width,
-                screenshot.height,
+                screenshot_prompt(
+                    screenshot.width, screenshot.height, isolated=True
+                ),
             )
 
-            print(
-                "[Screenshot] Vision analysis received."
-            )
+            print("[Screenshot] Vision analysis received.")
 
             return {
                 "status": "success",
@@ -91,89 +84,13 @@ class ComputerScreenshotTool(AlfredTool):
             }
 
         except ChildSessionError as exc:
+            return {"status": "error", "error": str(exc)}
+
+        except ProviderError as exc:
+            return {"status": "error", "error": f"Vision analysis failed: {exc}"}
+
+        except Exception as exc:  # noqa: BLE001
             return {
                 "status": "error",
-                "error": str(exc),
+                "error": f"{type(exc).__name__}: {exc}",
             }
-
-        except Exception as exc:
-            return {
-                "status": "error",
-                "error": (
-                    f"{type(exc).__name__}: {exc}"
-                ),
-            }
-
-    def _analyze(
-        self,
-        image_bytes: bytes,
-        width: int,
-        height: int,
-    ) -> str:
-        encoded_image = base64.b64encode(
-            image_bytes
-        ).decode(
-            "ascii"
-        )
-
-        prompt = (
-            "Inspect this exact Windows desktop screenshot "
-            "from Alfred's isolated child session. "
-            f"The image resolution is {width}x{height}. "
-            "Report only what is actually visible in this "
-            "image. Do not infer hidden windows, previous "
-            "state, or applications that are not visible. "
-            "Identify the current foreground window, every "
-            "other visibly open application window, visible "
-            "dialogs, and important visible text. "
-            "Also report the approximate screen position and "
-            "size of each visible application window when "
-            "that can be determined from the screenshot. "
-            "Pay particular attention to PowerShell, "
-            "Notepad, File Explorer, browsers, dialogs, and "
-            "taskbar contents. "
-            "This analysis will be used by another AI to "
-            "control the desktop, so factual accuracy is more "
-            "important than verbosity."
-        )
-
-        interaction = (
-            self._vision_client.interactions.create(
-                model=self.VISION_MODEL,
-                input=[
-                    {
-                        "type": "text",
-                        "text": prompt,
-                    },
-                    {
-                        "type": "image",
-                        "data": encoded_image,
-                        "mime_type": "image/png",
-                    },
-                ],
-                timeout=30,
-            )
-        )
-
-        output_text = getattr(
-            interaction,
-            "output_text",
-            None,
-        )
-
-        if not isinstance(
-            output_text,
-            str,
-        ):
-            raise RuntimeError(
-                "Vision model returned no text analysis."
-            )
-
-        output_text = output_text.strip()
-
-        if not output_text:
-            raise RuntimeError(
-                "Vision model returned an empty analysis."
-            )
-
-        return output_text

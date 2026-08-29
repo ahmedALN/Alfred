@@ -1,42 +1,148 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 
+from google import genai
+
 from src.ai.gemini import AlfredLiveSession
+from src.ai.providers import build_providers
+from src.brain.audit import AuditLog
+from src.brain.deliberation import Deliberator
+from src.brain.orchestrator import BrainLoop
+from src.brain.perception import Perception
+from src.brain.policy import Policy
+from src.brain.reasoner import LLMReasoner
+from src.config import load_settings
+from src.memory.learner import MemoryLearner
+from src.memory.store import MemoryStore
 from src.tools.computer_screenshot import ComputerScreenshotTool
+from src.tools.memory_tools import RecallTool, RememberTool
+from src.tools.network_info import NetworkInfoTool
 from src.tools.open_app import OpenAppTool
 from src.tools.powershell import PowerShellTool
 from src.tools.registry import ToolRegistry
+from src.tools.system_info import SystemInfoTool
 from src.windows.child_session import ChildSessionClient
 
 
 async def main() -> None:
+    settings = load_settings()
+
+    # --------------------------------------------------------------
+    # Long-term memory: persists across every future run of Alfred.
+    # --------------------------------------------------------------
+    gemini_client = genai.Client(api_key=settings.gemini_api_key)
+
+    # Swappable AI backends (chat / embeddings / vision). Voice stays
+    # on Gemini Live regardless. Switch with ALFRED_AI_PROVIDER.
+    providers = build_providers(settings, gemini_client)
+    print(f"[AI] providers: {providers.describe()}")
+
+    store = MemoryStore(settings.memory_db_path)
+
+    learner = MemoryLearner(
+        store=store,
+        chat=providers.chat,
+        embedder=providers.embedder,
+    )
+
+    known_facts = len(store.all_facts())
+
+    print(f"[Memory] {known_facts} known fact(s) loaded.")
+
+    # --------------------------------------------------------------
+    # Tools
+    # --------------------------------------------------------------
     registry = ToolRegistry()
 
     powershell_tool = PowerShellTool()
     open_app_tool = OpenAppTool()
+    system_info_tool = SystemInfoTool()
+    network_info_tool = NetworkInfoTool()
+    remember_tool = RememberTool(learner)
+    recall_tool = RecallTool(learner)
 
     child_session_client = ChildSessionClient()
 
     screenshot_tool = ComputerScreenshotTool(
-        child_session_client
+        child_session_client,
+        vision=providers.vision,
     )
 
-    registry.register(
-        powershell_tool
-    )
+    for tool in (
+        powershell_tool,
+        open_app_tool,
+        screenshot_tool,
+        system_info_tool,
+        network_info_tool,
+        remember_tool,
+        recall_tool,
+    ):
+        registry.register(tool)
 
-    registry.register(
-        open_app_tool
-    )
-
-    registry.register(
-        screenshot_tool
+    voice_policy = Policy(
+        autonomy=settings.brain_autonomy,
+        known_tools=set(registry.names()),
+        surface="voice",
     )
 
     session = AlfredLiveSession(
-        registry
+        registry,
+        store=store,
+        learner=learner,
+        policy=voice_policy,
     )
+
+    # --------------------------------------------------------------
+    # Proactive brain: background awareness loop. Optional; disabled
+    # via ALFRED_BRAIN_ENABLED=false.
+    # --------------------------------------------------------------
+    audit: AuditLog | None = None
+    brain: BrainLoop | None = None
+
+    if settings.brain_enabled:
+        audit = AuditLog(settings.brain_audit_path)
+
+        perception = Perception()
+
+        reasoner = LLMReasoner(providers.chat)
+
+        deliberator = Deliberator(
+            reasoner=reasoner,
+            store=store,
+            learner=learner,
+            tool_catalogue=registry.gemini_declarations(),
+            autonomy=settings.brain_autonomy,
+        )
+
+        policy = Policy(
+            autonomy=settings.brain_autonomy,
+            known_tools=set(registry.names()),
+        )
+
+        brain = BrainLoop(
+            perception=perception,
+            deliberator=deliberator,
+            policy=policy,
+            registry=registry,
+            audit=audit,
+            learner=learner,
+            speak=session.inject_system_prompt,
+            get_session_id=lambda: session.session_key,
+            tick_seconds=settings.brain_tick_seconds,
+            min_speak_gap_seconds=settings.brain_min_speak_gap_seconds,
+            quiet_hours=settings.brain_quiet_hours,
+            heartbeat_ticks=settings.brain_heartbeat_ticks,
+        )
+
+        session.attach_brain(brain)
+
+        print(
+            f"[Brain] enabled (autonomy={settings.brain_autonomy}, "
+            f"tick={settings.brain_tick_seconds:.0f}s)."
+        )
+    else:
+        print("[Brain] disabled.")
 
     try:
         await session.connect()
@@ -54,7 +160,7 @@ async def main() -> None:
 
     except KeyboardInterrupt:
         print(
-            "`nShutting down Alfred..."
+            "\nShutting down Alfred..."
         )
 
     finally:
@@ -63,6 +169,11 @@ async def main() -> None:
         child_session_client.close()
 
         open_app_tool.close()
+
+        if audit is not None:
+            audit.close()
+
+        store.close()
 
 
 if __name__ == "__main__":

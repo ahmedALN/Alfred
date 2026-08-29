@@ -3,6 +3,7 @@
 import asyncio
 import queue
 import threading
+import uuid
 from typing import Any
 
 import sounddevice as sd
@@ -10,6 +11,8 @@ from google import genai
 from google.genai import types
 
 from src.config import load_settings
+from src.memory.learner import MemoryLearner
+from src.memory.store import MemoryStore
 from src.tools.registry import ToolRegistry
 
 
@@ -35,6 +38,10 @@ class AlfredLiveSession:
     def __init__(
         self,
         registry: ToolRegistry,
+        store: MemoryStore | None = None,
+        learner: MemoryLearner | None = None,
+        brain: Any = None,
+        policy: Any = None,
     ) -> None:
         settings = load_settings()
 
@@ -44,6 +51,16 @@ class AlfredLiveSession:
 
         self.model = settings.gemini_live_model
         self.registry = registry
+
+        self._store = store
+        self._learner = learner
+        self._brain = brain
+        self._policy = policy
+        self._session_id = uuid.uuid4().hex
+
+        # Partial input-transcription fragments for the current user
+        # turn, joined and handed to the brain on turn completion.
+        self._input_transcript_parts: list[str] = []
 
         self.session: Any = None
         self._connection: Any = None
@@ -65,6 +82,98 @@ class AlfredLiveSession:
         self._state_lock = threading.Lock()
 
     # ================================================================
+    # Brain integration
+    # ================================================================
+
+    @property
+    def session_key(self) -> str:
+        """Stable id for the current voice session (for the audit log)."""
+
+        return self._session_id
+
+    def attach_brain(self, brain: Any) -> None:
+        """Wire the background awareness loop in after construction."""
+
+        self._brain = brain
+
+    def _gate_tool_call(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        pre_confirmed: bool,
+    ) -> dict[str, Any] | None:
+        """
+        Run a user-requested tool call through the safety policy.
+
+        Returns None to let the call proceed, or a dict to send back to
+        the model instead of executing (refusal or confirmation prompt).
+        """
+
+        if self._policy is None:
+            return None
+
+        from src.brain.types import Proposal, ProposalKind, Verdict
+
+        proposal = Proposal(
+            kind=ProposalKind.ACT,
+            message=f"run {name}",
+            tool=name,
+            args=arguments,
+        )
+
+        decision = self._policy.evaluate(proposal)
+
+        if decision.verdict is Verdict.AUTO:
+            return None
+
+        if decision.verdict is Verdict.FORBID:
+            return {
+                "status": "refused",
+                "reason": decision.reason,
+                "instruction": (
+                    "Do not retry. Tell the user you can't do this because "
+                    "it is irreversible or destructive, and they should do "
+                    "it themselves if they are certain."
+                ),
+            }
+
+        # CONFIRM
+        if pre_confirmed:
+            return None
+
+        return {
+            "status": "needs_confirmation",
+            "reason": decision.reason,
+            "instruction": (
+                "Briefly tell the user exactly what this will do and why it "
+                "is risky, then ask them to confirm. If they clearly agree, "
+                "call this same tool again with the extra argument "
+                '"_confirmed": true. If they decline, drop it.'
+            ),
+        }
+
+    async def inject_system_prompt(self, text: str) -> None:
+        """
+        Push a system-authored turn into the live session so Alfred
+        voices it in character. Used by the brain for proactive
+        messages and post-action summaries.
+        """
+
+        if self.session is None:
+            return
+
+        try:
+            await self.session.send_client_content(
+                turns=types.Content(
+                    role="user",
+                    parts=[types.Part(text=text)],
+                ),
+                turn_complete=True,
+            )
+        except Exception as exc:
+            print(f"[Brain] inject_system_prompt failed: {exc}")
+
+    # ================================================================
     # Gemini configuration
     # ================================================================
 
@@ -72,6 +181,71 @@ class AlfredLiveSession:
         self,
     ) -> list[dict[str, Any]]:
         return self.registry.gemini_declarations()
+
+    def _memory_context_block(self) -> str:
+        if self._learner is None:
+            return ""
+
+        try:
+            context = self._learner.recall_context()
+        except Exception as exc:
+            print(f"[Memory] failed to recall context: {exc}")
+            return ""
+
+        return f"\n\n{context}" if context else ""
+
+    def _system_instruction(self) -> str:
+        base = (
+            "You are Alfred, a concise Windows desktop "
+            "AI assistant. "
+            "Respond in English unless the user explicitly "
+            "speaks another language. "
+            "Keep responses direct and concise. "
+            "When an action is successfully completed and "
+            "no further information is needed, say 'Done.'. "
+            "Use tools whenever the user asks you to perform "
+            "an action that requires them. "
+
+            "Alfred has an isolated child Windows session "
+            "separate from the user's normal desktop. "
+            "The computer_screenshot tool captures and "
+            "analyzes the complete child-session display. "
+            "Treat its analysis as the visual state of the "
+            "child desktop at the time of capture. "
+            "Do not assume the child desktop is empty unless "
+            "the screenshot analysis explicitly indicates that. "
+
+            "For questions about the machine's resources, "
+            "processes, or network/firewall state, prefer the "
+            "system_info and network_info tools over raw "
+            "powershell, since their output is structured and "
+            "reliable. Use powershell for anything those tools "
+            "don't cover. "
+
+            "Whenever the user states a lasting preference, "
+            "corrects your behavior, or you learn a stable fact "
+            "about their machine or setup, call the 'remember' "
+            "tool to store it for future sessions. If you are "
+            "unsure whether you already know something relevant, "
+            "call 'recall' before asking the user or guessing. "
+
+            "Alfred also has a background awareness loop that watches "
+            "the machine and may hand you a proactive note prefixed "
+            "'(System: proactive)'. When you get one, relay it to the "
+            "user briefly and naturally in your own voice, then stop. "
+            "If the user tells you to stop mentioning a topic, to be "
+            "quiet, or to pause the background loop, acknowledge it in "
+            "one short sentence. "
+
+            "Run whatever the user asks without hesitation. If a tool "
+            "returns status 'needs_confirmation', follow its instruction: "
+            "tell the user what the action does and the risk, and only "
+            "if they agree, call the same tool again with '_confirmed': "
+            "true. If a tool returns status 'refused', do not retry - "
+            "explain why and suggest they do it manually."
+        )
+
+        return base + self._memory_context_block()
 
     def _config(self) -> types.LiveConnectConfig:
         return types.LiveConnectConfig(
@@ -107,26 +281,7 @@ class AlfredLiveSession:
                 thinking_level="minimal"
             ),
 
-            system_instruction=(
-                "You are Alfred, a concise Windows desktop "
-                "AI assistant. "
-                "Respond in English unless the user explicitly "
-                "speaks another language. "
-                "Keep responses direct and concise. "
-                "When an action is successfully completed and "
-                "no further information is needed, say 'Done.'. "
-                "Use tools whenever the user asks you to perform "
-                "an action that requires them. "
-
-                "Alfred has an isolated child Windows session "
-                "separate from the user's normal desktop. "
-                "The computer_screenshot tool captures and "
-                "analyzes the complete child-session display. "
-                "Treat its analysis as the visual state of the "
-                "child desktop at the time of capture. "
-                "Do not assume the child desktop is empty unless "
-                "the screenshot analysis explicitly indicates that."
-            ),
+            system_instruction=self._system_instruction(),
         )
 
     # ================================================================
@@ -356,6 +511,8 @@ class AlfredLiveSession:
 
             self._start_microphone()
 
+            await self._send_startup_greeting()
+
         except Exception:
             self._connection = None
 
@@ -363,6 +520,33 @@ class AlfredLiveSession:
             self._stop_audio_output()
 
             raise
+
+    async def _send_startup_greeting(self) -> None:
+        if self.session is None:
+            return
+
+        try:
+            await self.session.send_client_content(
+                turns=types.Content(
+                    role="user",
+                    parts=[
+                        types.Part(
+                            text=(
+                                "(System: Alfred has just started up "
+                                "and is now listening. Greet the user "
+                                "briefly by name if you know it, "
+                                "mention anything relevant you "
+                                "remember from before if it's useful, "
+                                "and ask what they need. Keep it to "
+                                "one or two short sentences.)"
+                            )
+                        )
+                    ],
+                ),
+                turn_complete=True,
+            )
+        except Exception as exc:
+            print(f"[Startup] failed to send greeting prompt: {exc}")
 
     # ================================================================
     # Microphone → Gemini
@@ -463,6 +647,17 @@ class AlfredLiveSession:
                             f"{input_transcription.text}"
                         )
 
+                        self._input_transcript_parts.append(
+                            input_transcription.text
+                        )
+
+                        if self._store is not None:
+                            self._store.add_turn(
+                                self._session_id,
+                                "user",
+                                input_transcription.text,
+                            )
+
                 output_transcription = (
                     server_content.output_transcription
                 )
@@ -493,11 +688,34 @@ class AlfredLiveSession:
                             f"{response_text}"
                         )
 
+                        if self._store is not None:
+                            self._store.add_turn(
+                                self._session_id,
+                                "alfred",
+                                response_text,
+                            )
+
                     print(
                         "[Turn complete]"
                     )
 
                     transcript_parts.clear()
+
+                    user_utterance = "".join(
+                        self._input_transcript_parts
+                    ).strip()
+
+                    self._input_transcript_parts.clear()
+
+                    if user_utterance and self._brain is not None:
+                        try:
+                            await self._brain.note_user_reply(
+                                user_utterance
+                            )
+                        except Exception as exc:
+                            print(
+                                f"[Brain] note_user_reply failed: {exc}"
+                            )
 
             await asyncio.sleep(0)
 
@@ -530,6 +748,8 @@ class AlfredLiveSession:
                 call.args or {}
             )
 
+            pre_confirmed = bool(arguments.pop("_confirmed", False))
+
             print(
                 f"\n[Tool] {call.name}"
             )
@@ -537,6 +757,31 @@ class AlfredLiveSession:
             print(
                 f"[Arguments] {arguments}"
             )
+
+            gate = self._gate_tool_call(
+                call.name, arguments, pre_confirmed
+            )
+
+            if gate is not None:
+                print(f"[Policy] {gate['status']}: {gate.get('reason', '')}")
+
+                if self._store is not None:
+                    self._store.add_tool_event(
+                        self._session_id,
+                        call.name,
+                        arguments,
+                        gate,
+                        False,
+                    )
+
+                function_responses.append(
+                    types.FunctionResponse(
+                        name=call.name,
+                        id=call.id,
+                        response=gate,
+                    )
+                )
+                continue
 
             result = await asyncio.to_thread(
                 self.registry.execute,
@@ -558,6 +803,17 @@ class AlfredLiveSession:
             print(
                 f"[Tool Result] {result}"
             )
+
+            if self._store is not None:
+                success = result.get("status") != "error"
+
+                self._store.add_tool_event(
+                    self._session_id,
+                    call.name,
+                    arguments,
+                    result,
+                    success,
+                )
 
             function_responses.append(
                 types.FunctionResponse(
@@ -589,12 +845,17 @@ class AlfredLiveSession:
             self._receive()
         )
 
+        tasks = {microphone_task, receive_task}
+
+        brain_task: asyncio.Task[None] | None = None
+
+        if self._brain is not None:
+            brain_task = asyncio.create_task(self._brain.run())
+            tasks.add(brain_task)
+
         try:
             done, pending = await asyncio.wait(
-                {
-                    microphone_task,
-                    receive_task,
-                },
+                tasks,
                 return_when=asyncio.FIRST_EXCEPTION,
             )
 
@@ -613,12 +874,11 @@ class AlfredLiveSession:
             )
 
         finally:
-            microphone_task.cancel()
-            receive_task.cancel()
+            for task in tasks:
+                task.cancel()
 
             await asyncio.gather(
-                microphone_task,
-                receive_task,
+                *tasks,
                 return_exceptions=True,
             )
 
@@ -626,9 +886,35 @@ class AlfredLiveSession:
     # Cleanup
     # ================================================================
 
+    async def _distill_session(self) -> None:
+        if self._store is None or self._learner is None:
+            return
+
+        transcript = self._store.session_turns(self._session_id)
+
+        if not transcript:
+            return
+
+        try:
+            learned = await asyncio.to_thread(
+                self._learner.distill_session,
+                transcript,
+            )
+
+            if learned:
+                print(
+                    f"[Memory] learned {learned} new fact(s) "
+                    "from this session."
+                )
+
+        except Exception as exc:
+            print(f"[Memory] session distillation failed: {exc}")
+
     async def close(self) -> None:
         with self._state_lock:
             self._running = False
+
+        await self._distill_session()
 
         try:
             if self._mic_queue is not None:

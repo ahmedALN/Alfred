@@ -1,0 +1,271 @@
+import asyncio
+from pathlib import Path
+
+import pytest
+
+from src.brain.audit import AuditLog
+from src.brain.orchestrator import BrainLoop
+from src.brain.policy import Policy
+from src.brain.types import Notable, Proposal, ProposalKind
+
+
+# ---------------------------------------------------------------- fakes
+
+
+class Clock:
+    def __init__(self) -> None:
+        self.t = 1000.0
+
+    def __call__(self) -> float:
+        return self.t
+
+    def advance(self, seconds: float) -> None:
+        self.t += seconds
+
+
+class FakePerception:
+    def __init__(self, notables: list[Notable]) -> None:
+        self._notables = notables
+
+    def sense(self):
+        obs = []
+        return list(self._notables), obs
+
+
+class FakeDeliberator:
+    def __init__(self, proposals: list[Proposal]) -> None:
+        self.proposals = proposals
+        self.calls = 0
+
+    def deliberate(self, notables, session_id):
+        self.calls += 1
+        return list(self.proposals)
+
+
+class FakeRegistry:
+    def __init__(self, result=None) -> None:
+        self.result = result or {"status": "success"}
+        self.executed: list[tuple[str, dict]] = []
+
+    def execute(self, name, args):
+        self.executed.append((name, args))
+        return self.result
+
+
+class FakeLearner:
+    def __init__(self) -> None:
+        self.remembered: list[dict] = []
+
+    def remember(self, content, category="general", source="conversation"):
+        self.remembered.append(
+            {"content": content, "category": category, "source": source}
+        )
+        return {"status": "stored"}
+
+
+KNOWN_TOOLS = {"powershell", "system_info", "open_app", "remember", "recall"}
+
+
+def _notable():
+    return Notable("resources", "disk.C:.free_gb", "Disk C: 5 GB free", "warn")
+
+
+def build_loop(
+    tmp_path: Path,
+    proposals: list[Proposal],
+    *,
+    clock: Clock | None = None,
+    registry: FakeRegistry | None = None,
+    learner: FakeLearner | None = None,
+    min_speak_gap: float = 600.0,
+    autonomy: str = "full",
+):
+    clock = clock or Clock()
+    audit = AuditLog(tmp_path / "audit.sqlite3")
+    spoken: list[str] = []
+
+    async def speak(text: str) -> None:
+        spoken.append(text)
+
+    loop = BrainLoop(
+        perception=FakePerception([_notable()]),
+        deliberator=FakeDeliberator(proposals),
+        policy=Policy(autonomy, KNOWN_TOOLS),
+        registry=registry or FakeRegistry(),
+        audit=audit,
+        learner=learner or FakeLearner(),
+        speak=speak,
+        get_session_id=lambda: "sess-1",
+        tick_seconds=90.0,
+        min_speak_gap_seconds=min_speak_gap,
+        monotonic=clock,
+        fullscreen_probe=lambda: False,
+    )
+    return loop, spoken, audit, clock
+
+
+def _kinds(audit: AuditLog) -> list[str]:
+    return [row["kind"] for row in audit.recent(limit=100)]
+
+
+# ---------------------------------------------------------------- tests
+
+
+def test_speak_proposal_is_spoken_and_audited(tmp_path):
+    loop, spoken, audit, _ = build_loop(
+        tmp_path, [Proposal(ProposalKind.SPEAK, "Your disk is nearly full.")]
+    )
+
+    asyncio.run(loop.run_once())
+
+    assert spoken == ["(System: proactive) Your disk is nearly full."]
+    kinds = _kinds(audit)
+    assert "tick" in kinds and "notable" in kinds
+    assert "decision" in kinds and "spoken" in kinds
+    audit.close()
+
+
+def test_forbidden_proposal_is_blocked_not_executed(tmp_path):
+    registry = FakeRegistry()
+    loop, spoken, audit, _ = build_loop(
+        tmp_path,
+        [
+            Proposal(
+                ProposalKind.ACT,
+                "clean up windows",
+                tool="powershell",
+                args={"command": "Remove-Item -Recurse C:\\Windows"},
+            )
+        ],
+        registry=registry,
+    )
+
+    asyncio.run(loop.run_once())
+
+    assert registry.executed == []
+    assert spoken == []
+    assert "blocked" in _kinds(audit)
+    audit.close()
+
+
+def test_auto_readonly_action_executes_and_reports(tmp_path):
+    registry = FakeRegistry(result={"status": "success", "data": {}})
+    loop, spoken, audit, _ = build_loop(
+        tmp_path,
+        [
+            Proposal(
+                ProposalKind.ACT,
+                "checked your disk usage",
+                tool="system_info",
+                args={"query": "disks"},
+            )
+        ],
+        registry=registry,
+    )
+
+    asyncio.run(loop.run_once())
+
+    assert registry.executed == [("system_info", {"query": "disks"})]
+    assert spoken == ["(System: proactive) checked your disk usage"]
+    kinds = _kinds(audit)
+    assert "action" in kinds and "action_result" in kinds
+    audit.close()
+
+
+def test_rate_limit_suppresses_second_speak(tmp_path):
+    clock = Clock()
+    loop, spoken, audit, _ = build_loop(
+        tmp_path,
+        [
+            Proposal(ProposalKind.SPEAK, "first"),
+            Proposal(ProposalKind.SPEAK, "second"),
+        ],
+        clock=clock,
+    )
+
+    asyncio.run(loop.run_once())
+
+    assert spoken == ["(System: proactive) first"]
+    audit.close()
+
+
+def test_high_urgency_bypasses_rate_limit(tmp_path):
+    loop, spoken, audit, _ = build_loop(
+        tmp_path,
+        [
+            Proposal(ProposalKind.SPEAK, "first"),
+            Proposal(ProposalKind.SPEAK, "urgent", urgency="high"),
+        ],
+    )
+
+    asyncio.run(loop.run_once())
+
+    assert spoken == [
+        "(System: proactive) first",
+        "(System: proactive) urgent",
+    ]
+    audit.close()
+
+
+def test_pause_phrase_halts_ticks(tmp_path):
+    loop, spoken, audit, _ = build_loop(
+        tmp_path, [Proposal(ProposalKind.SPEAK, "something")]
+    )
+
+    asyncio.run(loop.note_user_reply("Alfred, stop"))
+    asyncio.run(loop.run_once())
+
+    assert spoken == []
+    audit.close()
+
+
+def test_dnd_phrase_suppresses_speech(tmp_path):
+    loop, spoken, audit, _ = build_loop(
+        tmp_path, [Proposal(ProposalKind.SPEAK, "something")]
+    )
+
+    asyncio.run(loop.note_user_reply("do not disturb me"))
+    asyncio.run(loop.run_once())
+
+    assert spoken == []
+    assert "spoken" in _kinds(audit)  # recorded as suppressed
+    audit.close()
+
+
+def test_suppression_phrase_persists_fact(tmp_path):
+    learner = FakeLearner()
+    loop, _, audit, _ = build_loop(
+        tmp_path, [Proposal(ProposalKind.SPEAK, "x")], learner=learner
+    )
+
+    asyncio.run(loop.note_user_reply("stop telling me about disk space"))
+
+    assert len(learner.remembered) == 1
+    assert learner.remembered[0]["content"] == "SUPPRESS: disk space"
+    audit.close()
+
+
+def test_confirm_then_yes_executes_action(tmp_path):
+    registry = FakeRegistry()
+    loop, spoken, audit, _ = build_loop(
+        tmp_path,
+        [
+            Proposal(
+                ProposalKind.ACT,
+                "create a cleanup script",
+                tool="powershell",
+                args={"command": "New-Item C:\\temp\\x.ps1 -ItemType File"},
+            )
+        ],
+        registry=registry,
+    )
+
+    asyncio.run(loop.run_once())
+    assert registry.executed == []  # waiting on confirmation
+    assert spoken and spoken[0].endswith("go ahead?")
+
+    asyncio.run(loop.note_user_reply("yes, go ahead"))
+    assert registry.executed == [
+        ("powershell", {"command": "New-Item C:\\temp\\x.ps1 -ItemType File"})
+    ]
+    audit.close()
