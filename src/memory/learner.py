@@ -194,6 +194,38 @@ class MemoryLearner:
             f"{lines}"
         )
 
+    def dedupe(self, threshold: float = 0.93) -> int:
+        """
+        Merge near-duplicate facts that accumulate over months. Keeps the
+        more-reinforced one, folds the other's reinforcement in. Returns
+        the number of merges. Embedding-only; a no-op without embeddings.
+        """
+
+        facts = [f for f in self._store.all_facts() if f.embedding is not None]
+        merged = 0
+        removed: set[int] = set()
+
+        for i, a in enumerate(facts):
+            if a.id in removed:
+                continue
+            for b in facts[i + 1:]:
+                if b.id in removed:
+                    continue
+                if cosine_similarity(a.embedding, b.embedding) < threshold:
+                    continue
+                keep, drop = (
+                    (a, b) if a.times_reinforced >= b.times_reinforced
+                    else (b, a)
+                )
+                try:
+                    self._store.merge_facts(keep.id, drop.id)
+                    removed.add(drop.id)
+                    merged += 1
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[Memory] merge failed: {exc}")
+
+        return merged
+
     def _embed(self, text: str) -> list[float] | None:
         if self._embedder is None:
             return None

@@ -1065,6 +1065,10 @@ class AlfredLiveSession:
                     "from this session."
                 )
 
+            merged = await asyncio.to_thread(self._learner.dedupe)
+            if merged:
+                print(f"[Memory] merged {merged} duplicate fact(s).")
+
         except Exception as exc:
             print(f"[Memory] session distillation failed: {exc}")
 

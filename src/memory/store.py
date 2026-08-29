@@ -181,6 +181,36 @@ class MemoryStore:
             )
             self._conn.commit()
 
+    def update_fact(self, fact_id: int, content: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE facts SET content = ?, updated_at = ? WHERE id = ?",
+                (content, _now(), fact_id),
+            )
+            self._conn.commit()
+
+    def search_facts(self, text: str) -> list[Fact]:
+        like = f"%{text.strip()}%"
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM facts WHERE content LIKE ? "
+                "ORDER BY times_reinforced DESC, updated_at DESC",
+                (like,),
+            ).fetchall()
+        return [self._row_to_fact(row) for row in rows]
+
+    def merge_facts(self, keep_id: int, drop_id: int) -> None:
+        """Fold drop_id into keep_id: sum reinforcement, delete the dup."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE facts SET times_reinforced = times_reinforced + "
+                "(SELECT times_reinforced FROM facts WHERE id = ?), "
+                "updated_at = ? WHERE id = ?",
+                (drop_id, _now(), keep_id),
+            )
+            self._conn.execute("DELETE FROM facts WHERE id = ?", (drop_id,))
+            self._conn.commit()
+
     @staticmethod
     def _row_to_fact(row: sqlite3.Row) -> Fact:
         embedding_raw = row["embedding"]

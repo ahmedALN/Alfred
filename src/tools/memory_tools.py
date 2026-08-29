@@ -61,6 +61,60 @@ class RememberTool(AlfredTool):
         return self._learner.remember(content=content, category=category)
 
 
+class ForgetTool(AlfredTool):
+    """Lets the user tell Alfred to delete something it remembers."""
+
+    name = "forget"
+
+    description = (
+        "Delete a fact from long-term memory when the user says to forget "
+        "something. Call with a short description of what to forget; it "
+        "returns the matching facts. To actually delete, call again with "
+        "the same query plus '_confirmed': true, and it removes the best "
+        "match."
+    )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "_confirmed": {"type": "boolean"},
+            },
+            "required": ["query"],
+        }
+
+    def __init__(self, learner: MemoryLearner) -> None:
+        self._learner = learner
+
+    def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        query = arguments.get("query")
+        if not isinstance(query, str) or not query.strip():
+            return {"status": "error", "error": "'query' must be a string."}
+
+        matches = self._learner.recall(query, top_k=5)
+
+        if not matches:
+            return {"status": "not_found",
+                    "note": "Nothing in memory matches that."}
+
+        if not arguments.get("_confirmed"):
+            return {
+                "status": "needs_confirmation",
+                "matches": [{"content": f.content} for f in matches],
+                "instruction": (
+                    "Read the top match to the user and ask if that's the "
+                    "one to forget. If yes, call forget again with the same "
+                    "query and '_confirmed': true."
+                ),
+            }
+
+        target = matches[0]
+        self._learner._store.delete_fact(target.id)
+        return {"status": "success", "forgot": target.content}
+
+
 class RecallTool(AlfredTool):
     """Lets Alfred deliberately search its own long-term memory."""
 

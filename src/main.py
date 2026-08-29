@@ -30,7 +30,7 @@ from src.resource_mode import ResourceMode
 from src.tools.resource_tool import ResourceModeTool
 from src.tools.computer_screenshot import ComputerScreenshotTool
 from src.tools.desktop_control import DesktopControlTool
-from src.tools.memory_tools import RecallTool, RememberTool
+from src.tools.memory_tools import ForgetTool, RecallTool, RememberTool
 from src.tools.network_info import NetworkInfoTool
 from src.tools.open_app import OpenAppTool
 from src.tools.powershell import PowerShellTool
@@ -86,6 +86,7 @@ async def main() -> None:
     network_info_tool = NetworkInfoTool()
     remember_tool = RememberTool(learner)
     recall_tool = RecallTool(learner)
+    forget_tool = ForgetTool(learner)
 
     # Desktop Alfred controls: try to bring up the input/capture agent.
     agent_status = ensure_agent_running()
@@ -146,6 +147,7 @@ async def main() -> None:
         network_info_tool,
         remember_tool,
         recall_tool,
+        forget_tool,
         RunTaskTool(task_queue),
         TaskStatusTool(task_queue),
         ResourceModeTool(resource_mode),
