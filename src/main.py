@@ -56,7 +56,7 @@ async def main() -> None:
         instance_lock.acquire()
     except AlreadyRunning as exc:
         print(f"\n{exc}\n")
-        return
+        raise SystemExit(3)  # watchdog: retry later, don't treat as clean exit
 
     # --------------------------------------------------------------
     # Long-term memory: persists across every future run of Alfred.

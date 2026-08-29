@@ -20,7 +20,8 @@ def _pythonw() -> str:
 
 
 def _launch_command() -> str:
-    return f'"{_pythonw()}" -m src.main'
+    # The watchdog keeps Alfred alive across crashes.
+    return f'"{_pythonw()}" -m src.watchdog'
 
 
 def install() -> dict[str, object]:

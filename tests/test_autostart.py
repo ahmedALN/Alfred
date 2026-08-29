@@ -25,7 +25,7 @@ def test_install_creates_logon_task(monkeypatch):
     args = calls[0]
     assert args[:4] == ["schtasks", "/Create", "/TN", "AlfredAssistant"]
     assert "ONLOGON" in args
-    assert "-m src.main" in " ".join(args)
+    assert "-m src.watchdog" in " ".join(args)
     assert "/RL" in args and "LIMITED" in args  # no admin required
 
 
