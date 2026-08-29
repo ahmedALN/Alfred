@@ -456,6 +456,14 @@ class ChildSessionClient:
             }
         )
 
+    def capture_window(self, hwnd: int) -> dict[str, Any]:
+        """
+        Point the capture at one window (by HWND). Subsequent
+        screenshot() calls grab that window - even when it's on an
+        inactive virtual desktop, so no desktop switch / flicker.
+        """
+        return self._request({"op": "capture_window", "hwnd": int(hwnd)})
+
     def key(
         self,
         keys: list[str] | str,

@@ -26,6 +26,11 @@ class FakeClient:
         self.calls.append(("screenshot",))
         return FakeScreenshot()
 
+    def capture_window(self, hwnd):
+        self._g()
+        self.calls.append(("capture_window", hwnd))
+        return {"started": True}
+
     def mouse_move(self, x, y):
         self._g(); self.calls.append(("mouse_move", x, y))
 
@@ -84,6 +89,14 @@ def test_look_no_focus_switch(tool):
     out = t.execute({"action": "look"})
     assert out["status"] == "success" and "Notepad" in out["analysis"]
     assert desks.switches == []  # look never switches desktops
+
+
+def test_look_with_hwnd_captures_that_window(tool):
+    t, client, desks = tool
+    out = t.execute({"action": "look", "hwnd": 12345})
+    assert out["status"] == "success"
+    assert ("capture_window", 12345) in client.calls
+    assert desks.switches == []  # no flicker
 
 
 def test_click_borrows_focus_and_returns(tool):

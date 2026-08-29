@@ -47,7 +47,9 @@ class DesktopControlTool(AlfredTool):
         "See and control Alfred's own desktop (separate from the user's). "
         "action='look' returns a screenshot analysis with pixel "
         "coordinates of windows and controls - always look before acting, "
-        "and look again afterwards to confirm. Other actions: move, click, "
+        "and look again afterwards to confirm. Pass hwnd (from open_app) to "
+        "'look' to capture just that window with no screen flicker. "
+        "Other actions: move, click, "
         "double_click, right_click, middle_click (need x,y); type (needs "
         "text); key (needs keys, e.g. 'ctrl+s' or ['enter']); scroll "
         "(x,y,dy - negative dy scrolls down); drag (x1,y1,x2,y2); activate "
@@ -148,7 +150,8 @@ class DesktopControlTool(AlfredTool):
 
         try:
             if action == "look":
-                return self._look()
+                hwnd = arguments.get("hwnd")
+                return self._look(hwnd if isinstance(hwnd, int) else None)
 
             if action == "wait":
                 time.sleep(min(float(arguments.get("seconds", 1.0)), 20.0))
@@ -190,7 +193,16 @@ class DesktopControlTool(AlfredTool):
 
     # ----------------------------------------------------------------
 
-    def _look(self) -> dict[str, Any]:
+    def _look(self, hwnd: int | None = None) -> dict[str, Any]:
+        if hwnd is not None:
+            # Capture that window directly - no desktop switch, no flicker.
+            try:
+                self._client.capture_window(hwnd)
+            except ChildSessionError as exc:
+                return {
+                    "status": "error",
+                    "error": f"Could not capture window {hwnd}: {exc}",
+                }
         shot = self._client.screenshot()
         image = shot.png_bytes
         if self._grid:

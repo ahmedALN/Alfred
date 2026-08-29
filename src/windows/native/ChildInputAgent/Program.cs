@@ -440,6 +440,9 @@ private static string HandleRequest(
             case "capture_start":
                 return HandleCaptureStart();
 
+            case "capture_window":
+                return HandleCaptureWindow(root);
+
             case "screenshot":
                 return HandleScreenshot();
 
@@ -480,6 +483,39 @@ private static string HandleRequest(
 // ================================================================
 // Persistent capture commands
 // ================================================================
+
+private static string HandleCaptureWindow(JsonElement root)
+{
+    if (!root.TryGetProperty("hwnd", out JsonElement hwndEl) ||
+        !hwndEl.TryGetInt64(out long hwndVal))
+    {
+        return Error("invalid_hwnd", "Request must contain integer 'hwnd'.");
+    }
+
+    try
+    {
+        _capture?.Dispose();
+        _capture = CaptureController.CreateForWindow(new IntPtr(hwndVal));
+        _capture.Start();
+
+        return Success(new
+        {
+            started = true,
+            scope = "window",
+            hwnd = hwndVal,
+            width = _capture.Width,
+            height = _capture.Height,
+            session = GetCurrentSessionId()
+        });
+    }
+    catch (Exception ex)
+    {
+        _capture?.Dispose();
+        _capture = null;
+        return Error("capture_window_failed",
+            $"{ex.GetType().Name}: {ex.Message}");
+    }
+}
 
 private static string HandleCaptureStart()
 {
@@ -1780,6 +1816,21 @@ private sealed class CaptureController :
         );
     }
 
+    public static CaptureController
+        CreateForWindow(IntPtr hWnd)
+    {
+        if (!IsWindow(hWnd))
+        {
+            throw new InvalidOperationException(
+                "Target window does not exist."
+            );
+        }
+
+        return new CaptureController(
+            CreateWindowCaptureItem(hWnd)
+        );
+    }
+
     public void Start()
     {
         ThrowIfDisposed();
@@ -2079,6 +2130,58 @@ private sealed class CaptureController :
     }
 
     private static GraphicsCaptureItem
+        CreateWindowCaptureItem(
+            IntPtr hWnd)
+    {
+        IntPtr factory =
+            GetActivationFactory(
+                "Windows.Graphics.Capture.GraphicsCaptureItem"
+            );
+
+        try
+        {
+            Guid interopGuid = GraphicsCaptureItemInteropGuid;
+            int hr = Marshal.QueryInterface(
+                factory, ref interopGuid, out IntPtr interop);
+            if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+            if (interop == IntPtr.Zero)
+                throw new InvalidOperationException(
+                    "IGraphicsCaptureItemInterop is null.");
+
+            try
+            {
+                IntPtr vtable = Marshal.ReadIntPtr(interop);
+                // vtable slot 3 = CreateForWindow (slot 4 = CreateForMonitor)
+                IntPtr fn = Marshal.ReadIntPtr(vtable, IntPtr.Size * 3);
+                if (fn == IntPtr.Zero)
+                    throw new InvalidOperationException(
+                        "CreateForWindow pointer is null.");
+
+                var createForWindow =
+                    Marshal.GetDelegateForFunctionPointer<
+                        CreateForWindowDelegate>(fn);
+
+                Guid itemGuid = GraphicsCaptureItemGuid;
+                int createHr = createForWindow(
+                    interop, hWnd, ref itemGuid, out IntPtr itemPointer);
+                if (createHr < 0) Marshal.ThrowExceptionForHR(createHr);
+                if (itemPointer == IntPtr.Zero)
+                    throw new InvalidOperationException(
+                        "CreateForWindow returned null.");
+
+                try
+                {
+                    return MarshalInterface<GraphicsCaptureItem>
+                        .FromAbi(itemPointer);
+                }
+                finally { Marshal.Release(itemPointer); }
+            }
+            finally { Marshal.Release(interop); }
+        }
+        finally { Marshal.Release(factory); }
+    }
+
+    private static GraphicsCaptureItem
         CreateMonitorCaptureItem(
             IntPtr hMonitor)
     {
@@ -2361,6 +2464,16 @@ private delegate int
     CreateForMonitorDelegate(
         IntPtr @this,
         IntPtr hMonitor,
+        ref Guid iid,
+        out IntPtr result
+    );
+
+[UnmanagedFunctionPointer(
+    CallingConvention.StdCall)]
+private delegate int
+    CreateForWindowDelegate(
+        IntPtr @this,
+        IntPtr hWnd,
         ref Guid iid,
         out IntPtr result
     );
