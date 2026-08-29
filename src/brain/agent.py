@@ -14,29 +14,31 @@ from src.tools.registry import ToolRegistry
 from src.tools.results import summarize_result, tool_succeeded
 
 _PLAN_SYSTEM = """You are Alfred's task planner on a Windows PC. Turn the goal \
-into an ordered plan a tool-using agent can execute.
+into the SHORTEST ordered plan a tool-using agent can execute.
 
 Rules:
-- 2 to 6 steps. Each step is one imperative sentence a person would recognise \
-("Search Spotify for the artist and start the top track"), NOT a code-style \
-identifier and NOT a UI micro-action like "focus the search box".
-- Every 'done_when' must be checkable from a tool result you can actually get \
-with the listed tools - a value a tool returns, a file that exists, text shown \
-in a control, a process that is running. Never "it worked" or "the user is \
-happy".
-- Prefer ui_control (reads controls by name, exact) over desktop_control \
-(screenshot guessing). Prefer powershell / system_info for files and settings.
-- Use the SITUATION block for real paths (the user's profile folder, etc.) - \
-never invent a username.
+- 2 to 5 steps. Fewer is better. Each step is a meaningful unit of work - \
+open an app, do a search and start playback, run one PowerShell command that \
+does several related things. NEVER a single keystroke, a single click, or \
+"focus the box".
+- Do NOT add steps that only check, confirm, verify, or "get" a value - \
+verification happens automatically after every step. The last step should be \
+the last real action, not "confirm it worked".
+- Combine: "search and play the top track" is ONE step, not three.
+- Every 'done_when' must be checkable from a tool result - a value a tool \
+returns, a file that exists, text in a control. Never "it worked".
+- Prefer ui_control for apps, powershell / system_info for files and settings. \
+Use the ENVIRONMENT paths - never invent a username.
 
-Example goal: "play a Drake song on Spotify"
+Example goal: "play a Drake song on Spotify, then tell me what's playing"
 {"plan":[
- {"step":"Open Spotify","done_when":"open_app returns success or ui_control tree lists the Spotify window"},
- {"step":"Search Spotify for Drake and play the top track","done_when":"ui_control get on the now-playing area shows a Drake track and it is playing"}],
+ {"step":"Open Spotify","done_when":"open_app returns success"},
+ {"step":"Search Spotify for Drake and start the top track","done_when":"ui_control get on the now-playing text shows a Drake track"}],
  "note":""}
+(Note: no third "tell me / confirm" step - that check is automatic.)
 
 Reply with ONLY this JSON:
-{"plan":[{"step":"<imperative sentence>","done_when":"<checkable condition>"}],
+{"plan":[{"step":"<meaningful action>","done_when":"<checkable condition>"}],
  "note":"<one line about anything risky or uncertain, or empty>"}
 """
 
@@ -169,10 +171,11 @@ class TaskAgent:
     ) -> None:
         self._chat = chat
         self._plan_chat = plan_chat or chat
-        # Verification accuracy matters more than its latency (it's the
-        # guard against reporting unverified work), so it defaults to the
-        # stronger planning model rather than the fast local one.
-        self._verify_chat = verify_chat or self._plan_chat
+        # Verification defaults to the FAST model: the deterministic
+        # fast-paths + strict per-substep scoping carry most of the load,
+        # and a strong-model verify on every step of a multi-step task
+        # roughly doubles latency. Pass verify_chat= to override.
+        self._verify_chat = verify_chat or chat
         self._registry = registry
         self._situation = situation
         self._learner = learner
@@ -505,6 +508,31 @@ class TaskAgent:
         if len(set(norm)) < len(norm):
             self._plan_gripe = "the plan repeats a step - each step must be distinct"
             return False
+        # near-duplicates ("check free space" / "get free space information")
+        kw = [
+            {w for w in n.split() if len(w) > 3 and w not in self._VERIFY_STOP}
+            for n in norm
+        ]
+        for i in range(len(kw)):
+            for j in range(i + 1, len(kw)):
+                a, b = kw[i], kw[j]
+                if a and b and len(a & b) / len(a | b) >= 0.6:
+                    self._plan_gripe = (
+                        f"steps {i + 1} and {j + 1} are near-duplicates - merge them"
+                    )
+                    return False
+        # explicit verify/confirm-only steps (verification is automatic)
+        for s in steps:
+            t = s["step"].lower()
+            if (
+                t.startswith(("verify ", "confirm ", "check that ", "ensure that "))
+                or t.startswith(("get the current", "get the currently"))
+            ) and s is not steps[0]:
+                self._plan_gripe = (
+                    f"drop the check-only step {s['step']!r} - verification is "
+                    "automatic"
+                )
+                return False
         for s in steps:
             text = s["step"]
             # identifier-like ("search_spotify_top_track") or one bare word
