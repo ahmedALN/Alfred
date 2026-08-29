@@ -37,7 +37,21 @@ class TaskStore:
         self._conn.row_factory = sqlite3.Row
         with self._lock:
             self._conn.executescript(_SCHEMA)
+            self._migrate()
             self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after a database was first created
+        (CREATE TABLE IF NOT EXISTS won't touch an existing table)."""
+        cols = {
+            r["name"]
+            for r in self._conn.execute("PRAGMA table_info(tasks)").fetchall()
+        }
+        if "source" not in cols:
+            self._conn.execute(
+                "ALTER TABLE tasks ADD COLUMN source TEXT NOT NULL "
+                "DEFAULT 'voice'"
+            )
 
     def add(self, task_id: str, goal: str, source: str = "voice") -> None:
         now = _now()
