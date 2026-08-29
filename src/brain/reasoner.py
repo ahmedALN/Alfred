@@ -145,7 +145,9 @@ class LLMReasoner:
         prompt = build_prompt(context)
 
         try:
-            raw_text = self._chat.generate(prompt, temperature=0.3)
+            raw_text = self._chat.generate(
+                prompt, temperature=0.3, max_tokens=600
+            )
         except Exception as exc:  # noqa: BLE001 - brain must survive
             print(f"[Brain/Reasoner] generation failed: {exc}")
             return []

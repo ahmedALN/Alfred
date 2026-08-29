@@ -303,7 +303,9 @@ class MemoryLearner:
         prompt = DISTILLATION_PROMPT.format(transcript=formatted)
 
         try:
-            raw_text = self._chat.generate(prompt, temperature=0.2)
+            raw_text = self._chat.generate(
+                prompt, temperature=0.2, max_tokens=800
+            )
         except Exception as exc:  # noqa: BLE001
             print(f"[Memory] session distillation failed: {exc}")
             return 0

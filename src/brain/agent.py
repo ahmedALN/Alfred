@@ -155,9 +155,9 @@ class TaskAgent:
         policy_voice: Policy | None = None,
         plan_chat: ChatProvider | None = None,
         verify_chat: ChatProvider | None = None,
-        max_steps: int = 20,
-        max_seconds: float = 360.0,
-        substep_max_calls: int = 6,
+        max_steps: int = 16,
+        max_seconds: float = 240.0,
+        substep_max_calls: int = 5,
         situation: "Callable[[], str] | None" = None,
         learner: Any = None,
         audit: Any = None,
@@ -260,6 +260,7 @@ class TaskAgent:
         replans = 0
         pi = 0
         total_calls = 0
+        dead_streak = 0  # consecutive steps that made zero progress
 
         while pi < len(plan):
             if self._cancel_check():
@@ -269,6 +270,13 @@ class TaskAgent:
                 result.status = "exhausted"
                 break
             if total_calls >= self._max_steps:
+                break
+            if dead_streak >= 2:
+                # Two steps running with nothing to show - grinding the
+                # rest of the budget won't help. Record the rest as
+                # unverified and stop.
+                for p in plan[pi:]:
+                    result.unverified.append(f"{p['step']} (gave up - no progress)")
                 break
 
             pstep = plan[pi]
@@ -302,8 +310,11 @@ class TaskAgent:
 
             if ok:
                 result.verified.append(pstep["step"])
+                dead_streak = 0
                 pi += 1
                 continue
+
+            dead_streak = dead_streak + 1 if not progressed else 0
 
             if replans < 2 and total_calls < self._max_steps:
                 replans += 1
