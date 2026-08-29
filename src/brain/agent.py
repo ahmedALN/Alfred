@@ -854,9 +854,13 @@ class TaskAgent:
         outstanding = [s for s in current if s not in verified_set]
         n_ok = len(verified_set)
 
-        # If replans shrank the plan below what we first committed to, some
-        # of the original work was quietly dropped - don't call that "done".
-        shrank = 0 < self._first_plan_len and len(current) < self._first_plan_len
+        # If replans shrank the plan by more than a step below what we first
+        # committed to, real work was likely dropped - don't call that
+        # "done". A trim of one step is usually just consolidation.
+        shrank = (
+            self._first_plan_len > 0
+            and len(current) < self._first_plan_len - 1
+        )
 
         if result.status in ("cancelled", "exhausted", "error"):
             base = {
