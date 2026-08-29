@@ -45,7 +45,7 @@ class GeminiChatProvider(ChatProvider):
         )
 
         last: Exception | None = None
-        for attempt in range(3):
+        for attempt in range(2):
             try:
                 response = self._client.models.generate_content(
                     model=self.model,
@@ -56,8 +56,10 @@ class GeminiChatProvider(ChatProvider):
                 return (getattr(response, "text", None) or "").strip()
             except Exception as exc:  # noqa: BLE001
                 last = exc
-                if attempt < 2 and _is_retryable(exc):
-                    time.sleep(2.0 * (attempt + 1))
+                # A sustained 503 ("high demand") won't clear in a second;
+                # one short retry then hand off to the next provider.
+                if attempt == 0 and _is_retryable(exc):
+                    time.sleep(1.5)
                     continue
                 break
 

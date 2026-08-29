@@ -103,6 +103,41 @@ class AuditLog:
 
         return row_id
 
+    def prune(self, keep_days: float = 21.0, jsonl_max_mb: float = 25.0) -> int:
+        """Drop audit rows older than keep_days and truncate the JSONL
+        mirror if it has grown past jsonl_max_mb. Called on brain startup
+        so months of ticks and task steps don't accumulate forever."""
+        from datetime import timedelta
+
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=keep_days)).isoformat()
+        with self._lock:
+            try:
+                cur = self._conn.execute(
+                    "DELETE FROM brain_audit WHERE created_at < ?", (cutoff,)
+                )
+                self._conn.commit()
+                removed = cur.rowcount
+                self._conn.execute("VACUUM")
+            except Exception as exc:  # noqa: BLE001
+                print(f"[Brain/Audit] prune failed: {exc}")
+                removed = 0
+
+            try:
+                if (
+                    self._jsonl_path.exists()
+                    and self._jsonl_path.stat().st_size > jsonl_max_mb * 1_000_000
+                ):
+                    lines = self._jsonl_path.read_text(
+                        encoding="utf-8", errors="replace"
+                    ).splitlines()
+                    self._jsonl_path.write_text(
+                        "\n".join(lines[-20_000:]) + "\n", encoding="utf-8"
+                    )
+            except OSError as exc:
+                print(f"[Brain/Audit] JSONL trim failed: {exc}")
+
+        return removed
+
     def recent(self, limit: int = 50) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute(

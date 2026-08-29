@@ -186,6 +186,15 @@ class BrainLoop:
         # the startup greeting.
         await asyncio.sleep(min(15.0, self._tick_seconds))
 
+        try:
+            dropped = await asyncio.to_thread(self._audit.prune)
+            if dropped:
+                print(f"[Brain] pruned {dropped} old audit row(s).")
+            if self._episodes is not None:
+                await asyncio.to_thread(self._episodes.prune)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Brain] housekeeping skipped: {exc}")
+
         while True:
             try:
                 await self.run_once()

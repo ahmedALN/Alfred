@@ -185,7 +185,61 @@ def build_plan_chat(
     if not chain:
         chain.append(local_chat)
 
+    # Always keep the local model as the final safety net.
+    if not any(getattr(p, "name", "") == "ollama" for p in chain):
+        chain.append(local_chat)
+
+    import os
+
+    # Optional: a quick reachability check that reorders the chain so the
+    # planner Alfred lands on first is one that actually works right now.
+    # Off by default - it costs a few seconds and a token at startup, and
+    # FallbackChatProvider's per-rung cooldown already routes around a
+    # dead provider after the first call.
+    if os.getenv("ALFRED_PLAN_PROBE", "false").strip().lower() in (
+        "1", "true", "yes", "on"
+    ):
+        chain = _probe_and_order(chain)
+
     return FallbackChatProvider(chain) if len(chain) > 1 else chain[0]
+
+
+def _probe_and_order(chain: list[ChatProvider]) -> list[ChatProvider]:
+    """A quick reachability check at startup so Alfred knows which planner
+    it can actually use right now (NVIDIA entitlement, Gemini quota and
+    the local server all vary). Reachable providers keep their configured
+    order and move ahead of unreachable ones. Never blocks startup for
+    more than ~12s."""
+    import concurrent.futures as _cf
+
+    if len(chain) < 2:
+        return chain
+
+    def _ok(p: ChatProvider) -> bool:
+        try:
+            out = p.generate("Reply with the single word: ok", max_tokens=8)
+            return bool(out and out.strip())
+        except Exception:  # noqa: BLE001
+            return False
+
+    results: dict[int, bool] = {}
+    try:
+        with _cf.ThreadPoolExecutor(max_workers=len(chain)) as ex:
+            futs = {ex.submit(_ok, p): i for i, p in enumerate(chain)}
+            for fut in _cf.as_completed(futs, timeout=9):
+                results[futs[fut]] = bool(fut.result())
+    except Exception:  # noqa: BLE001 - timeout or worse: keep what we have
+        pass
+
+    live = [p for i, p in enumerate(chain) if results.get(i)]
+    dead = [p for i, p in enumerate(chain) if not results.get(i)]
+
+    for p in live:
+        print(f"[Plan] reachable now: {p.name}:{getattr(p, 'model', '?')}")
+    for p in dead:
+        print(f"[Plan] not reachable now: {p.name}:{getattr(p, 'model', '?')}")
+
+    return (live + dead) or chain
 
 
 def _build_chat(

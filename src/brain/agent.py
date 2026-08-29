@@ -273,10 +273,9 @@ class TaskAgent:
                 break
             if total_calls >= self._max_steps:
                 break
-            if dead_streak >= 2:
-                # Two steps running with nothing to show - grinding the
-                # rest of the budget won't help. Record the rest as
-                # unverified and stop.
+            if dead_streak >= 3:
+                # Three steps tried and got nowhere - grinding the rest of
+                # the budget won't help. Record the rest as unverified.
                 for p in plan[pi:]:
                     result.unverified.append(f"{p['step']} (gave up - no progress)")
                 break
@@ -286,23 +285,27 @@ class TaskAgent:
                 on_progress(f"Step {pi + 1}/{len(plan)}: {pstep['step'][:70]}")
 
             before = len(result.steps)
+            hist_before = len(history)
             calls = self._execute_substep(
                 goal, plan, pi, history, result, session_id,
                 budget=self._max_steps - total_calls,
             )
             total_calls += calls
-            progressed = any(s.ok for s in result.steps[before:])
-            claimed = any("executor claims done" in h for h in history[-4:])
-            any_success = any("-> ok:" in h for h in history)
+            sub_hist = history[hist_before:]
+            sub_steps = result.steps[before:]
+            progressed_here = any(s.ok for s in sub_steps)
+            progressed_ever = any("-> ok:" in h for h in history)
 
-            if progressed or (claimed and any_success):
-                # Either work just happened, or the step was already done
-                # on an earlier attempt (post-replan) - let the verifier
-                # read the whole log and decide.
-                ok, evidence = self._verify(pstep, history)
+            if progressed_here:
+                ok, evidence = self._verify(pstep, history, sub_hist)
+            elif not calls and any(
+                "-> ok:" in h for h in history[:hist_before]
+            ):
+                # Zero tool calls this step but earlier work exists - could
+                # be "already done" after a replan. Let the verifier judge
+                # from the whole log, but it must find real evidence.
+                ok, evidence = self._verify(pstep, history, sub_hist)
             else:
-                # Nothing worked and nothing in the log supports it - the
-                # exact pattern behind "it said it opened Drake".
                 ok, evidence = False, "no successful tool action for this step"
             self._log(
                 "task_verify",
@@ -316,7 +319,11 @@ class TaskAgent:
                 pi += 1
                 continue
 
-            dead_streak = dead_streak + 1 if not progressed else 0
+            # Count toward the give-up streak only when the step genuinely
+            # tried (made tool calls) and still got nowhere - not when the
+            # executor just declared done without acting.
+            tried_and_failed = calls > 0 and not progressed_here
+            dead_streak = dead_streak + 1 if tried_and_failed else dead_streak
 
             if replans < 2 and total_calls < self._max_steps:
                 replans += 1
@@ -492,6 +499,17 @@ class TaskAgent:
             dw = s["done_when"].strip()
             if not dw or dw.lower() == text.lower():
                 self._plan_gripe = f"step has no checkable done_when: {text!r}"
+                return False
+
+        # The goal asks to change something, but every step only looks.
+        gl = goal.lower()
+        if any(v in gl for v in _MUTATION_INTENT):
+            plan_text = " ".join(s["step"].lower() for s in steps)
+            if not any(v in plan_text for v in _MUTATION_VERBS):
+                self._plan_gripe = (
+                    "the goal asks to change something but the plan only "
+                    "inspects - add the step(s) that actually do it"
+                )
                 return False
         return True
 
@@ -672,20 +690,35 @@ class TaskAgent:
     }
 
     def _verify(
-        self, pstep: dict[str, str], history: list[str]
+        self,
+        pstep: dict[str, str],
+        history: list[str],
+        sub_hist: list[str] | None = None,
     ) -> tuple[bool, str]:
         done_when = pstep["done_when"]
 
+        # Evidence for THIS step comes from THIS step's own log. If it did
+        # nothing that worked here, only an earlier step that plausibly
+        # already covered it (executor explicitly claims done) gets a
+        # second look against the whole log.
+        scope = sub_hist if sub_hist is not None else history
+        if sub_hist is not None and not any("-> ok:" in h for h in sub_hist):
+            claimed_done = any("executor claims done" in h for h in sub_hist)
+            if not claimed_done:
+                return False, "this step took no successful action"
+            scope = history  # let the model check for prior coverage
+
         # --- deterministic fast-paths (never say "no", only "yes") ------
-        probe = self._deterministic_verify(done_when, history)
+        probe = self._deterministic_verify(done_when, scope)
         if probe is not None:
             return True, probe
 
         # --- model check ---------------------------------------------
+        log_lines = scope[-18:]
         prompt = (
             f"{_VERIFY_SYSTEM}\n\nSTEP: {pstep['step']}\n"
             f"DONE WHEN: {done_when}\n\n"
-            f"LOG:\n" + "\n".join(history[-18:]) + "\n\nYour one line:"
+            f"LOG:\n" + "\n".join(log_lines) + "\n\nYour one line:"
         )
         try:
             raw = self._verify_chat.generate(
@@ -876,6 +909,18 @@ class TaskAgent:
 # ====================================================================
 # helpers
 # ====================================================================
+
+
+_MUTATION_INTENT = (
+    "clean up", "tidy", "organi", "declutter", "sort out", "fix", "delete",
+    "remove", "move", "rename", "archive", "clear out", "free up", "uninstall",
+    "disable", "enable", "turn on", "turn off", "set up", "install", "close",
+)
+_MUTATION_VERBS = (
+    "delete", "remove", "move", "rename", "create", "run ", "click", "type",
+    "set ", "enable", "disable", "close", "open", "install", "uninstall",
+    "stop", "start", "change", "turn ", "write", "compress", "archive", "play",
+)
 
 
 def _enum_hints(schema: dict[str, Any]) -> str:
