@@ -17,6 +17,35 @@ from src.memory.store import MemoryStore
 from src.tools.registry import ToolRegistry
 
 
+_CONNECTION_ERROR_HINTS = (
+    "aborted", "closed", "connectionclosed", "1008", "1011", "1006",
+    "policy violation", "going away", "timeout", "timed out",
+    "deadline", "unavailable", "reset by peer", "broken pipe",
+)
+
+
+def _is_connection_error(exc: BaseException) -> bool:
+    """
+    True for transient transport/session failures we should reconnect
+    through (Gemini Live sockets drop on idle/timeout/quota), not for
+    real bugs.
+    """
+
+    if isinstance(exc, (ConnectionError, OSError, asyncio.TimeoutError)):
+        return True
+
+    name = type(exc).__name__.lower()
+    module = (type(exc).__module__ or "").lower()
+    text = f"{exc}".lower()
+
+    if "websockets" in module or "connectionclosed" in name:
+        return True
+    if "apierror" in name or "genai" in module:
+        return any(h in text for h in _CONNECTION_ERROR_HINTS)
+
+    return any(h in text for h in _CONNECTION_ERROR_HINTS)
+
+
 class AlfredLiveSession:
     """
     Persistent Gemini Live session for Alfred.
@@ -62,6 +91,7 @@ class AlfredLiveSession:
         self._activation = activation
         self._half_duplex = half_duplex
         self._last_audio_queued_at = 0.0
+        self._reconnect_backoff_base = 2.0
         self._session_id = uuid.uuid4().hex
 
         # Extra long-lived coroutines to run alongside the session
@@ -987,62 +1017,117 @@ class AlfredLiveSession:
     # Runtime
     # ================================================================
 
+    async def _reopen_session(self) -> None:
+        """Drop the current Gemini Live socket and open a fresh one."""
+
+        try:
+            if self._connection is not None:
+                await self._connection.__aexit__(None, None, None)
+        except Exception:  # noqa: BLE001
+            pass
+
+        self.session = None
+        self._connection = None
+
+        self._connection = self.client.aio.live.connect(
+            model=self.model, config=self._config()
+        )
+        self.session = await self._connection.__aenter__()
+
     async def run_forever(self) -> None:
         if self.session is None:
             raise RuntimeError(
                 "Alfred Live session is not connected."
             )
 
-        microphone_task = asyncio.create_task(
-            self._stream_microphone()
-        )
-
-        receive_task = asyncio.create_task(
-            self._receive()
-        )
-
-        tasks = {microphone_task, receive_task}
-
-        brain_task: asyncio.Task[None] | None = None
+        # Background tasks start once and survive voice reconnects.
+        background: set[asyncio.Task[None]] = set()
 
         if self._brain is not None:
-            brain_task = asyncio.create_task(self._brain.run())
-            tasks.add(brain_task)
+            background.add(asyncio.create_task(self._brain.run()))
 
         if self._activation is not None and not self._activation.always_on:
-            tasks.add(asyncio.create_task(self._activation.run()))
+            background.add(asyncio.create_task(self._activation.run()))
 
         for factory in self._background_factories:
-            tasks.add(asyncio.create_task(factory()))
+            background.add(asyncio.create_task(factory()))
+
+        backoff = self._reconnect_backoff_base
+        consecutive_failures = 0
 
         try:
-            done, pending = await asyncio.wait(
-                tasks,
-                return_when=asyncio.FIRST_EXCEPTION,
-            )
+            while True:
+                with self._state_lock:
+                    if not self._running:
+                        break
 
-            for task in done:
-                exception = task.exception()
+                voice = {
+                    asyncio.create_task(self._stream_microphone()),
+                    asyncio.create_task(self._receive()),
+                }
 
-                if exception is not None:
-                    raise exception
+                done, _ = await asyncio.wait(
+                    voice | background,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
 
-            for task in pending:
-                task.cancel()
+                # A background task ending (it shouldn't) is not
+                # recoverable here.
+                for task in done:
+                    if task in background:
+                        bg_exc = task.exception()
+                        if bg_exc is not None:
+                            raise bg_exc
+                        raise RuntimeError(
+                            "A background task exited unexpectedly."
+                        )
 
-            await asyncio.gather(
-                *pending,
-                return_exceptions=True,
-            )
+                for task in voice:
+                    task.cancel()
+                await asyncio.gather(*voice, return_exceptions=True)
+
+                exc = next(
+                    (t.exception() for t in done
+                     if t in voice and t.exception() is not None),
+                    None,
+                )
+
+                if exc is None:
+                    break  # a voice task ended cleanly -> shut down
+
+                if isinstance(exc, (KeyboardInterrupt, asyncio.CancelledError)):
+                    raise exc
+
+                if not _is_connection_error(exc):
+                    raise exc
+
+                consecutive_failures += 1
+                if consecutive_failures > 10:
+                    print(
+                        "[Alfred] giving up after repeated reconnect "
+                        f"failures: {exc}"
+                    )
+                    raise exc
+
+                print(
+                    f"[Alfred] voice connection dropped ({type(exc).__name__}: "
+                    f"{exc}); reconnecting in {backoff:.0f}s"
+                )
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 60.0)
+
+                try:
+                    await self._reopen_session()
+                    backoff = self._reconnect_backoff_base
+                    consecutive_failures = 0
+                    print("[Alfred] reconnected.")
+                except Exception as reconnect_exc:  # noqa: BLE001
+                    print(f"[Alfred] reconnect failed: {reconnect_exc}")
 
         finally:
-            for task in tasks:
+            for task in background:
                 task.cancel()
-
-            await asyncio.gather(
-                *tasks,
-                return_exceptions=True,
-            )
+            await asyncio.gather(*background, return_exceptions=True)
 
     # ================================================================
     # Cleanup

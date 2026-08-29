@@ -42,17 +42,17 @@ Two proposal kinds:
 (system_info, network_info) are fine to run directly. For anything that \
 changes the system, use "speak" to suggest it instead.
 
+Only ever refer to a change that is explicitly in the list below. Never \
+invent a change, and never copy an example - if the list is empty or \
+trivial, return [].
+
 Respond with ONLY a JSON array. Each element:
-{"kind":"speak"|"act","message":"<one spoken sentence>",\
-"rationale":"<why, short>","urgency":"low"|"normal"|"high",\
+{"kind":"speak"|"act","message":"<one spoken sentence about a listed \
+change>","rationale":"<why, short>","urgency":"low"|"normal"|"high",\
 "tool":"<name, act only>","args":{<args, act only>}}
 
-Examples:
-Change: "[critical] Firewall profile Public: OFF (was on last check)"
--> [{"kind":"speak","message":"Heads up - your Public firewall profile \
-just switched off.","rationale":"security regression","urgency":"high"}]
-Change: "[info] CPU load: 4%"
--> []
+If the change is "[info] CPU load: 4%" or similar routine noise, the \
+answer is [].
 """
 
 

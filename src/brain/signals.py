@@ -45,6 +45,30 @@ def _as_list(value: Any) -> list[Any]:
     return [value]
 
 
+def _parse_enabled(value: Any) -> bool | None:
+    """
+    Get-NetFirewallProfile's Enabled comes back as 1/0, true/false, or
+    the GpoBoolean names. Return True/False when certain, None when not
+    - the brain must never guess 'off'.
+    """
+
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        if value == 1:
+            return True
+        if value == 0:
+            return False
+        return None
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("1", "true", "enabled", "yes", "on"):
+            return True
+        if v in ("0", "false", "disabled", "no", "off"):
+            return False
+    return None
+
+
 class ResourceCollector(SignalCollector):
     """CPU load, free RAM, and per-disk free space."""
 
@@ -197,10 +221,12 @@ class NetworkCollector(SignalCollector):
                 continue
 
             name = row.get("Name", "?")
-            enabled = row.get("Enabled")
+            is_on = _parse_enabled(row.get("Enabled"))
 
-            # Get-NetFirewallProfile returns Enabled as 1/0 or True/False.
-            is_on = bool(enabled) and str(enabled) not in ("0", "False")
+            # Unknown / unparseable -> emit nothing, so a bad reading
+            # can never look like "firewall turned off".
+            if is_on is None:
+                continue
 
             observations.append(
                 Observation(

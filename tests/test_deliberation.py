@@ -34,9 +34,15 @@ def _delib(store, reasoner):
 
 
 def test_reasoner_proposals_pass_through(store):
-    d = _delib(store, Reasoner([Proposal(ProposalKind.SPEAK, "hi there")]))
-    out = d.deliberate([Notable("x", "x", "something", "info")], None)
-    assert [p.message for p in out] == ["hi there"]
+    d = _delib(store, Reasoner([
+        Proposal(ProposalKind.SPEAK, "Your machine has a reboot pending.")
+    ]))
+    out = d.deliberate(
+        [Notable("updates", "updates.pending_reboot",
+                 "Windows now has a reboot pending.", "info")],
+        None,
+    )
+    assert [p.message for p in out] == ["Your machine has a reboot pending."]
 
 
 def test_silent_reasoner_still_voices_warn_and_critical(store):
@@ -63,6 +69,30 @@ def test_safety_net_skips_topic_the_reasoner_covered(store):
         [Notable("res", "disk.C:.free_gb", "Disk C: 5 GB free", "warn")], None
     )
     assert len(out) == 1  # not duplicated
+
+
+def test_drops_proposal_not_grounded_in_any_notable(store):
+    # reasoner hallucinates / echoes an example about the firewall
+    d = _delib(store, Reasoner([
+        Proposal(ProposalKind.SPEAK,
+                 "Heads up - your Public firewall profile just switched off.")
+    ]))
+    out = d.deliberate(
+        [Notable("updates", "updates.pending_reboot",
+                 "Windows now has a reboot pending.", "info")],
+        None,
+    )
+    assert out == []  # nothing about a firewall actually changed
+
+
+def test_keeps_proposal_that_matches_a_notable(store):
+    d = _delib(store, Reasoner([
+        Proposal(ProposalKind.SPEAK, "Your disk is almost out of space.")
+    ]))
+    out = d.deliberate(
+        [Notable("res", "disk.C:.free_gb", "Disk C: 4 GB free", "warn")], None
+    )
+    assert len(out) == 1
 
 
 def test_safety_net_respects_suppression(store):

@@ -211,21 +211,26 @@ class Perception:
                 continue
 
             was = prev.get(key)
+            cond = f"fw_off:{key}"
 
-            if was is True and value is False:
-                out.append(
-                    Notable(
-                        source="network",
-                        key=key,
-                        summary=(
-                            f"{snap.summaries.get(key, key)} "
-                            "(was on last check)"
-                        ),
-                        severity="critical",
-                        previous=was,
-                        current=value,
+            if value is False and was is False:
+                # Off confirmed on two consecutive ticks - real.
+                if self._enter(cond):
+                    out.append(
+                        Notable(
+                            source="network",
+                            key=key,
+                            summary=(
+                                f"{snap.summaries.get(key, key)} "
+                                "(off on the last two checks)"
+                            ),
+                            severity="critical",
+                            previous=was,
+                            current=value,
+                        )
                     )
-                )
+            elif value is True:
+                self._clear(cond)
 
     def _check_reboot(
         self,

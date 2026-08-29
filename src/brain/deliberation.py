@@ -109,9 +109,16 @@ class Deliberator:
 
         proposals = self._reasoner.decide(context)
 
-        # Final guard: drop any proposal that names a suppressed topic
-        # even if the reasoner ignored the instruction.
         suppressed = [s.lower() for s in context.suppressions]
+
+        # What actually changed this tick - a small model will happily
+        # invent an alert (or echo a prompt example), so a spoken
+        # proposal must be about something in this list.
+        notable_text = " ".join(n.summary for n in notables).lower()
+        notable_keywords: set[str] = set()
+        for n in notables:
+            notable_keywords |= _keywords(n.summary)
+            notable_keywords.add(n.key.split(".")[0].lower())
 
         kept: list[Proposal] = []
 
@@ -124,6 +131,20 @@ class Deliberator:
                     f"topic: {proposal.message!r}"
                 )
                 continue
+
+            # A "speak" proposal must relate to an actual notable.
+            if proposal.kind is ProposalKind.SPEAK and notables:
+                msg_keywords = _keywords(proposal.message)
+                grounded = (
+                    bool(msg_keywords & notable_keywords)
+                    or any(w in notable_text for w in msg_keywords if len(w) > 4)
+                )
+                if not grounded:
+                    print(
+                        "[Brain/Deliberation] dropped ungrounded proposal: "
+                        f"{proposal.message!r}"
+                    )
+                    continue
 
             kept.append(proposal)
 

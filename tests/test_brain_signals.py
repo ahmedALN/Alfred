@@ -77,14 +77,25 @@ def test_disk_step_drop_refires_while_still_low():
     assert len(perception.sense()[0]) == 1
 
 
-def test_firewall_turning_off_is_critical():
-    collector = ScriptedCollector([[_fw(True)], [_fw(False)]])
+def test_firewall_off_needs_two_consecutive_readings():
+    collector = ScriptedCollector([
+        [_fw(True)],    # on
+        [_fw(False)],   # one off reading - could be a glitch, stay quiet
+        [_fw(False)],   # confirmed off -> critical
+        [_fw(False)],   # still off - hysteresis, quiet
+    ])
     perception = Perception(collectors=[collector])
 
-    assert perception.sense()[0] == []
-    notables = perception.sense()[0]
-    assert len(notables) == 1
-    assert notables[0].severity == "critical"
+    fired = [len(perception.sense()[0]) for _ in range(4)]
+    assert fired == [0, 0, 1, 0]
+
+
+def test_single_off_glitch_does_not_alarm():
+    collector = ScriptedCollector([
+        [_fw(True)], [_fw(False)], [_fw(True)],  # blip back to on
+    ])
+    perception = Perception(collectors=[collector])
+    assert [len(perception.sense()[0]) for _ in range(3)] == [0, 0, 0]
 
 
 def test_new_listening_port_is_notable():
@@ -98,6 +109,21 @@ def test_new_listening_port_is_notable():
     notables = perception.sense()[0]
     assert len(notables) == 1
     assert "3389/svchost" in notables[0].summary
+
+
+def test_parse_enabled_never_guesses_off():
+    from src.brain.signals import _parse_enabled
+
+    assert _parse_enabled(1) is True
+    assert _parse_enabled(0) is False
+    assert _parse_enabled(True) is True
+    assert _parse_enabled("True") is True
+    assert _parse_enabled("Disabled") is False
+    # anything ambiguous -> None (unknown), NOT False
+    assert _parse_enabled(None) is None
+    assert _parse_enabled(2) is None
+    assert _parse_enabled("NotConfigured") is None
+    assert _parse_enabled({}) is None
 
 
 def test_broken_collector_does_not_crash_perception():
