@@ -66,6 +66,7 @@ class Deliberator:
         tool_catalogue: list[dict[str, Any]],
         autonomy: str,
         recent_turns_limit: int = 8,
+        situation_fn: Any = None,
     ) -> None:
         self._reasoner = reasoner
         self._store = store
@@ -73,6 +74,7 @@ class Deliberator:
         self._tool_catalogue = tool_catalogue
         self._autonomy = autonomy
         self._recent_turns_limit = recent_turns_limit
+        self._situation_fn = situation_fn
 
     def deliberate(
         self,
@@ -87,6 +89,16 @@ class Deliberator:
         except Exception as exc:  # noqa: BLE001
             print(f"[Brain/Deliberation] recall_context failed: {exc}")
             memory_context = ""
+
+        if self._situation_fn is not None:
+            try:
+                snap = (self._situation_fn() or "").strip()
+                if snap:
+                    memory_context = (
+                        f"Current situation:\n{snap}\n\n{memory_context}"
+                    ).strip()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[Brain/Deliberation] situation failed: {exc}")
 
         recent_turns: list[dict[str, str]] = []
 

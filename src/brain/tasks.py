@@ -38,6 +38,7 @@ class TaskQueue:
         max_history: int = 50,
         store: Any = None,
         skills: SkillLibrary | None = None,
+        episodes: Any = None,
     ) -> None:
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._records: dict[str, TaskRecord] = {}
@@ -45,6 +46,7 @@ class TaskQueue:
         self._max_history = max_history
         self._store = store
         self._skills: SkillLibrary | None = skills
+        self._episodes = episodes
         self._gate = asyncio.Event()
         self._gate.set()  # not paused
         self._cancel = threading.Event()
@@ -58,6 +60,22 @@ class TaskQueue:
 
     def attach_skills(self, skills: SkillLibrary) -> None:
         self._skills = skills
+
+    def attach_episodes(self, episodes: Any) -> None:
+        self._episodes = episodes
+
+    def _record_episode(self, record: TaskRecord, result: TaskResult) -> None:
+        if self._episodes is None:
+            return
+        try:
+            self._episodes.record(
+                "task",
+                f"{'you asked' if record.source == 'voice' else 'on my own'}: "
+                f"{record.goal}",
+                outcome=result.status,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Tasks] episode log failed: {exc}")
 
     # ---- interrupt --------------------------------------------------
 
@@ -258,6 +276,7 @@ class TaskQueue:
             record.summary = result.summary
             record.skipped_confirmations = result.skipped_confirmations
             self._persist(task_id, result.status, result.summary)
+            self._record_episode(record, result)
 
             await _safe_speak(speak, _announce(result))
 

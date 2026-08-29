@@ -246,6 +246,31 @@ def test_suppression_phrase_persists_fact(tmp_path):
     audit.close()
 
 
+def test_stated_goal_is_remembered(tmp_path):
+    learner = FakeLearner()
+    loop, _, audit, _ = build_loop(
+        tmp_path, [Proposal(ProposalKind.SPEAK, "x")], learner=learner
+    )
+
+    asyncio.run(loop.note_user_reply(
+        "I'm trying to set up a python dev environment on this machine"
+    ))
+
+    assert learner.remembered
+    assert learner.remembered[0]["content"].startswith("GOAL: set up a python")
+    audit.close()
+
+
+def test_ordinary_reply_sets_no_goal(tmp_path):
+    learner = FakeLearner()
+    loop, _, audit, _ = build_loop(
+        tmp_path, [Proposal(ProposalKind.SPEAK, "x")], learner=learner
+    )
+    asyncio.run(loop.note_user_reply("what time is it"))
+    assert learner.remembered == []
+    audit.close()
+
+
 def test_confirm_then_yes_executes_action(tmp_path):
     registry = FakeRegistry()
     loop, spoken, audit, _ = build_loop(

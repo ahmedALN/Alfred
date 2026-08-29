@@ -68,6 +68,16 @@ _CANCEL_TASK = re.compile(
     r"abort the task|stop what you'?re doing)\b",
     re.I,
 )
+_GOAL = re.compile(
+    r"\b(?:i'?m (?:trying|working) (?:to|on)|i want to|help me|"
+    r"i need to|my goal is to|i'?m going to)\s+(.{4,140})",
+    re.I,
+)
+_GOAL_DONE = re.compile(
+    r"\b(?:done with|finished|gave up on|forget about) (?:that|the goal|it)\b|"
+    r"\bno more goal\b",
+    re.I,
+)
 
 
 @dataclass
@@ -118,6 +128,7 @@ class BrainLoop:
         self._get_session_id = get_session_id
         self._resource_mode = None  # set via attach_resource_mode()
         self._task_queue = None  # set via attach_task_queue()
+        self._episodes = None  # set via attach_episodes()
 
         self._tick_seconds = tick_seconds
         self._min_speak_gap = min_speak_gap_seconds
@@ -153,6 +164,9 @@ class BrainLoop:
 
     def attach_task_queue(self, task_queue: object) -> None:
         self._task_queue = task_queue
+
+    def attach_episodes(self, episodes: object) -> None:
+        self._episodes = episodes
 
     def set_paused(self, value: bool) -> None:
         self._paused = bool(value)
@@ -444,7 +458,34 @@ class BrainLoop:
                 self._remember_suppression(topic)
             return
 
+        self._note_goal(text)
+
         await self._maybe_resolve_pending(text)
+
+    def _note_goal(self, text: str) -> None:
+        """Pick up 'I'm trying to set up X' and remember it as the user's
+        active goal so the planner and deliberator can see it."""
+        try:
+            if _GOAL_DONE.search(text):
+                for fact in self._learner._store.all_facts():
+                    if fact.content.upper().startswith("GOAL:"):
+                        self._learner._store.delete_fact(fact.id)
+                return
+
+            m = _GOAL.search(text)
+            if not m:
+                return
+            goal = m.group(1).strip().rstrip(".!?")
+            if len(goal) < 4:
+                return
+            self._learner.remember(
+                content=f"GOAL: {goal}",
+                category="habit",
+                source="stated_goal",
+            )
+            self._audit.record("tick", {"note": f"active goal: {goal}"})
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Brain] goal capture failed: {exc}")
 
     def _remember_suppression(self, topic: str) -> None:
         try:
@@ -529,6 +570,11 @@ class BrainLoop:
             await self._speak(text)
             self._last_spoke_at = now
             self._audit.record("spoken", {"text": text})
+            if self._episodes is not None:
+                try:
+                    self._episodes.record("proactive", text)
+                except Exception:  # noqa: BLE001
+                    pass
         except Exception as exc:  # noqa: BLE001
             print(f"[Brain] speak failed: {exc}")
 

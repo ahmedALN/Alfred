@@ -74,6 +74,7 @@ class AlfredLiveSession:
         policy: Any = None,
         activation: Any = None,
         half_duplex: bool = True,
+        situation_fn: Any = None,
     ) -> None:
         settings = load_settings()
 
@@ -90,6 +91,7 @@ class AlfredLiveSession:
         self._policy = policy
         self._activation = activation
         self._half_duplex = half_duplex
+        self._situation_fn = situation_fn
         self._last_audio_queued_at = 0.0
         self._reconnect_backoff_base = 2.0
 
@@ -413,7 +415,22 @@ class AlfredLiveSession:
             "explain why and suggest they do it manually."
         )
 
-        return base + self._memory_context_block()
+        return base + self._memory_context_block() + self._situation_block()
+
+    def _situation_block(self) -> str:
+        if self._situation_fn is None:
+            return ""
+        try:
+            text = (self._situation_fn() or "").strip()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Context] situation probe failed: {exc}")
+            return ""
+        if not text:
+            return ""
+        return (
+            "\n\nCurrent situation (background context, may be stale - "
+            f"verify before acting on it):\n{text}"
+        )
 
     def _config(self) -> types.LiveConnectConfig:
         return types.LiveConnectConfig(

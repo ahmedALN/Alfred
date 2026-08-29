@@ -20,6 +20,7 @@ class Settings:
     memory_db_path: str
     skill_db_path: str
     skills_enabled: bool
+    episode_db_path: str
 
     # --- Swappable AI backends (voice always stays Gemini Live) ---
     ai_provider: str
@@ -140,6 +141,10 @@ def load_settings() -> Settings:
             "alfred_skills.sqlite3",
         ),
         skills_enabled=_get_bool("ALFRED_SKILLS_ENABLED", True),
+        episode_db_path=os.getenv(
+            "ALFRED_EPISODE_DB",
+            "alfred_episodes.sqlite3",
+        ),
         brain_enabled=_get_bool("ALFRED_BRAIN_ENABLED", True),
         brain_autonomy=autonomy,
         brain_tick_seconds=_get_float("ALFRED_BRAIN_TICK_SECONDS", 90.0),

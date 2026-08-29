@@ -124,11 +124,13 @@ class TaskAgent:
         max_steps: int = 20,
         max_seconds: float = 360.0,
         substep_max_calls: int = 5,
+        situation: "Callable[[], str] | None" = None,
         audit: Any = None,
     ) -> None:
         self._chat = chat
         self._plan_chat = plan_chat or chat
         self._registry = registry
+        self._situation = situation
         self._policy_brain = policy
         self._policy_voice = policy_voice or policy
         self._policy = policy  # active policy, set per run()
@@ -341,7 +343,9 @@ class TaskAgent:
 
     def _make_plan(self, goal: str, extra: str = "") -> list[dict[str, str]]:
         prompt = (
-            f"{_PLAN_SYSTEM}\n\nGOAL: {goal}\n\nTOOLS:\n{self._catalogue}\n"
+            f"{_PLAN_SYSTEM}\n\nGOAL: {goal}\n\n"
+            + (f"SITUATION:\n{self._situation_text()}\n\n" if self._situation else "")
+            + f"TOOLS:\n{self._catalogue}\n"
             + (f"\nCONTEXT: {extra}\n" if extra else "")
             + "\nYour JSON:"
         )
@@ -363,6 +367,15 @@ class TaskAgent:
                         or str(item["step"]).strip(),
                     })
         return steps or [{"step": goal, "done_when": goal}]
+
+    def _situation_text(self) -> str:
+        if self._situation is None:
+            return ""
+        try:
+            return (self._situation() or "").strip()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Task] situation probe failed: {exc}")
+            return ""
 
     def _execute_substep(
         self,

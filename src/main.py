@@ -30,7 +30,10 @@ from src.brain.skills import SkillLibrary
 from src.brain.tasks import TaskQueue
 from src.brain.task_store import TaskStore
 from src.config import load_settings
+from src.context import build_situation
 from src.tools.introspect import WhatCanYouDoTool
+from src.tools.episodes_tool import EpisodesTool
+from src.memory.episodes import EpisodeStore
 from src.memory.learner import MemoryLearner
 from src.memory.store import MemoryStore
 from src.resource_mode import ResourceMode
@@ -119,7 +122,8 @@ async def main() -> None:
     task_store = TaskStore(_ROOT / "alfred_tasks.sqlite3")
 
     skill_store = SkillStore(settings.skill_db_path)
-    task_queue = TaskQueue(store=task_store)
+    episode_store = EpisodeStore(settings.episode_db_path)
+    task_queue = TaskQueue(store=task_store, episodes=episode_store)
 
     # --------------------------------------------------------------
     # Activation: wake word + hotkey + conversation window.
@@ -152,6 +156,18 @@ async def main() -> None:
         detect_seconds=settings.game_detect_seconds,
     )
 
+    # A compact "what's going on right now" snapshot, shared by the voice
+    # prompt, the task planner and the deliberator.
+    def _situation() -> str:
+        return build_situation(
+            task_queue=task_queue,
+            resource_mode=resource_mode,
+            learner=learner,
+            episodes=episode_store,
+        )
+
+    session._situation_fn = _situation
+
     for tool in (
         powershell_tool,
         open_app_tool,
@@ -165,6 +181,7 @@ async def main() -> None:
         forget_tool,
         RunTaskTool(task_queue),
         TaskStatusTool(task_queue),
+        EpisodesTool(episode_store),
         ResourceModeTool(resource_mode),
         WhatCanYouDoTool(
             registry, settings, resource_mode=resource_mode,
@@ -269,6 +286,7 @@ async def main() -> None:
             known_tools=_agent_tools,
             surface="voice",
         ),
+        situation=_situation,
         audit=None,  # set below once the audit log exists
     )
 
@@ -301,6 +319,7 @@ async def main() -> None:
             learner=learner,
             tool_catalogue=registry.gemini_declarations(),
             autonomy=settings.brain_autonomy,
+            situation_fn=_situation,
         )
 
         policy = Policy(
@@ -327,6 +346,7 @@ async def main() -> None:
         session.attach_brain(brain)
         brain.attach_resource_mode(resource_mode)
         brain.attach_task_queue(task_queue)
+        brain.attach_episodes(episode_store)
         resource_mode.attach_brain(brain)
 
         print(
@@ -400,6 +420,7 @@ async def main() -> None:
 
         task_store.close()
         skill_store.close()
+        episode_store.close()
         store.close()
 
         instance_lock.release()

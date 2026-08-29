@@ -194,6 +194,27 @@ class MemoryLearner:
             f"{lines}"
         )
 
+    def recent_facts(self, limit: int = 5) -> list[Fact]:
+        """The most recently added/reinforced durable facts, newest first,
+        with internal control facts (SUPPRESS:/GOAL:) filtered out."""
+        facts = [
+            f for f in self._store.all_facts()
+            if not f.content.upper().startswith(("SUPPRESS:", "GOAL:"))
+        ]
+        return sorted(facts, key=lambda f: f.updated_at, reverse=True)[:limit]
+
+    def active_goal(self) -> str | None:
+        """The user's current stated goal, if they've told Alfred one
+        ("I'm trying to set up X"). Stored as a GOAL: fact."""
+        goals = [
+            f for f in self._store.all_facts()
+            if f.content.upper().startswith("GOAL:")
+        ]
+        if not goals:
+            return None
+        newest = max(goals, key=lambda f: f.updated_at)
+        return newest.content.split(":", 1)[1].strip() or None
+
     def dedupe(self, threshold: float = 0.93) -> int:
         """
         Merge near-duplicate facts that accumulate over months. Keeps the
