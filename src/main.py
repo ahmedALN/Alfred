@@ -22,6 +22,8 @@ from src.brain.tasks import TaskQueue
 from src.config import load_settings
 from src.memory.learner import MemoryLearner
 from src.memory.store import MemoryStore
+from src.resource_mode import ResourceMode
+from src.tools.resource_tool import ResourceModeTool
 from src.tools.computer_screenshot import ComputerScreenshotTool
 from src.tools.desktop_control import DesktopControlTool
 from src.tools.memory_tools import RecallTool, RememberTool
@@ -100,26 +102,6 @@ async def main() -> None:
     # Background task agent: delegate multi-step jobs.
     task_queue = TaskQueue()
 
-    for tool in (
-        powershell_tool,
-        open_app_tool,
-        screenshot_tool,
-        desktop_control_tool,
-        system_info_tool,
-        network_info_tool,
-        remember_tool,
-        recall_tool,
-        RunTaskTool(task_queue),
-        TaskStatusTool(task_queue),
-    ):
-        registry.register(tool)
-
-    voice_policy = Policy(
-        autonomy=settings.brain_autonomy,
-        known_tools=set(registry.names()),
-        surface="voice",
-    )
-
     # --------------------------------------------------------------
     # Activation: wake word + hotkey + conversation window.
     # --------------------------------------------------------------
@@ -131,14 +113,50 @@ async def main() -> None:
         always_on=not wake_gated,
     )
 
+    # Session is needed by ResourceMode's speak callback; built now,
+    # policy attached just below once every tool is registered.
     session = AlfredLiveSession(
         registry,
         store=store,
         learner=learner,
-        policy=voice_policy,
         activation=activation,
         half_duplex=settings.half_duplex,
     )
+
+    # Game / low-resource mode.
+    resource_mode = ResourceMode(
+        providers=providers,
+        speak=session.inject_system_prompt,
+        task_queue=task_queue,
+        child_client=child_session_client,
+        autodetect=settings.game_autodetect,
+        detect_seconds=settings.game_detect_seconds,
+    )
+
+    for tool in (
+        powershell_tool,
+        open_app_tool,
+        screenshot_tool,
+        desktop_control_tool,
+        system_info_tool,
+        network_info_tool,
+        remember_tool,
+        recall_tool,
+        RunTaskTool(task_queue),
+        TaskStatusTool(task_queue),
+        ResourceModeTool(resource_mode),
+    ):
+        registry.register(tool)
+
+    session.attach_policy(
+        Policy(
+            autonomy=settings.brain_autonomy,
+            known_tools=set(registry.names()),
+            surface="voice",
+        )
+    )
+
+    session.add_background_task(resource_mode.run)
 
     wake_listener: WakeListener | None = None
     hotkey_listener: HotkeyListener | None = None
@@ -235,6 +253,8 @@ async def main() -> None:
         )
 
         session.attach_brain(brain)
+        brain.attach_resource_mode(resource_mode)
+        resource_mode.attach_brain(brain)
 
         print(
             f"[Brain] enabled (autonomy={settings.brain_autonomy}, "
@@ -262,6 +282,8 @@ async def main() -> None:
             ),
             logs_dir=Path(settings.brain_audit_path).resolve().parent,
             tooltip=f"{settings.alfred_name} — running",
+            is_game_mode=lambda: resource_mode.in_game_mode,
+            toggle_game_mode=resource_mode.toggle,
         )
         tray.start()
 

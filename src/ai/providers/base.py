@@ -7,7 +7,14 @@ class ProviderError(RuntimeError):
     """Raised when an AI provider call fails."""
 
 
-class ChatProvider(ABC):
+class _Unloadable:
+    """Mixin: free any GPU/RAM the backend is holding. No-op for cloud APIs."""
+
+    def unload(self) -> None:  # noqa: D401
+        return None
+
+
+class ChatProvider(_Unloadable, ABC):
     """Text in, text out. Used for memory distillation and the brain's reasoning."""
 
     name: str = "chat"
@@ -30,7 +37,7 @@ class ChatProvider(ABC):
         raise NotImplementedError
 
 
-class EmbeddingProvider(ABC):
+class EmbeddingProvider(_Unloadable, ABC):
     """Text to vector. Used for memory dedup and semantic recall."""
 
     name: str = "embedding"
@@ -42,7 +49,7 @@ class EmbeddingProvider(ABC):
         raise NotImplementedError
 
 
-class VisionProvider(ABC):
+class VisionProvider(_Unloadable, ABC):
     """Image + prompt to text. Used to describe the desktop Alfred controls."""
 
     name: str = "vision"

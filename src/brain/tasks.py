@@ -33,6 +33,21 @@ class TaskQueue:
         self._records: dict[str, TaskRecord] = {}
         self._order: list[str] = []
         self._max_history = max_history
+        self._gate = asyncio.Event()
+        self._gate.set()  # not paused
+
+    # ----------------------------------------------------------------
+
+    def pause(self) -> None:
+        """Worker finishes its current job, then waits before the next."""
+        self._gate.clear()
+
+    def resume(self) -> None:
+        self._gate.set()
+
+    @property
+    def is_paused(self) -> bool:
+        return not self._gate.is_set()
 
     # ----------------------------------------------------------------
 
@@ -69,6 +84,7 @@ class TaskQueue:
         """Worker loop. Launch as a background task alongside the session."""
 
         while True:
+            await self._gate.wait()  # blocks while paused (game mode)
             task_id = await self._queue.get()
             record = self._records.get(task_id)
 

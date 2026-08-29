@@ -17,6 +17,21 @@ def _clean_base(base_url: str) -> str:
     return (base_url or DEFAULT_BASE_URL).rstrip("/")
 
 
+def _unload_model(base: str, model: str) -> None:
+    """Ask Ollama to evict a model from VRAM/RAM immediately."""
+
+    if not model:
+        return
+    try:
+        post_json(
+            f"{base}/api/generate",
+            {"model": model, "keep_alive": 0},
+            timeout=15.0,
+        )
+    except ProviderError as exc:
+        print(f"[Ollama] unload {model} failed: {exc}")
+
+
 class OllamaChatProvider(ChatProvider):
     """Local text generation via a running Ollama server. No API key."""
 
@@ -68,6 +83,9 @@ class OllamaChatProvider(ChatProvider):
 
         return str(data.get("response", "")).strip()
 
+    def unload(self) -> None:
+        _unload_model(self._base, self.model)
+
 
 class OllamaEmbeddingProvider(EmbeddingProvider):
     name = "ollama"
@@ -104,6 +122,9 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
             return [float(x) for x in vector]
 
         return None
+
+    def unload(self) -> None:
+        _unload_model(self._base, self.model)
 
 
 class OllamaVisionProvider(VisionProvider):
@@ -153,3 +174,6 @@ class OllamaVisionProvider(VisionProvider):
             raise ProviderError("Ollama vision model returned no analysis.")
 
         return text
+
+    def unload(self) -> None:
+        _unload_model(self._base, self.model)

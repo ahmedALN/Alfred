@@ -111,6 +111,9 @@ class AlfredLiveSession:
 
         self._brain = brain
 
+    def attach_policy(self, policy: Any) -> None:
+        self._policy = policy
+
     def add_background_task(self, factory: Any) -> None:
         """
         Register a zero-arg callable returning a coroutine to run for the

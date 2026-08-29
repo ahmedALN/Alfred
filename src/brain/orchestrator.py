@@ -52,6 +52,17 @@ _SUPPRESS = re.compile(
     r"stop mentioning|quit bugging me about)\s+(.+)",
     re.I,
 )
+_GAME_ON = re.compile(
+    r"\b(game mode|gaming mode|i'?m (?:going to |gonna )?gam(?:e|ing)|"
+    r"free up (?:resources|memory|the gpu|vram)|low.?resource mode|"
+    r"i want to play)\b",
+    re.I,
+)
+_GAME_OFF = re.compile(
+    r"\b(back to normal|normal mode|done gaming|finished gaming|"
+    r"exit game mode|stop game mode|full power)\b",
+    re.I,
+)
 
 
 @dataclass
@@ -99,6 +110,7 @@ class BrainLoop:
         self._learner = learner
         self._speak = speak
         self._get_session_id = get_session_id
+        self._resource_mode = None  # set via attach_resource_mode()
 
         self._tick_seconds = tick_seconds
         self._min_speak_gap = min_speak_gap_seconds
@@ -123,6 +135,9 @@ class BrainLoop:
     @property
     def is_paused(self) -> bool:
         return self._paused
+
+    def attach_resource_mode(self, resource_mode: object) -> None:
+        self._resource_mode = resource_mode
 
     def set_paused(self, value: bool) -> None:
         self._paused = bool(value)
@@ -334,6 +349,14 @@ class BrainLoop:
         if _DND_OFF.search(text):
             self._session_dnd = False
             return
+
+        if self._resource_mode is not None:
+            if _GAME_ON.search(text):
+                await self._resource_mode.enter_game("voice")
+                return
+            if _GAME_OFF.search(text):
+                await self._resource_mode.exit_game("voice")
+                return
 
         suppress_match = _SUPPRESS.search(text)
         if suppress_match:

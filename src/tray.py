@@ -22,6 +22,7 @@ _ID_STATUS = 1000
 _ID_TOGGLE_BRAIN = 1001
 _ID_OPEN_LOGS = 1002
 _ID_QUIT = 1003
+_ID_GAME_MODE = 1004
 
 
 class TrayIcon:
@@ -41,11 +42,15 @@ class TrayIcon:
         set_brain_paused: Callable[[bool], None],
         logs_dir: Path | str,
         tooltip: str = "Alfred",
+        is_game_mode: Callable[[], bool] | None = None,
+        toggle_game_mode: Callable[[], None] | None = None,
     ) -> None:
         self._is_paused = is_brain_paused
         self._set_paused = set_brain_paused
         self._logs_dir = Path(logs_dir)
         self._tooltip = tooltip
+        self._is_game_mode = is_game_mode
+        self._toggle_game_mode = toggle_game_mode
 
         self._hwnd = None
         self._thread: threading.Thread | None = None
@@ -159,6 +164,16 @@ class TrayIcon:
             menu, win32con.MF_STRING, _ID_TOGGLE_BRAIN,
             "Resume awareness" if paused else "Pause awareness",
         )
+
+        if self._toggle_game_mode is not None:
+            in_game = False
+            try:
+                in_game = bool(self._is_game_mode()) if self._is_game_mode else False
+            except Exception:  # noqa: BLE001
+                pass
+            flags = win32con.MF_STRING | (win32con.MF_CHECKED if in_game else 0)
+            win32gui.AppendMenu(menu, flags, _ID_GAME_MODE, "Game mode")
+
         win32gui.AppendMenu(
             menu, win32con.MF_STRING, _ID_OPEN_LOGS, "Open logs folder"
         )
@@ -179,6 +194,13 @@ class TrayIcon:
                 self._set_paused(not self._is_paused())
             except Exception as exc:  # noqa: BLE001
                 print(f"[Tray] could not toggle awareness: {exc}")
+
+        elif command_id == _ID_GAME_MODE:
+            try:
+                if self._toggle_game_mode is not None:
+                    self._toggle_game_mode()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[Tray] could not toggle game mode: {exc}")
 
         elif command_id == _ID_OPEN_LOGS:
             try:
