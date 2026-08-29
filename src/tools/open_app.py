@@ -10,12 +10,14 @@ class OpenAppTool(AlfredTool):
     name = "open_app"
 
     description = (
-        "Open a Windows application and place its window on "
-        "a virtual desktop. By default, applications requested "
-        "by Alfred are placed on Alfred's desktop. Use target='user' "
-        "only when the user explicitly wants the application on "
-        "their own desktop. Use target='current' to leave the "
-        "application on the currently active desktop."
+        "Open anything on Windows by natural name: an app (Spotify, "
+        "Chrome, VS Code, Calculator, any Store app or Start-menu "
+        "entry), a website (youtube, github.com), or a file/folder "
+        "path. If it's already open, its window is reused. "
+        "target='user' puts it on the user's desktop, 'current' leaves "
+        "it where it opens, otherwise it goes to Alfred's desktop. "
+        "A result with status 'not_found' includes name suggestions - "
+        "relay them and ask which one."
     )
 
     @property

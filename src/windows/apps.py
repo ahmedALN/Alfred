@@ -277,6 +277,16 @@ class AppLauncher:
         if which:
             return LaunchSpec("exe", which, raw)
 
+        # An existing file or folder path -> open it in Explorer / its app.
+        expanded = os.path.expandvars(os.path.expanduser(raw))
+        if os.path.exists(expanded):
+            return LaunchSpec("uri", expanded, raw)
+
+        # Looks like a website ("youtube", "github.com", "open reddit").
+        site = _as_website(raw)
+        if site:
+            return LaunchSpec("uri", site, raw)
+
         # Fall back to the aliased exe name and let the OS try.
         if aliased.lower().endswith(".exe"):
             return LaunchSpec("exe", aliased, raw)
@@ -540,3 +550,32 @@ def _tokens_overlap(a: str, b: str) -> bool:
     ta = {t for t in a.replace("-", " ").split() if len(t) > 2}
     tb = {t for t in b.replace("-", " ").split() if len(t) > 2}
     return bool(ta) and ta.issubset(tb)
+
+
+# Common single-word site names Alfred should just open in the browser.
+_KNOWN_SITES = {
+    "youtube": "https://www.youtube.com",
+    "gmail": "https://mail.google.com",
+    "github": "https://github.com",
+    "reddit": "https://www.reddit.com",
+    "twitter": "https://twitter.com",
+    "x": "https://x.com",
+    "chatgpt": "https://chat.openai.com",
+    "claude": "https://claude.ai",
+    "netflix": "https://www.netflix.com",
+    "twitch": "https://www.twitch.tv",
+    "maps": "https://maps.google.com",
+    "google": "https://www.google.com",
+    "amazon": "https://www.amazon.com",
+    "outlook": "https://outlook.office.com",
+}
+
+
+def _as_website(name: str) -> str | None:
+    n = name.strip().lower()
+    if n in _KNOWN_SITES:
+        return _KNOWN_SITES[n]
+    # bare domain like "example.com" or "docs.python.org"
+    if " " not in n and "." in n and not n.endswith("."):
+        return "https://" + name.strip()
+    return None
