@@ -96,6 +96,9 @@ class AlfredLiveSession:
         self._passphrase = settings.voice_passphrase
         self._passphrase_window = settings.voice_passphrase_window
         self._passphrase_ok_until = 0.0
+
+        self._local_voice_factory: Any = None
+        self._local_voice_cooldown = settings.local_voice_cooldown
         self._session_id = uuid.uuid4().hex
 
         # Extra long-lived coroutines to run alongside the session
@@ -147,6 +150,10 @@ class AlfredLiveSession:
 
     def attach_policy(self, policy: Any) -> None:
         self._policy = policy
+
+    def attach_local_voice(self, factory: Any) -> None:
+        """factory() -> a LocalVoiceSession, used while Gemini quota is out."""
+        self._local_voice_factory = factory
 
     def add_background_task(self, factory: Any) -> None:
         """
@@ -1138,16 +1145,38 @@ class AlfredLiveSession:
                 if not _is_connection_error(exc):
                     raise exc
 
+                text = f"{exc}".lower()
+                is_quota = "exhausted" in text or "429" in text or "quota" in text
+
                 try:
                     from src.usage import USAGE
 
-                    text = f"{exc}".lower()
-                    USAGE.record_error(
-                        "quota" if ("exhausted" in text or "429" in text)
-                        else "disconnect"
-                    )
+                    USAGE.record_error("quota" if is_quota else "disconnect")
                 except Exception:  # noqa: BLE001
                     pass
+
+                # Quota is out - talk locally for a while instead of
+                # hammering reconnects.
+                if is_quota and self._local_voice_factory is not None:
+                    print(
+                        "[Alfred] Gemini quota exhausted - switching to "
+                        f"offline voice for {self._local_voice_cooldown:.0f}s."
+                    )
+                    try:
+                        local = self._local_voice_factory()
+                        await local.run(
+                            time.monotonic() + self._local_voice_cooldown
+                        )
+                    except Exception as lv_exc:  # noqa: BLE001
+                        print(f"[Alfred] offline voice failed: {lv_exc}")
+                    try:
+                        await self._reopen_session()
+                        backoff = self._reconnect_backoff_base
+                        consecutive_failures = 0
+                        print("[Alfred] back on the cloud voice.")
+                    except Exception as re:  # noqa: BLE001
+                        print(f"[Alfred] reconnect after offline failed: {re}")
+                    continue
 
                 consecutive_failures += 1
                 if consecutive_failures > 10:

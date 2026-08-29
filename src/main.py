@@ -169,15 +169,28 @@ async def main() -> None:
     if restored:
         print(f"[Tasks] resumed {restored} unfinished task(s) from last run.")
 
-    session.attach_policy(
-        Policy(
-            autonomy=settings.brain_autonomy,
-            known_tools=set(registry.names()),
-            surface="voice",
-        )
+    voice_policy = Policy(
+        autonomy=settings.brain_autonomy,
+        known_tools=set(registry.names()),
+        surface="voice",
     )
+    session.attach_policy(voice_policy)
 
     session.add_background_task(resource_mode.run)
+
+    # Offline voice loop for when the Gemini quota is exhausted.
+    if settings.local_voice_fallback:
+        from src.voice.local_voice import LocalVoiceSession
+
+        session.attach_local_voice(
+            lambda: LocalVoiceSession(
+                providers.chat,
+                registry,
+                voice_policy,
+                stt_model=settings.local_voice_stt_model,
+                get_listening=lambda: activation.is_listening,
+            )
+        )
 
     wake_listener: WakeListener | None = None
     hotkey_listener: HotkeyListener | None = None

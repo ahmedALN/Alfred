@@ -60,6 +60,11 @@ class Settings:
     # --- Desktop control ---
     desktop_grid: bool
 
+    # --- Local voice fallback (when Gemini quota is hit) ---
+    local_voice_fallback: bool
+    local_voice_cooldown: float
+    local_voice_stt_model: str
+
 
 def _get_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
@@ -155,6 +160,11 @@ def load_settings() -> Settings:
         game_autodetect=_get_bool("ALFRED_GAME_AUTODETECT", True),
         game_detect_seconds=_get_float("ALFRED_GAME_DETECT_SECONDS", 30.0),
         desktop_grid=_get_bool("ALFRED_DESKTOP_GRID", True),
+        local_voice_fallback=_get_bool("ALFRED_LOCAL_VOICE_FALLBACK", True),
+        local_voice_cooldown=_get_float("ALFRED_LOCAL_VOICE_COOLDOWN", 300.0),
+        local_voice_stt_model=os.getenv(
+            "ALFRED_LOCAL_VOICE_STT_MODEL", "base.en"
+        ),
         ai_provider=os.getenv("ALFRED_AI_PROVIDER", "gemini").strip().lower()
         or "gemini",
         ai_chat_provider=_opt("ALFRED_AI_CHAT_PROVIDER"),
