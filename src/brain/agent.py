@@ -35,6 +35,11 @@ returns, a file that exists, text in a control. Never "it worked".
 NEVER plan "Open PowerShell" or "Open a terminal" - to run a command the step \
 is just "Run PowerShell to <do X>". Only plan "Open <app>" for a real GUI app \
 the user will see (Spotify, a browser, Notepad, Settings).
+- For work INSIDE an app, one step per thing the user would call a thing: \
+"Open the app", "Search for X and open it", "Change setting Y to Z". The \
+executor handles the clicks and typing within a step - do not plan those.
+- If the goal needs signing in, make that its own step ("Get to the sign-in \
+screen"). Alfred never types passwords; the user does that part.
 - For a "tell me / show me / what is / how much" question, the plan is just \
 the query - ONE step, maybe two. Do NOT save the answer to a file or open \
 Notepad unless the user explicitly asked for a file. The user gets the answer \
@@ -64,11 +69,18 @@ using tools, one JSON object per reply, nothing else.
 Use tools EXACTLY as the catalogue shows - the args in [brackets] are the only \
 valid values for that parameter. Do not invent parameters.
 
-ui_control recipe (for Spotify, browsers, Explorer, Office):
- 1. {"action":"tree","window":"<app>"}  - once, to see real controls
- 2. {"action":"type","window":"<app>","text":"<query>"}  - into the search/Edit
- 3. {"action":"click","window":"<app>","name":"<button or first result>"}
- 4. {"action":"get","window":"<app>","name":"<now-playing / status text>"} - to confirm
+Working INSIDE an app with ui_control:
+ 1. {"action":"wait_ready","window":"<app>"}   - right after launching it
+ 2. {"action":"tree","window":"<app>"}          - once, to see real controls
+    (add "contains":"<word>" to find a control in a busy app)
+ 3. {"action":"type","window":"<app>","text":"<text>","into":<ref>}
+ 4. {"action":"click","window":"<app>","name":"<button>"} (or "ref":<n>)
+ 5. {"action":"get","window":"<app>","name":"<status text>"} - to confirm
+Also available: find, select (combo/list), expand, scroll, menu, key,
+double_click, right_click, wait_for, windows, focus.
+
+If APP NOTES below name a control, use that name directly - skip the
+exploratory 'tree'. If the name turns out to be gone, THEN read the tree.
 
 Rules:
 - Do the smallest set of actions that makes 'done_when' true, then action=done \
@@ -77,6 +89,9 @@ with the tool result that proves it.
 - If an app is already open in HISTORY, do NOT open it again.
 - After 2-3 failed calls, change tool or approach; if truly stuck, action=give_up.
 - Do not claim done unless a real tool result in HISTORY shows done_when holds.
+- NEVER type a password, PIN or security code. If the step needs a sign-in, \
+get to the sign-in screen, then action=give_up with reason \
+"waiting for the user to sign in" - Alfred will ask them.
 
 Reply with exactly one of:
 {"action":"use_tool","tool":"<name>","args":{...},"rationale":"<short>"}
@@ -183,6 +198,7 @@ class TaskAgent:
         substep_max_calls: int = 5,
         situation: "Callable[[], str] | None" = None,
         learner: Any = None,
+        app_memory: Any = None,
         audit: Any = None,
     ) -> None:
         self._chat = chat
@@ -195,6 +211,7 @@ class TaskAgent:
         self._registry = registry
         self._situation = situation
         self._learner = learner
+        self._app_memory = app_memory
         self._policy_brain = policy
         self._policy_voice = policy_voice or policy
         self._policy = policy  # active policy, set per run()
@@ -207,6 +224,7 @@ class TaskAgent:
         self._exec_catalogue = ""
         self._plan_gripe = ""
         self._run_knowledge = ""
+        self._run_apps = ""
         self._planned_ever: set[str] = set()
         self._first_plan_len = 0
         self._deadline = 0.0
@@ -278,6 +296,7 @@ class TaskAgent:
         # Retrieve goal-relevant know-how once (embedding call); reused by
         # planning and every substep.
         self._run_knowledge = self._relevant_knowledge(goal)
+        self._run_apps = self._app_profiles(goal)
 
         # 1. PLAN
         plan = self._make_plan(goal)
@@ -470,9 +489,11 @@ class TaskAgent:
 
     def _make_plan(self, goal: str, extra: str = "") -> list[dict[str, str]]:
         know = getattr(self, "_run_knowledge", "") or self._relevant_knowledge(goal)
+        apps = getattr(self, "_run_apps", "")
         base_prompt = (
             f"{_PLAN_SYSTEM}\n\nGOAL: {goal}\n\n"
             f"ENVIRONMENT: {self._environment()}\n\n"
+            + (f"APP NOTES (what worked here before):\n{apps}\n\n" if apps else "")
             + (f"KNOWN GOOD PRACTICE:\n{know}\n\n" if know else "")
             + (f"SITUATION:\n{self._situation_text()}\n\n" if self._situation else "")
             + f"TOOLS:\n{self._catalogue}\n"
@@ -623,6 +644,16 @@ class TaskAgent:
             print(f"[Task] situation probe failed: {exc}")
             return ""
 
+    def _app_profiles(self, goal: str) -> str:
+        """What Alfred already knows about the app(s) this goal names."""
+        if self._app_memory is None:
+            return ""
+        try:
+            return (self._app_memory.profiles_for(goal) or "").strip()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Task] app memory lookup failed: {exc}")
+            return ""
+
     def _relevant_knowledge(self, goal: str, k: int = 5) -> str:
         """Pull the handful of learned facts / playbook entries most
         relevant to this goal, so planning starts from good practice."""
@@ -664,10 +695,13 @@ class TaskAgent:
                 break
 
             know = getattr(self, "_run_knowledge", "")
+            apps = getattr(self, "_run_apps", "")
             prompt = (
                 f"{_EXEC_SYSTEM}\n\nOVERALL GOAL: {goal}\n\nPLAN:\n{plan_view}\n\n"
                 f"CURRENT STEP: {pstep['step']}\nDONE WHEN: {pstep['done_when']}\n\n"
                 f"ENVIRONMENT: {self._environment()}\n\n"
+                + (f"APP NOTES (controls that worked here before):\n{apps}\n\n"
+                   if apps else "")
                 + (f"KNOWN GOOD PRACTICE:\n{know}\n\n" if know else "")
                 + f"TOOLS:\n{self._exec_catalogue}\n\n"
                 + f"HISTORY:\n" + ("\n".join(history[-16:]) or "(nothing yet)")

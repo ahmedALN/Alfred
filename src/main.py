@@ -25,6 +25,7 @@ from src.brain.agent import TaskAgent
 from src.brain.perception import Perception
 from src.brain.policy import Policy
 from src.brain.reasoner import LLMReasoner
+from src.brain.app_memory import AppMemory
 from src.brain.skill_store import SkillStore
 from src.brain.skills import SkillLibrary
 from src.brain.tasks import TaskQueue
@@ -123,7 +124,11 @@ async def main() -> None:
 
     skill_store = SkillStore(settings.skill_db_path)
     episode_store = EpisodeStore(settings.episode_db_path)
-    task_queue = TaskQueue(store=task_store, episodes=episode_store)
+    # What Alfred has learned about working inside specific apps.
+    app_memory = AppMemory(settings.app_db_path)
+    task_queue = TaskQueue(
+        store=task_store, episodes=episode_store, app_memory=app_memory,
+    )
 
     # --------------------------------------------------------------
     # Activation: wake word + hotkey + conversation window.
@@ -221,6 +226,9 @@ async def main() -> None:
         f"[Skills] {len(skill_store.all(include_disabled=True))} learned; "
         f"library {'on' if settings.skills_enabled else 'off'}."
     )
+    _known_apps = app_memory.known_apps()
+    if _known_apps:
+        print(f"[Apps] know my way around: {', '.join(_known_apps[:8])}")
 
     session.add_background_task(resource_mode.run)
 
@@ -288,6 +296,7 @@ async def main() -> None:
         ),
         situation=_situation,
         learner=learner,  # for post-task reflection lessons
+        app_memory=app_memory,  # per-app control knowledge
         audit=None,  # set below once the audit log exists
     )
 
@@ -422,6 +431,7 @@ async def main() -> None:
         task_store.close()
         skill_store.close()
         episode_store.close()
+        app_memory.close()
         store.close()
 
         instance_lock.release()

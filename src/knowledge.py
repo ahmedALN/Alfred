@@ -41,11 +41,45 @@ WINDOWS_PLAYBOOK: list[tuple[str, str]] = [
      "status='not_found' the app genuinely isn't installed - don't retry "
      "the same name."),
 
+    # --- working inside an app ------------------------------------
+    ("correction", "Multi-step work inside an app follows one shape: "
+     "open_app, then ui_control wait_ready (apps take seconds to paint - "
+     "a tree read immediately after launch comes back empty), then "
+     "ui_control tree once, then act by ref or name, then ui_control get "
+     "to read the result back."),
+    ("correction", "In a busy app use ui_control tree with contains='<word>' "
+     "instead of reading the whole tree - the control you want is often "
+     "past the listing limit otherwise."),
+    ("correction", "If APP NOTES already give a control name for this app, "
+     "use it directly and skip the exploratory tree. Only read the tree if "
+     "that name turns out to be gone."),
+    ("correction", "ALFRED NEVER TYPES PASSWORDS, PINs, card numbers or "
+     "security codes. If a task needs a sign-in, get the app to the "
+     "sign-in screen, tell the user it's ready and ask them to enter it "
+     "(or use their password manager), then continue once they confirm. "
+     "ui_control refuses password fields outright."),
+    ("system", "ui_control actions: windows, focus, tree, find, click, "
+     "double_click, right_click, invoke, type, key, get, select, expand, "
+     "scroll, menu, wait_for, wait_ready, exists."),
+    ("system", "ui_control select is for combo boxes, dropdowns, list items "
+     "and tabs; expand opens a tree node or dropdown; menu takes a path "
+     "like 'File->Save As'; scroll takes direction up/down/left/right."),
+
     # --- app recipes ----------------------------------------------
     ("system", "Spotify: open it, ui_control tree, type the artist/song "
      "into the 'Search' Edit control, then click the 'Play' button (or "
      "the first result). Confirm with ui_control get on the now-playing "
      "text. Ctrl+L also focuses the Spotify search box."),
+    ("system", "Steam: the Library tab lists installed games; a game is "
+     "launched by selecting it in the library and clicking 'Play'. Steam "
+     "takes a while to become usable after launching - use wait_ready."),
+    ("system", "A game's own menus are usually NOT in the accessibility "
+     "tree (they are drawn by the game engine). ui_control tree will come "
+     "back nearly empty - that is the signal to fall back to "
+     "desktop_control, or to use the game's own keyboard shortcuts."),
+    ("system", "Launchers (Steam, Epic, Battle.net, Xbox) are ordinary "
+     "apps with real accessibility trees even when the games they launch "
+     "are not - do the launcher part with ui_control."),
     ("system", "A web browser: ui_control tree, type the URL or query into "
      "the address bar (often named 'Address and search bar'), press "
      "Enter with ui_control key '{ENTER}'."),

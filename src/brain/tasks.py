@@ -39,6 +39,7 @@ class TaskQueue:
         store: Any = None,
         skills: SkillLibrary | None = None,
         episodes: Any = None,
+        app_memory: Any = None,
     ) -> None:
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._records: dict[str, TaskRecord] = {}
@@ -47,6 +48,7 @@ class TaskQueue:
         self._store = store
         self._skills: SkillLibrary | None = skills
         self._episodes = episodes
+        self._app_memory = app_memory
         self._gate = asyncio.Event()
         self._gate.set()  # not paused
         self._cancel = threading.Event()
@@ -63,6 +65,9 @@ class TaskQueue:
 
     def attach_episodes(self, episodes: Any) -> None:
         self._episodes = episodes
+
+    def attach_app_memory(self, app_memory: Any) -> None:
+        self._app_memory = app_memory
 
     def _record_episode(self, record: TaskRecord, result: TaskResult) -> None:
         if self._episodes is None:
@@ -277,6 +282,7 @@ class TaskQueue:
             record.skipped_confirmations = result.skipped_confirmations
             self._persist(task_id, result.status, result.summary)
             self._record_episode(record, result)
+            self._learn_app_knowledge(result)
 
             await _safe_speak(speak, _announce(result))
 
@@ -289,6 +295,22 @@ class TaskQueue:
                         print(f"[Task] reflection: {line}")
                 except Exception as exc:  # noqa: BLE001
                     print(f"[Task] reflection error: {exc}")
+
+    def _learn_app_knowledge(self, result: TaskResult) -> None:
+        """Record the window titles and control names that actually worked,
+        so the next task in the same app skips the exploration.
+
+        Runs for partial tasks too - a step that worked teaches something
+        even when a later step didn't.
+        """
+        if self._app_memory is None:
+            return
+        try:
+            n = self._app_memory.learn_from_steps(result.steps)
+            if n:
+                print(f"[Apps] learned {n} thing(s) about the apps involved.")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Apps] could not record app knowledge: {exc}")
 
     def _maybe_learn(
         self, goal: str, result: TaskResult, source: str
