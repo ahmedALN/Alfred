@@ -34,8 +34,12 @@ python -m src.main
 
 ## Talking to it
 
-Say **"Hey Alfred"** (or press the hotkey, default `Ctrl+Alt+K`). Alfred wakes,
-you talk, and it drops back to sleep after ~30 s of silence.
+Say the wake word (bundled **"Hey Jarvis"**, or set your own — see below) or
+press the hotkey (default `Ctrl+Alt+K`). Alfred wakes, you talk, and it drops
+back to sleep after ~30 s of silence.
+
+For a custom **"Hey Alfred"**: `python -m src.voice.setup_wakeword` once, then
+put `ALFRED_WAKE_PHRASE=hey alfred` in `.env`.
 
 | Say | What happens |
 |---|---|
@@ -56,13 +60,25 @@ Game mode also auto-engages when a fullscreen game holds the foreground
 ## Everyday commands
 
 ```bash
-python -m src.status                 # is it running? what has it done today?
+python -m src.status                 # running? memory, brain + Gemini usage today
 python -m src.memory_cli list        # what it remembers  (search / forget / edit / dedupe / export)
-python -m src.autostart install      # start at login     (uninstall / status)
-python -m src.voice.train_wakeword   # record samples for a custom "Hey Alfred"
+python -m src.autostart install      # start at login via the watchdog (uninstall / status)
+python -m src.watchdog               # run Alfred with crash-restart supervision
+python -m src.voice.setup_wakeword   # download the model for a custom wake phrase
 ```
 
 Logs: `logs/alfred.log`. Brain activity: `alfred_brain_audit.jsonl`.
+
+**Quota fallback:** if the Gemini voice quota is exhausted, Alfred switches to a
+fully local voice loop (faster-whisper + your chat model + Piper TTS) for a few
+minutes, then retries the cloud. Say *"switch back"* to end it early.
+
+**Protecting risky actions:** set `ALFRED_VOICE_PASSPHRASE` and every dangerous
+action (stop-service, firewall change, `rm -rf`, …) needs the passphrase spoken
+first. Catastrophic actions are always refused.
+
+**Gaming:** *"game mode"* (or automatically on a fullscreen game) unloads the
+local models and pauses background work; *"back to normal"* restores it.
 
 ## Switching the reasoning backend
 
