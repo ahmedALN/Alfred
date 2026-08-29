@@ -116,6 +116,11 @@ class AlfredLiveSession:
         self._surfaced_fact_ids: set[int] = set()
         self._last_memory_surface = 0.0
 
+        # Continuous learning: distil durable facts every N completed
+        # turns, not only at session close.
+        self._turns_since_distill = 0
+        self._distill_every_turns = 15
+
         self.session: Any = None
         self._connection: Any = None
 
@@ -723,6 +728,15 @@ class AlfredLiveSession:
             print("[Alfred] ready - say the wake word or press the hotkey.")
             return
 
+        situation = ""
+        if self._situation_fn is not None:
+            try:
+                snap = (self._situation_fn() or "").strip()
+                if snap:
+                    situation = f"\n\nWhat's going on right now:\n{snap}"
+            except Exception:  # noqa: BLE001
+                pass
+
         try:
             await self.session.send_client_content(
                 turns=types.Content(
@@ -732,11 +746,13 @@ class AlfredLiveSession:
                             text=(
                                 "(System: Alfred has just started up "
                                 "and is now listening. Greet the user "
-                                "briefly by name if you know it, "
-                                "mention anything relevant you "
-                                "remember from before if it's useful, "
-                                "and ask what they need. Keep it to "
-                                "one or two short sentences.)"
+                                "briefly by name if you know it. If "
+                                "anything below is worth flagging - an "
+                                "unfinished task, something you learned, "
+                                "a relevant change - mention the one most "
+                                "useful thing, then ask what they need. "
+                                "One or two short sentences, no lists."
+                                f"{situation})"
                             )
                         )
                     ],
@@ -915,6 +931,13 @@ class AlfredLiveSession:
                                 response_text,
                             )
 
+                        # Keep the mic open while Alfred is talking, and
+                        # longer if he just asked the user something.
+                        if self._activation is not None:
+                            self._activation.note_activity()
+                            if response_text.rstrip().endswith("?"):
+                                self._activation.extend(45.0)
+
                     print(
                         "[Turn complete]"
                     )
@@ -954,6 +977,15 @@ class AlfredLiveSession:
                         asyncio.create_task(
                             self._surface_relevant_memory(user_utterance)
                         )
+
+                    if user_utterance and response_text:
+                        self._turns_since_distill += 1
+                        if (
+                            self._turns_since_distill
+                            >= self._distill_every_turns
+                        ):
+                            self._turns_since_distill = 0
+                            asyncio.create_task(self._distill_incremental())
 
             await asyncio.sleep(0)
 
@@ -1226,6 +1258,25 @@ class AlfredLiveSession:
     # ================================================================
     # Cleanup
     # ================================================================
+
+    async def _distill_incremental(self) -> None:
+        """Mid-session distillation: fold the last stretch of conversation
+        into durable memory so long sessions still learn, then dedupe."""
+        if self._store is None or self._learner is None:
+            return
+        try:
+            transcript = self._store.session_turns(self._session_id)
+            tail = transcript[-2 * self._distill_every_turns:]
+            if len(tail) < 4:
+                return
+            learned = await asyncio.to_thread(
+                self._learner.distill_session, tail
+            )
+            if learned:
+                print(f"[Memory] +{learned} fact(s) (mid-session).")
+                await asyncio.to_thread(self._learner.dedupe)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Memory] incremental distillation failed: {exc}")
 
     async def _distill_session(self) -> None:
         if self._store is None or self._learner is None:

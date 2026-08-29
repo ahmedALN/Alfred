@@ -287,6 +287,7 @@ async def main() -> None:
             surface="voice",
         ),
         situation=_situation,
+        learner=learner,  # for post-task reflection lessons
         audit=None,  # set below once the audit log exists
     )
 

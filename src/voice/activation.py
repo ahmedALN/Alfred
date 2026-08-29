@@ -57,6 +57,14 @@ class ActivationController:
     def note_activity(self) -> None:
         self._last_activity = self._monotonic()
 
+    def extend(self, min_seconds: float) -> None:
+        """Guarantee at least ``min_seconds`` remain before the idle
+        timeout - used when Alfred asks the user a question and should
+        keep listening for the answer."""
+        target = self._monotonic() + min_seconds - self._idle
+        if target > self._last_activity:
+            self._last_activity = target
+
     def sleep(self, source: str = "idle") -> None:
         if self._always or not self._listening:
             return

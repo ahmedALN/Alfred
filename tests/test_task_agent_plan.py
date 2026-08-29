@@ -1,8 +1,19 @@
 """P4 contract: plan is spoken, reporting is honest, lies don't verify."""
 
-from src.brain.agent import TaskAgent
+from src.brain.agent import Step, TaskAgent, TaskResult
 from src.brain.policy import Policy
 from tests._taskfakes import KNOWN, DispatchChat, FakeRegistry
+
+
+class RecordingLearner:
+    def __init__(self):
+        self.remembered = []
+
+    def remember(self, content, category="general", source="conversation"):
+        self.remembered.append(
+            {"content": content, "category": category, "source": source}
+        )
+        return {"status": "stored"}
 
 
 def _use(tool, args, why="do it"):
@@ -80,3 +91,59 @@ def test_as_dict_exposes_plan_verified_unverified():
     assert d["verified"] == ["a"]
     assert d["unverified"] and "b" in d["unverified"][0]
     assert d["status"] == "partial"
+
+
+# --------------------------------------------------------------------
+# P7: post-task reflection
+# --------------------------------------------------------------------
+
+def _result_with_steps():
+    r = TaskResult(goal="open the report", status="failed", summary="")
+    r.steps.append(
+        Step(1, "click it", "ui_control", {"action": "click"}, "auto",
+             {"status": "error"}, False)
+    )
+    return r
+
+
+def test_reflection_stores_a_lesson_fact():
+    learner = RecordingLearner()
+    chat = DispatchChat()
+    chat._plan = []  # planner path unused
+    agent = TaskAgent(
+        chat, FakeRegistry(), Policy("full", KNOWN, surface="brain"),
+        learner=learner,
+    )
+    # make the planner model return the lesson line
+    agent._plan_chat = type("C", (), {
+        "generate": lambda self, p, **k:
+            "LESSON: Spotify search is opened with Ctrl+L, not a toolbar icon."
+    })()
+
+    line = agent.reflect(_result_with_steps())
+
+    assert line.startswith("LESSON:")
+    assert learner.remembered
+    assert learner.remembered[0]["source"] == "task_reflection"
+    assert "Ctrl+L" in learner.remembered[0]["content"]
+
+
+def test_reflection_none_stores_nothing():
+    learner = RecordingLearner()
+    agent = TaskAgent(
+        DispatchChat(), FakeRegistry(), Policy("full", KNOWN, surface="brain"),
+        learner=learner,
+    )
+    agent._plan_chat = type("C", (), {
+        "generate": lambda self, p, **k: "none"
+    })()
+
+    assert agent.reflect(_result_with_steps()) == "none"
+    assert learner.remembered == []
+
+
+def test_reflection_skipped_when_no_steps():
+    agent = TaskAgent(
+        DispatchChat(), FakeRegistry(), Policy("full", KNOWN, surface="brain"),
+    )
+    assert agent.reflect(TaskResult(goal="x", status="done", summary="")) == ""

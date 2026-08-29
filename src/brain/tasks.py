@@ -280,6 +280,16 @@ class TaskQueue:
 
             await _safe_speak(speak, _announce(result))
 
+            # Post-mortem: one cheap call that may bank a lesson for next
+            # time. Fire-and-forget so it never delays the next job.
+            if hasattr(agent, "reflect"):
+                try:
+                    line = await asyncio.to_thread(agent.reflect, result)
+                    if line and line.lower() != "none":
+                        print(f"[Task] reflection: {line}")
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[Task] reflection error: {exc}")
+
     def _maybe_learn(
         self, goal: str, result: TaskResult, source: str
     ) -> None:

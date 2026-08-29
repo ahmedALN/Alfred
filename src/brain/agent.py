@@ -55,6 +55,16 @@ is not evidence. If you are unsure, say UNVERIFIED.
 Reply with exactly one line: 'VERIFIED: <why>' or 'UNVERIFIED: <what's \
 missing>'."""
 
+_REFLECT_SYSTEM = """You are Alfred reviewing a task you just finished, to get \
+better next time.
+
+If a step failed or was slow for a concrete, reusable reason (a wrong UI \
+assumption, a better tool for the job, a path that doesn't exist), state that \
+lesson on one line starting 'LESSON: ' - phrased as a durable fact, not a \
+description of this one run.
+
+If there is no useful lesson, reply with exactly 'none'."""
+
 
 @dataclass
 class Step:
@@ -125,12 +135,14 @@ class TaskAgent:
         max_seconds: float = 360.0,
         substep_max_calls: int = 5,
         situation: "Callable[[], str] | None" = None,
+        learner: Any = None,
         audit: Any = None,
     ) -> None:
         self._chat = chat
         self._plan_chat = plan_chat or chat
         self._registry = registry
         self._situation = situation
+        self._learner = learner
         self._policy_brain = policy
         self._policy_voice = policy_voice or policy
         self._policy = policy  # active policy, set per run()
@@ -367,6 +379,44 @@ class TaskAgent:
                         or str(item["step"]).strip(),
                     })
         return steps or [{"step": goal, "done_when": goal}]
+
+    def reflect(self, result: "TaskResult") -> str:
+        """One cheap post-mortem call. Turns a concrete failure reason into
+        a durable LESSON fact for next time. Returns the reflection line
+        (or '') for logging. Safe to call from a worker thread."""
+        if not result.steps:
+            return ""
+
+        trace = "\n".join(
+            f"- {s.tool}({_short(s.args, 80)}) -> {'ok' if s.ok else 'FAILED'}"
+            for s in result.steps
+        )
+        prompt = (
+            f"{_REFLECT_SYSTEM}\n\nGOAL: {result.goal}\n"
+            f"OUTCOME: {result.status}\n"
+            f"VERIFIED: {result.verified or 'nothing'}\n"
+            f"NOT VERIFIED: {result.unverified or 'n/a'}\n\n"
+            f"STEPS:\n{trace}\n\nYour one line:"
+        )
+        try:
+            line = self._plan_chat.generate(prompt, temperature=0.2).strip()
+        except Exception as exc:  # noqa: BLE001
+            return f"(reflection failed: {exc})"
+
+        line = line.splitlines()[0].strip() if line else ""
+        if line.upper().startswith("LESSON:") and self._learner is not None:
+            lesson = line.split(":", 1)[1].strip()
+            if len(lesson) > 8:
+                try:
+                    self._learner.remember(
+                        content=lesson,
+                        category="correction",
+                        source="task_reflection",
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[Task] could not store lesson: {exc}")
+        self._log("task_reflect", {"goal": result.goal, "line": line}, None)
+        return line
 
     def _situation_text(self) -> str:
         if self._situation is None:

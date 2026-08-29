@@ -58,6 +58,36 @@ def test_wake_then_idle_timeout():
     assert states == [True, False]
 
 
+def test_extend_keeps_listening_past_normal_idle():
+    clk = Clock()
+    a = ActivationController(idle_seconds=30, monotonic=clk)
+    a.on_state_change = lambda _v: None
+    a.wake()
+
+    async def drive():
+        task = asyncio.create_task(a.run(poll_seconds=0.01))
+        a.extend(45)          # Alfred asked a question
+        clk.tick(35)          # past the normal 30s window
+        await asyncio.sleep(0.05)
+        assert a.is_listening is True
+        clk.tick(15)          # now past the 45s extension
+        await asyncio.sleep(0.05)
+        assert a.is_listening is False
+        task.cancel()
+
+    asyncio.run(drive())
+
+
+def test_extend_never_shortens_the_window():
+    clk = Clock()
+    a = ActivationController(idle_seconds=30, monotonic=clk)
+    a.wake()
+    a.note_activity()
+    before = a._last_activity
+    a.extend(5)  # shorter than idle - must not pull the deadline in
+    assert a._last_activity == before
+
+
 def test_wake_while_listening_is_noop_for_callback():
     a = ActivationController()
     states = []
