@@ -251,12 +251,17 @@ class AppMemory:
             if not ok or verdict != "auto" or not isinstance(args, dict):
                 continue
 
+            result = getattr(step, "result", None)
+            title = ""
+            if isinstance(result, dict):
+                title = str(result.get("window_title")
+                            or result.get("window") or "")
+
             if tool == "open_app":
-                app = str(args.get("app") or args.get("name") or "")
-                title = ""
-                result = getattr(step, "result", None)
-                if isinstance(result, dict):
-                    title = str(result.get("window_title") or "")
+                app = str(
+                    args.get("app") or args.get("name")
+                    or args.get("application") or ""
+                )
                 if app:
                     current_app = app
                     self.note_open(app, title)
@@ -272,6 +277,13 @@ class AppMemory:
                 continue
             if window:
                 current_app = window
+
+            # Any successful interaction confirms this app is workable and
+            # tells us its real window title - worth recording even when
+            # the executor addressed controls by ref rather than by name.
+            if title and title.strip().lower() != app.strip().lower():
+                self.note_open(app, title)
+                learned += 1
 
             action = str(args.get("action") or "")
             target = str(args.get("name") or args.get("item") or "")

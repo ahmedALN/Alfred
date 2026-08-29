@@ -169,3 +169,18 @@ def test_profiles_for_does_not_match_substrings_of_other_words(tmp_path):
     # "Word" must not match inside "wordpress" or "keyword"
     assert m.profiles_for("search for the keyword in my notes") == ""
     m.close()
+
+
+def test_learns_the_window_title_from_a_ui_control_result(tmp_path):
+    """The executor often addresses controls by ref, not name - Alfred must
+    still learn the app's real window title from that."""
+    m = _mem(tmp_path)
+    steps = [
+        _step("ui_control", {"action": "tree", "window": "notepad"},
+              result={"status": "success", "window": "Untitled - Notepad"}),
+        _step("ui_control", {"action": "type", "window": "notepad",
+                             "into": 2, "text": "hi"}),
+    ]
+    assert m.learn_from_steps(steps) >= 1
+    assert m.app("notepad")["window_title"] == "Untitled - Notepad"
+    m.close()

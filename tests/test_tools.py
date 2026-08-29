@@ -59,3 +59,33 @@ def test_registry_generates_gemini_declarations() -> None:
 
     assert len(declarations) == 1
     assert declarations[0]["name"] == "powershell"
+
+def test_open_app_accepts_name_as_an_alias_for_app():
+    """Models reliably reach for 'name'; a rejected call costs a whole step."""
+    class FakeLauncher:
+        def __init__(self):
+            self.opened = []
+
+        def open(self, app_name, target="alfred"):
+            self.opened.append(app_name)
+
+            class R:
+                @staticmethod
+                def as_dict():
+                    return {"status": "success", "app": app_name}
+            return R()
+
+        def close(self):
+            pass
+
+    from src.tools.open_app import OpenAppTool
+
+    for key in ("app", "name", "application", "app_name"):
+        launcher = FakeLauncher()
+        tool = OpenAppTool(launcher)
+        out = tool.execute({key: "Notepad"})
+        assert out["status"] == "success", f"{key} should be accepted"
+        assert launcher.opened == ["Notepad"]
+
+    # still rejects a genuinely missing app
+    assert OpenAppTool(FakeLauncher()).execute({})["status"] == "error"

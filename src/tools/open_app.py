@@ -31,7 +31,8 @@ class OpenAppTool(AlfredTool):
                     "type": "string",
                     "description": (
                         "Application to open, such as "
-                        "Calculator, Chrome, Notepad, or VS Code."
+                        "Calculator, Chrome, Notepad, or VS Code. "
+                        "('name' is accepted as an alias.)"
                     ),
                 },
                 "target": {
@@ -67,8 +68,13 @@ class OpenAppTool(AlfredTool):
         self,
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
-        app = arguments.get(
-            "app"
+        # Models reliably reach for 'name' here, and a rejected call costs
+        # a whole step - accept the obvious synonyms.
+        app = (
+            arguments.get("app")
+            or arguments.get("name")
+            or arguments.get("application")
+            or arguments.get("app_name")
         )
 
         target = arguments.get(

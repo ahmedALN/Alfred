@@ -688,6 +688,7 @@ class TaskAgent:
         )
         calls = 0
         seen_calls: dict[str, int] = {}
+        tool_fails: dict[str, int] = {}
         loops = 0
         consecutive_fail = 0
         for _ in range(max(0, min(self._substep_max_calls, budget))):
@@ -784,8 +785,26 @@ class TaskAgent:
 
             if step.ok:
                 consecutive_fail = 0
+                tool_fails.pop(str(dtool), None)
             else:
                 consecutive_fail += 1
+                # Retrying one tool with slightly different arguments is
+                # the weak model's other favourite wheel-spin: nudge it to
+                # a different tool rather than a different spelling.
+                key = str(dtool)
+                tool_fails[key] = tool_fails.get(key, 0) + 1
+                if tool_fails[key] == 2:
+                    history.append(
+                        f"[system] {key} has now failed twice - re-read its "
+                        "parameters in TOOLS above, or use a DIFFERENT tool "
+                        "to achieve this step."
+                    )
+                elif tool_fails[key] >= 3:
+                    history.append(
+                        f"[step {pi + 1} executor] {key} keeps failing - "
+                        "abandoned this step"
+                    )
+                    break
                 if consecutive_fail >= 3:
                     history.append(
                         f"[step {pi + 1} executor] 3 failed calls in a row - "
