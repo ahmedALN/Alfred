@@ -60,3 +60,6 @@ debug-child-desktop.png
 src/windows/native/ChildScreenCapture/child-capture.png
 src/windows/native/ChildScreenCapture/child-desktop.png
 src/windows/native/ChildScreenCapture/child-monitor-*.png
+
+# Downloaded models (Vosk, Piper, wake word) - fetched by setup scripts
+models/
