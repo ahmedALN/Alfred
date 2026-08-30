@@ -48,6 +48,7 @@ from src.tools.open_app import OpenAppTool
 from src.tools.powershell import PowerShellTool
 from src.tools.registry import ToolRegistry
 from src.tools.system_info import SystemInfoTool
+from src.tools.web import WebTool
 from src.singleton import AlreadyRunning, SingleInstance
 from src.tools.task_tool import RunTaskTool, TaskStatusTool
 from src.windows.child_session import ChildSessionClient
@@ -97,6 +98,7 @@ async def main() -> None:
 
     powershell_tool = PowerShellTool()
     open_app_tool = OpenAppTool()  # isolation wired in below
+    web_tool = WebTool()
     system_info_tool = SystemInfoTool()
     network_info_tool = NetworkInfoTool()
     remember_tool = RememberTool(learner)
@@ -201,6 +203,7 @@ async def main() -> None:
         open_app_tool,
         screenshot_tool,
         ui_control_tool,
+        web_tool,
         desktop_control_tool,
         system_info_tool,
         network_info_tool,
