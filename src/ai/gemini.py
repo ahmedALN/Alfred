@@ -130,6 +130,13 @@ class AlfredLiveSession:
         # turn, joined and handed to the brain on turn completion.
         self._input_transcript_parts: list[str] = []
 
+        # Isolation for a DIRECT voice request (no task queue involved).
+        # The voice model answers simple requests inline, so this cannot
+        # depend on it remembering to route through run_task.
+        self._isolated_desktop: Any = None
+        self._router: Any = None
+        self._turn_isolated = False
+
         # Turn-time memory recall: facts already shown this session, and
         # a simple gap so we surface at most one memory block per window.
         self._surfaced_fact_ids: set[int] = set()
@@ -173,6 +180,10 @@ class AlfredLiveSession:
         """Wire the background awareness loop in after construction."""
 
         self._brain = brain
+
+    def attach_isolation(self, desktop: Any, router: Any) -> None:
+        self._isolated_desktop = desktop
+        self._router = router
 
     def attach_policy(self, policy: Any) -> None:
         self._policy = policy
@@ -427,6 +438,16 @@ class AlfredLiveSession:
             "call run_task with a clear goal and let the background agent "
             "do it; tell the user you've started and don't wait. Do quick "
             "single actions yourself. "
+
+            "Alfred has a second, private Windows desktop the user "
+            "cannot see. When they ask for something 'without disturbing "
+            "me' or 'in the background', it is switched on automatically "
+            "before your tools run - you do not have to do anything. But "
+            "NEVER tell the user work happened on your private desktop "
+            "unless a tool result actually says so (opened_in, or a "
+            "session number). If a tool returns an error saying it could "
+            "not, relay that plainly instead of claiming success. On that "
+            "desktop use desktop_control, not ui_control. "
 
             "Run whatever the user asks without hesitation. If a tool "
             "returns status 'needs_confirmation', follow its instruction: "
@@ -906,6 +927,17 @@ class AlfredLiveSession:
                             input_transcription.text
                         )
 
+                        # Flag isolation as soon as we hear it - tool
+                        # calls arrive before the turn completes.
+                        if not self._turn_isolated:
+                            from src.brain.isolation import wants_isolation
+
+                            heard = "".join(self._input_transcript_parts)
+                            if wants_isolation(heard):
+                                self._turn_isolated = True
+                                print("[Voice] user asked for this to stay "
+                                      "off their screen")
+
                         if self._store is not None:
                             self._store.add_turn(
                                 self._session_id,
@@ -961,6 +993,10 @@ class AlfredLiveSession:
                         "[Turn complete]"
                     )
 
+                    # Point the tools back at the user's desktop and close
+                    # whatever Alfred opened in its own session.
+                    self._end_isolated_turn()
+
                     transcript_parts.clear()
 
                     user_utterance = "".join(
@@ -1012,6 +1048,73 @@ class AlfredLiveSession:
     # Tool handling
     # ================================================================
 
+    # Tools that act on a desktop - these are the ones isolation has to
+    # cover. Everything else (memory, system_info) is desktop-agnostic.
+    _DESKTOP_TOOLS = {
+        "open_app", "ui_control", "desktop_control", "computer_screenshot",
+    }
+
+    async def _apply_isolation(self, tool_name: str) -> dict[str, Any] | None:
+        """Point the desktop tools at Alfred's own session when asked.
+
+        Returns a tool response to send INSTEAD of running the tool, or
+        None to let it proceed.
+        """
+        if tool_name not in self._DESKTOP_TOOLS:
+            return None
+        if not self._turn_isolated:
+            return None
+        if self._isolated_desktop is None or self._router is None:
+            return None
+
+        if not self._router.isolated:
+            sid = await asyncio.to_thread(self._isolated_desktop.ensure)
+            if sid is None:
+                # Be honest rather than silently using the user's screen.
+                self._turn_isolated = False
+                return {
+                    "status": "error",
+                    "error": "could not open my own desktop",
+                    "instruction": (
+                        "Tell the user you could not open your private "
+                        "desktop, and ask whether to do it on their screen "
+                        "instead. Do NOT claim the work was done privately."
+                    ),
+                }
+            self._router.use_isolated()
+            print(f"[Voice] isolated: acting on session {sid}")
+
+        # ui_control drives UI Automation from inside Alfred's own
+        # process, and UIA is session-scoped - it physically cannot see
+        # the isolated session. Say so rather than silently acting on the
+        # user's desktop, which is exactly what they asked to avoid.
+        if tool_name == "ui_control":
+            return {
+                "status": "error",
+                "error": "ui_control cannot reach the private desktop",
+                "instruction": (
+                    "Use desktop_control instead for this request: "
+                    "action='look' to see the private desktop, then click "
+                    "and type by coordinates."
+                ),
+            }
+
+        return None
+
+    def _end_isolated_turn(self) -> None:
+        """Return the tools to the user's desktop and tidy up."""
+        if not self._turn_isolated:
+            return
+        self._turn_isolated = False
+
+        if self._router is not None:
+            self._router.use_users_desktop()
+        if self._isolated_desktop is not None:
+            try:
+                self._isolated_desktop.cleanup()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[Voice] isolated cleanup failed: {exc}")
+
     async def _handle_tool_call(
         self,
         tool_call: Any,
@@ -1043,6 +1146,19 @@ class AlfredLiveSession:
             )
 
             pre_confirmed = bool(arguments.pop("_confirmed", False))
+
+            # If the user asked for this to happen out of their way, make
+            # it so BEFORE the tool runs. Enforced here rather than relying
+            # on the model to route through run_task, because it answers
+            # simple requests inline.
+            isolation = await self._apply_isolation(call.name)
+            if isolation is not None:
+                function_responses.append(
+                    types.FunctionResponse(
+                        name=call.name, id=call.id, response=isolation,
+                    )
+                )
+                continue
 
             print(
                 f"\n[Tool] {call.name}"

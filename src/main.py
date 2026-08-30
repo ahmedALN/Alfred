@@ -95,7 +95,7 @@ async def main() -> None:
     registry = ToolRegistry()
 
     powershell_tool = PowerShellTool()
-    open_app_tool = OpenAppTool()
+    open_app_tool = OpenAppTool()  # isolation wired in below
     system_info_tool = SystemInfoTool()
     network_info_tool = NetworkInfoTool()
     remember_tool = RememberTool(learner)
@@ -213,6 +213,9 @@ async def main() -> None:
         surface="voice",
     )
     session.attach_policy(voice_policy)
+    session.attach_isolation(isolated_desktop, session_router)
+    open_app_tool._router = session_router
+    open_app_tool._isolated = isolated_desktop
 
     # Skill library: verified task successes are distilled into replayable
     # routines so repeat requests skip planning. Dangerous routines are

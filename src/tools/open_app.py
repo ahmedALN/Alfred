@@ -58,11 +58,18 @@ class OpenAppTool(AlfredTool):
     def __init__(
         self,
         launcher: AppLauncher | None = None,
+        router: Any = None,
+        isolated_desktop: Any = None,
     ) -> None:
         self.launcher = (
             launcher
             or AppLauncher()
         )
+        # When Alfred is working on its own desktop, apps must open THERE.
+        # The normal launcher starts them in Alfred's own session, which
+        # is the user's screen.
+        self._router = router
+        self._isolated = isolated_desktop
 
     def execute(
         self,
@@ -87,6 +94,30 @@ class OpenAppTool(AlfredTool):
 
         if target not in {"alfred", "user", "current"}:
             target = "alfred"
+
+        if (
+            self._router is not None
+            and self._isolated is not None
+            and getattr(self._router, "isolated", False)
+        ):
+            try:
+                out = self._isolated.launch(app)
+                return {
+                    "status": "success",
+                    "app": app,
+                    "opened_in": "alfred's private desktop",
+                    "session": out.get("session"),
+                    "pid": out.get("pid"),
+                }
+            except Exception as exc:  # noqa: BLE001
+                return {
+                    "status": "error",
+                    "error": f"could not open {app!r} on my desktop: {exc}",
+                    "instruction": (
+                        "Tell the user it failed. Do NOT claim it opened "
+                        "privately."
+                    ),
+                }
 
         try:
             result = self.launcher.open(app_name=app, target=target)
