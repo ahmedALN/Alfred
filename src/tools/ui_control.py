@@ -321,6 +321,36 @@ class UIControlTool(AlfredTool):
 
         return best.get("rect") if best else None
 
+    def _exact_landmark(self, ui: Any, window: str | None, pid: int | None,
+                        wanted: str) -> dict[str, Any] | None:
+        """Use a learned control only when its label matches exactly."""
+        if self._memory is None or not window:
+            return None
+
+        found = self._lookup(window, wanted)
+        if found is None:
+            return None
+        if found["label"].strip().lower() != wanted.strip().lower():
+            return None
+
+        return self._click_landmark(ui, window, pid, wanted)
+
+    def _lookup(self, window: str, wanted: str) -> dict[str, Any] | None:
+        """Find a landmark under the window's name, or the app's.
+
+        Windows are titled more specifically than apps are remembered -
+        "VLC media player" against landmarks learned as "VLC" - so the
+        first word is tried as well.
+        """
+        found = self._memory.find_landmark(window, wanted)
+        if found is not None:
+            return found
+
+        head = window.split()[0] if window.split() else ""
+        if head and head.lower() != window.lower():
+            return self._memory.find_landmark(head, wanted)
+        return None
+
     def _click_landmark(self, ui: Any, window: str | None, pid: int | None,
                         wanted: str) -> dict[str, Any] | None:
         """Click a control this app taught us about, by where it sits.
@@ -333,7 +363,7 @@ class UIControlTool(AlfredTool):
         if self._memory is None or not window:
             return None
 
-        found = self._memory.find_landmark(window, wanted)
+        found = self._lookup(window, wanted)
         if found is None:
             return None
 
@@ -1063,6 +1093,14 @@ class UIControlTool(AlfredTool):
 
                 # A filtered read is much smaller and much faster; fall
                 # back to the whole tree when the name is worded loosely.
+                # A label we learned exactly beats a loose match in the
+                # tree. Asking for "Play" in VLC otherwise opened the
+                # "Playback" menu, because a prefix match on a real
+                # control outranked the button actually meant.
+                exact = self._exact_landmark(ui, window, pid, wanted)
+                if exact is not None:
+                    return exact
+
                 _, controls = ui.tree(window, pid, limit=300, contains=wanted)
                 target = self._pick_item(controls, wanted)
 

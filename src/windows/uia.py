@@ -318,8 +318,21 @@ class UiaSession:
         # Chromium/Electron apps only expose their tree when focused, so
         # if that comes back thin, focus and re-read.
         descendants = self._descendants(win, max_depth)
-        if len(descendants) < 4:
+
+        # Chromium-based apps - Steam, Discord, Spotify, anything
+        # Electron - switch their accessibility tree off when nothing has
+        # asked for it, and report an empty window while being perfectly
+        # healthy on screen. Steam did exactly this between one run and
+        # the next, and recovered on its own moments later. WM_GETOBJECT
+        # is the ask a screen reader sends; the app then needs a beat to
+        # build the tree, so this waits rather than deciding after one
+        # try that the window is empty.
+        for pause in (0.3, 1.2):
+            if len(descendants) >= 4:
+                break
+            self._wake_accessibility(win)
             self.focus(win)
+            time.sleep(pause)
             descendants = self._descendants(win, max_depth)
 
         # How much was there versus how much could be named. A window
@@ -432,6 +445,32 @@ class UiaSession:
         except Exception:  # noqa: BLE001
             pass
         return title, found
+
+    @staticmethod
+    def _wake_accessibility(win) -> None:
+        """Ask a dormant app to build its accessibility tree."""
+        try:
+            handle = win.handle
+        except Exception:  # noqa: BLE001
+            return
+
+        if not handle:
+            return
+
+        try:
+            import ctypes
+
+            ctypes.windll.user32.SendMessageTimeoutW(
+                ctypes.c_void_p(int(handle)),
+                0x003D,                     # WM_GETOBJECT
+                0,
+                ctypes.c_long(-4),          # OBJID_CLIENT
+                0x0002,                     # SMTO_ABORTIFHUNG
+                600,
+                ctypes.byref(ctypes.c_ulong()),
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     def find(self, query: str, limit: int = 20) -> list[Control]:
         """Search the CURRENT window for controls mentioning ``query``.

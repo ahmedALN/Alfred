@@ -856,8 +856,13 @@ class _Positioned(FakeUia):
         self.clicked_at = []
 
     def windows(self, limit=40):
-        return [{"title": "MultiMC", "pid": 7, "class": "Qt",
-                 "rect": [600, 0, 1300, 1000]}]
+        # Both apps used in these tests, at the same known rectangle.
+        return [
+            {"title": "MultiMC", "pid": 7, "class": "Qt",
+             "rect": [600, 0, 1300, 1000]},
+            {"title": "VLC media player", "pid": 8, "class": "Qt",
+             "rect": [600, 0, 1300, 1000]},
+        ]
 
     def click_point(self, x, y, double=False):
         self.clicked_at.append((x, y))
@@ -926,3 +931,54 @@ def test_an_unknown_name_with_no_landmark_still_reports_not_found():
     )
     assert out["status"] in ("not_found", "needs_user")
     assert ui.clicked_at == []
+
+
+def test_an_exactly_learned_label_beats_a_loose_tree_match():
+    """Asking for "Play" in VLC opened the "Playback" menu: a prefix
+    match on a real control outranked the button actually meant."""
+    ui = _Positioned()
+    ui._controls = [Control(0, "MenuItem", "Playback Alt+l", "",
+                            (0, 0, 10, 10), True)]
+    memory = _Memory({"play": {"label": "Play", "rel_x": 0.04,
+                               "rel_y": 0.95}})
+    out = UIControlTool(ui, memory=memory).execute(
+        {"action": "open_item", "window": "VLC", "name": "Play"}
+    )
+
+    assert out["via"] == "learned position"
+    assert ui.clicked_at == [(628, 950)]
+
+
+def test_a_loose_landmark_does_not_pre_empt_a_real_control():
+    """Only an exact label jumps the queue - otherwise the app's own
+    tree is still the better source."""
+    ui = _Positioned()
+    ui._controls = [Control(0, "Button", "Play all", "", (0, 0, 10, 10), True)]
+    memory = _Memory({"play all": {"label": "Play all button",
+                                   "rel_x": 0.04, "rel_y": 0.95}})
+    out = UIControlTool(ui, memory=memory).execute(
+        {"action": "open_item", "window": "VLC", "name": "Play all"}
+    )
+
+    assert out.get("via") != "learned position"
+    assert ui.clicked_at == []
+
+
+class _AppNamed(_Memory):
+    """Landmarks learned under the app's short name."""
+
+    def find_landmark(self, app, wanted):
+        if app.lower() != "vlc":
+            return None
+        return self._marks.get(wanted.lower())
+
+
+def test_a_window_titled_more_fully_than_the_app_still_finds_them():
+    """Learned as "VLC", the window is called "VLC media player"."""
+    ui = _Positioned()
+    memory = _AppNamed({"mute": {"label": "Mute", "rel_x": 0.8, "rel_y": 0.96}})
+    out = UIControlTool(ui, memory=memory).execute(
+        {"action": "open_item", "window": "VLC media player", "name": "Mute"}
+    )
+
+    assert out["via"] == "learned position"

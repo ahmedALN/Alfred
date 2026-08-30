@@ -166,6 +166,43 @@ WINDOWS_PLAYBOOK: list[tuple[str, str]] = [
      "place. A file copy is exact; a file dialog is several fragile "
      "steps that can silently land elsewhere."),
 
+    ("correction", "A Chromium app - Steam, Discord, Spotify, anything "
+     "Electron - can report a completely EMPTY tree while looking "
+     "perfectly normal on screen: it switches accessibility off when "
+     "nothing has asked for it. ui_control retries and waits for it, but "
+     "if a window you know is populated comes back with nothing, that is "
+     "the reason. Read it again before concluding anything."),
+
+    # --- knowing what kind of app you are looking at -------------------
+    ("correction", "Work out what kind of app it is BEFORE deciding how "
+     "to drive it. Read the tree once and count the named controls. "
+     "Many (a dozen or more): drive everything by name. A handful, "
+     "usually just a menu bar: go through the menus and keyboard "
+     "shortcuts. Almost none but plenty of elements: the buttons are "
+     "drawn without labels - map them once. Nothing but System, "
+     "Minimise, Maximise, Close: it paints its own interface and only a "
+     "screenshot can see it."),
+    ("system", "Surveyed on this machine. Drive by name: Spotify (250 "
+     "named controls), Discord (178), Stremio (118), Docker Desktop "
+     "(74), Steam, and any browser. Menus only: VLC - its transport bar "
+     "is mapped instead. Positions needed: MultiMC's right-hand panel. "
+     "Nothing readable: Roblox, and games generally."),
+    ("system", "VLC: the menu bar is named (Media, Playback, Audio, "
+     "Video, Subtitle, Tools, View, Help). The transport bar has no "
+     "names and is mapped: Play, Previous, Stop, Next, Fullscreen, "
+     "Extended settings, Playlist, Loop, Shuffle, Mute, Volume. The "
+     "keyboard is often better still - Space play/pause, F fullscreen, "
+     "M mute."),
+    ("correction", "Games do not expose an interface at all, so do not "
+     "try to click your way through one. Start them from the launcher, "
+     "which usually IS readable: a game's Steam page has a Play button, "
+     "MultiMC launches on a double-click, and roblox.com works where the "
+     "Roblox client does not."),
+    ("correction", "An app that has been mapped is remembered. Check "
+     "what is already known before working anything out again - the app "
+     "profile lists both the controls seen and any buttons learned by "
+     "position, and open_item accepts those names directly."),
+
     # --- the web ------------------------------------------------------
     ("correction", "To reach a specific web page, pass the URL straight to "
      "open_app: open_app app='https://www.youtube.com/@Deji/videos'. It "
