@@ -1,5 +1,13 @@
+import pytest
+
 from src.tools.ui_control import UIControlTool
-from src.windows.uia import Control, UiaError, _escape, title_pattern
+from src.windows.uia import (
+    Control,
+    UiaError,
+    UiaSession,
+    _escape,
+    title_pattern,
+)
 
 
 class FakeUia:
@@ -369,3 +377,87 @@ def test_without_a_remote_backend_it_still_works_locally():
     out = tool.execute({"action": "windows"})
 
     assert out["status"] == "success"
+
+
+# ------------------------------------- reading a control's text
+
+
+class _Element:
+    """Enough of a pywinauto wrapper for get_text."""
+
+    def __init__(self, value=None, legacy=None, label=""):
+        self._value = value
+        self._legacy = legacy
+        self._label = label
+
+    def get_value(self):
+        if self._value is None:
+            raise RuntimeError("no ValuePattern")
+        return self._value
+
+    def legacy_properties(self):
+        if self._legacy is None:
+            raise RuntimeError("no legacy properties")
+        return self._legacy
+
+    def window_text(self):
+        return self._label
+
+
+def _session_reading(element):
+    session = UiaSession()
+    session._resolve = lambda ref=None, name=None: element  # type: ignore
+    return session
+
+
+def test_an_empty_field_reads_back_empty_not_its_label():
+    """It used to fall through to the label, so a cleared text box read
+    back as "Text editor" - which a model takes for its contents."""
+    session = _session_reading(_Element(value="", label="Text editor"))
+
+    assert session.get_text(ref=0) == ""
+
+
+def test_a_field_with_text_reads_its_value():
+    session = _session_reading(_Element(value="hello", label="Text editor"))
+
+    assert session.get_text(ref=0) == "hello"
+
+
+def test_a_control_with_no_value_falls_back_to_its_label():
+    session = _session_reading(_Element(label="Save"))
+
+    assert session.get_text(ref=0) == "Save"
+
+
+def test_legacy_value_is_used_when_there_is_no_value_pattern():
+    session = _session_reading(
+        _Element(legacy={"Value": "42"}, label="Quantity")
+    )
+
+    assert session.get_text(ref=0) == "42"
+
+
+# ------------------------------------------------- menu paths
+
+
+def test_menu_paths_split_on_both_separators():
+    """'File->Exit' used to become 'File-' and 'Exit': '>' was replaced
+    with '->' first, turning it into 'File-->Exit'."""
+    from src.windows.uia import _MENU_SEPARATOR
+
+    def parts(path):
+        return [p for p in _MENU_SEPARATOR.split(path) if p]
+
+    assert parts("File->Exit") == ["File", "Exit"]
+    assert parts("File>Exit") == ["File", "Exit"]
+    assert parts("File -> Save As") == ["File", "Save As"]
+    assert parts("View>Zoom>In") == ["View", "Zoom", "In"]
+
+
+def test_a_menu_path_with_no_parts_is_an_error():
+    session = UiaSession()
+    session._last_window = object()
+
+    with pytest.raises(UiaError):
+        session.menu_select("->")

@@ -200,10 +200,22 @@ internal sealed class UiaService
     {
         Task<string> task = Task.Run(work);
 
-        if (task.Wait(timeoutMs))
+        bool finished;
+
+        try
         {
-            // Unwraps rather than raising AggregateException, so the
-            // caller sees the real failure.
+            finished = task.Wait(timeoutMs);
+        }
+        catch (AggregateException)
+        {
+            // Wait() re-wraps a failure. GetResult below unwraps it, so
+            // the caller sees "no control matches ref=999" rather than
+            // "AggregateException: One or more errors occurred".
+            finished = true;
+        }
+
+        if (finished)
+        {
             return task.GetAwaiter().GetResult();
         }
 
@@ -1213,6 +1225,25 @@ internal sealed class UiaService
         }
     }
 
+    /// <summary>
+    /// Types text and waits for the app to actually receive it.
+    ///
+    /// SendInput queues each character and returns immediately, so a
+    /// 'get' straight afterwards read back "se" of "second". Waiting
+    /// roughly as long as the keystrokes take to arrive makes typing
+    /// mean the same thing as SetValue does: done when it returns.
+    /// </summary>
+    private static bool TypeAndSettle(string text)
+    {
+        if (!Program.UiaTypeText(text))
+        {
+            return false;
+        }
+
+        Thread.Sleep(Math.Min(600, 40 + (text.Length * 8)));
+        return true;
+    }
+
     private string OpType(JsonElement root)
     {
         string text = ReadString(root, "text") ?? string.Empty;
@@ -1222,7 +1253,7 @@ internal sealed class UiaService
         if (reference is null && string.IsNullOrWhiteSpace(name))
         {
             // Free typing into whatever holds focus.
-            if (!Program.UiaTypeText(text))
+            if (!TypeAndSettle(text))
             {
                 throw new UiaFailure("could not send the text");
             }
@@ -1272,7 +1303,7 @@ internal sealed class UiaService
             Thread.Sleep(90);
         }
 
-        if (!Program.UiaTypeText(text))
+        if (!TypeAndSettle(text))
         {
             throw new UiaFailure("could not send the text");
         }
@@ -1287,40 +1318,39 @@ internal sealed class UiaService
             ReadString(root, "name")
         );
 
+        // A control that carries a value reports that value, INCLUDING
+        // when it is empty. Falling through to the label made a cleared
+        // text box read back as "Text editor", which a model takes for
+        // its contents.
         try
         {
             if (el.TryGetCurrentPattern(ValuePattern.Pattern, out object value))
             {
-                string? text = ((ValuePattern)value).Current.Value;
-
-                if (!string.IsNullOrEmpty(text))
+                return Program.UiaOk(new
                 {
-                    return Program.UiaOk(new { text });
-                }
+                    text = ((ValuePattern)value).Current.Value ?? string.Empty,
+                });
             }
         }
         catch
         {
-            // Fall through.
+            // Pattern present but unusable; try the text one.
         }
 
         try
         {
             if (el.TryGetCurrentPattern(TextPattern.Pattern, out object text))
             {
-                string body = ((TextPattern)text)
-                    .DocumentRange
-                    .GetText(20000);
-
-                if (!string.IsNullOrEmpty(body))
+                return Program.UiaOk(new
                 {
-                    return Program.UiaOk(new { text = body });
-                }
+                    text = ((TextPattern)text).DocumentRange.GetText(20000)
+                        ?? string.Empty,
+                });
             }
         }
         catch
         {
-            // Fall through.
+            // Neither: the label is the best answer available.
         }
 
         return Program.UiaOk(new { text = SafeName(el) });
@@ -1622,15 +1652,16 @@ internal sealed class UiaService
             throw new UiaFailure("'menu' needs a path.");
         }
 
-        string normalised = path
-            .Replace(">", "->")
-            .Replace("->->", "->");
-
-        string[] parts = normalised
-            .Split(new[] { "->" }, StringSplitOptions.RemoveEmptyEntries)
+        // Both separators people write, and both at once: replacing '>'
+        // with '->' first turned 'File->Exit' into 'File-->Exit', which
+        // split into 'File-' and 'Exit'.
+        string[] parts = Regex
+            .Split(path, @"\s*(?:->|>)\s*")
             .Select(p => p.Trim())
             .Where(p => p.Length > 0)
             .ToArray();
+
+        string normalised = string.Join("->", parts);
 
         if (parts.Length == 0)
         {
@@ -1706,17 +1737,24 @@ internal sealed class UiaService
     // Waiting
     // ================================================================
 
+    /// <summary>
+    /// Answers "is this on screen yet" WITHOUT touching the ref cache.
+    ///
+    /// It used to rebuild it, which quietly renumbered every ref the
+    /// caller was holding: read the tree, check a button exists, then
+    /// act on ref 0 and hit a different control entirely. Checking
+    /// whether something is there must not move everything else.
+    /// </summary>
     private bool ControlExists(string name, string? title)
     {
         string? specTitle = title ?? _specTitle;
         int? specPid = title is null ? _specPid : null;
 
+        AutomationElement window;
+
         try
         {
-            AutomationElement window = ResolveWindow(specTitle, specPid);
-            _window = window;
-            _windowTitle = SafeName(window);
-            BuildRecords(Descendants(window, 14, 4000), name, 80);
+            window = ResolveWindow(specTitle, specPid);
         }
         catch (UiaFailure)
         {
@@ -1725,9 +1763,32 @@ internal sealed class UiaService
 
         string want = name.Trim().ToLowerInvariant();
 
-        return _controls.Any(c => c.Name
-            .ToLowerInvariant()
-            .Contains(want, StringComparison.Ordinal));
+        foreach (AutomationElement el in Descendants(window, 14, 4000))
+        {
+            try
+            {
+                if (!Actionable.Contains(TypeName(el, cached: true)))
+                {
+                    continue;
+                }
+
+                string candidate = (el.Cached.Name ?? string.Empty)
+                    .Trim()
+                    .ToLowerInvariant();
+
+                if (candidate.Length > 0
+                    && candidate.Contains(want, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+                // Element vanished mid-scan.
+            }
+        }
+
+        return false;
     }
 
     private string OpExists(JsonElement root)

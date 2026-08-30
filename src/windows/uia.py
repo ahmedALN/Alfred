@@ -16,6 +16,8 @@ _ACTIONABLE = {
 # containers are noise otherwise).
 _NEEDS_NAME = {"Group", "List", "Menu", "Tab", "Text"}
 
+_MENU_SEPARATOR = re.compile(r"\s*(?:->|>)\s*")
+
 _REGEX_META = re.compile(r"[.^$*+?()\[\]{}|\\]")
 
 
@@ -403,17 +405,32 @@ class UiaSession:
         send_keys(keys, with_spaces=True)
 
     def get_text(self, ref: int | None = None, name: str | None = None) -> str:
+        """A control's value if it has one, otherwise its label.
+
+        A value-bearing control reports its value INCLUDING when that is
+        empty - falling through to the label made a cleared text box
+        read back as "Text editor", which a model takes for contents.
+        """
         el = self._resolve(ref, name)
-        for getter in ("get_value", "window_text", "legacy_properties"):
-            try:
-                val = getattr(el, getter)()
-            except Exception:  # noqa: BLE001
-                continue
-            if isinstance(val, dict):
-                val = val.get("Value") or val.get("Name") or ""
-            if val:
-                return str(val)
-        return ""
+
+        try:
+            value = el.get_value()  # type: ignore[attr-defined]
+            if value is not None:
+                return str(value)
+        except Exception:  # noqa: BLE001
+            pass
+
+        try:
+            legacy = el.legacy_properties()  # type: ignore[attr-defined]
+            if isinstance(legacy, dict) and legacy.get("Value") is not None:
+                return str(legacy["Value"])
+        except Exception:  # noqa: BLE001
+            pass
+
+        try:
+            return str(el.window_text() or "")
+        except Exception:  # noqa: BLE001
+            return ""
 
     def select(self, item: str, ref: int | None = None,
                name: str | None = None) -> str:
@@ -481,14 +498,21 @@ class UiaSession:
         """Drive a classic menu bar, e.g. 'File->Save As' or 'File>Exit'."""
         if self._last_window is None:
             raise UiaError("focus a window first")
-        norm = path.replace(">", "->").replace("->->", "->")
+        # Both separators people write, and both at once: replacing '>'
+        # with '->' first turned 'File->Exit' into 'File-->Exit', which
+        # then split into 'File-' and 'Exit'.
+        parts = [p.strip() for p in _MENU_SEPARATOR.split(path) if p.strip()]
+        if not parts:
+            raise UiaError(f"could not read a menu path from {path!r}")
+        norm = "->".join(parts)
+
         try:
             self._last_window.menu_select(norm)
             return norm
         except Exception:  # noqa: BLE001
             pass
         # UIA apps often have no real menu bar - click the parts in turn.
-        for part in [p.strip() for p in norm.split("->") if p.strip()]:
+        for part in parts:
             self.click(name=part)
             time.sleep(0.35)
             try:
