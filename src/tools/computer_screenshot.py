@@ -42,11 +42,26 @@ class ComputerScreenshotTool(AlfredTool):
         self,
         client: ChildSessionClient,
         vision: VisionProvider,
+        router: Any = None,
         grid: bool | None = None,
     ) -> None:
         self._client = client
+        self._router = router
         self._vision = vision
         self._grid = load_settings().desktop_grid if grid is None else grid
+
+    def _session(self) -> Any:
+        """The agent for the desktop Alfred should be acting on right now.
+
+        With a router attached this follows the current task's isolation
+        setting; without one it is just the client we were built with.
+        """
+        if self._router is not None:
+            try:
+                return self._router.client()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[Desktop] router fell back to the default client: {exc}")
+        return self._client
 
     def execute(
         self,
@@ -55,7 +70,7 @@ class ComputerScreenshotTool(AlfredTool):
         del arguments
 
         try:
-            screenshot = self._client.screenshot()
+            screenshot = self._session().screenshot()
 
             print(
                 "[Screenshot] Captured "

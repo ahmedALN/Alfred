@@ -92,11 +92,13 @@ class DesktopControlTool(AlfredTool):
         self,
         client: ChildSessionClient,
         vision: VisionProvider,
+        router: Any = None,
         desktop_manager: DesktopManager | None = None,
         alfred_desktop: int | None = None,
         grid: bool | None = None,
     ) -> None:
         self._client = client
+        self._router = router
         self._vision = vision
         self._desktops = desktop_manager or DesktopManager()
         settings = load_settings()
@@ -142,6 +144,19 @@ class DesktopControlTool(AlfredTool):
 
     # ----------------------------------------------------------------
 
+    def _session(self) -> Any:
+        """The agent for the desktop Alfred should be acting on right now.
+
+        With a router attached this follows the current task's isolation
+        setting; without one it is just the client we were built with.
+        """
+        if self._router is not None:
+            try:
+                return self._router.client()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[Desktop] router fell back to the default client: {exc}")
+        return self._client
+
     def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
         action = arguments.get("action")
 
@@ -168,7 +183,7 @@ class DesktopControlTool(AlfredTool):
                 if not isinstance(hwnd, int):
                     return {"status": "error", "error": "'activate' needs 'hwnd'."}
                 with self._focus_borrow(bool(arguments.get("force"))):
-                    self._client.activate(hwnd)
+                    self._session().activate(hwnd)
                 return {"status": "success", "action": "activate", "hwnd": hwnd}
 
             with self._focus_borrow(bool(arguments.get("force"))):
@@ -200,13 +215,13 @@ class DesktopControlTool(AlfredTool):
         if hwnd is not None:
             # Capture that window directly - no desktop switch, no flicker.
             try:
-                self._client.capture_window(hwnd)
+                self._session().capture_window(hwnd)
             except ChildSessionError as exc:
                 return {
                     "status": "error",
                     "error": f"Could not capture window {hwnd}: {exc}",
                 }
-        shot = self._client.screenshot()
+        shot = self._session().screenshot()
         image = shot.png_bytes
         if self._grid:
             image = annotate_grid(image)
@@ -248,14 +263,14 @@ class DesktopControlTool(AlfredTool):
             text = args.get("text")
             if not isinstance(text, str) or not text:
                 return {"status": "error", "error": "'type' needs 'text'."}
-            self._client.type_text(text)
+            self._session().type_text(text)
             return {"status": "success", "action": "type", "typed": text}
 
         if action == "key":
             keys = args.get("keys")
             if not keys:
                 return {"status": "error", "error": "'key' needs 'keys'."}
-            self._client.key(keys)
+            self._session().key(keys)
             return {"status": "success", "action": "key", "keys": keys}
 
         x, y = args.get("x"), args.get("y")
@@ -264,17 +279,17 @@ class DesktopControlTool(AlfredTool):
                     "error": f"'{action}' needs integer 'x' and 'y'."}
 
         if action == "scroll":
-            self._client.scroll(x, y, int(args.get("dy", -3)))
+            self._session().scroll(x, y, int(args.get("dy", -3)))
             return {"status": "success", "action": "scroll", "x": x, "y": y}
 
         if action == "drag":
             x2, y2 = args.get("x2"), args.get("y2")
             if not isinstance(x2, int) or not isinstance(y2, int):
                 return {"status": "error", "error": "'drag' needs x2 and y2."}
-            self._client.drag(x, y, x2, y2)
+            self._session().drag(x, y, x2, y2)
             return {"status": "success", "action": "drag"}
 
-        self._client.mouse_move(x, y)
+        self._session().mouse_move(x, y)
 
         if action == "move":
             return {"status": "success", "action": "move", "x": x, "y": y}
@@ -283,10 +298,10 @@ class DesktopControlTool(AlfredTool):
             "click": "left", "double_click": "left",
             "right_click": "right", "middle_click": "middle",
         }[action]
-        self._client.click(button)
+        self._session().click(button)
         if action == "double_click":
             time.sleep(0.08)
-            self._client.click(button)
+            self._session().click(button)
 
         return {"status": "success", "action": action, "x": x, "y": y,
                 "button": button}

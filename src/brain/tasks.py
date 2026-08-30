@@ -52,6 +52,7 @@ class TaskQueue:
         self._episodes = episodes
         self._app_memory = app_memory
         self._isolated_desktop: Any = None
+        self._router: Any = None
         self._gate = asyncio.Event()
         self._gate.set()  # not paused
         self._cancel = threading.Event()
@@ -72,8 +73,9 @@ class TaskQueue:
     def attach_app_memory(self, app_memory: Any) -> None:
         self._app_memory = app_memory
 
-    def attach_isolated_desktop(self, desktop: Any) -> None:
+    def attach_isolated_desktop(self, desktop: Any, router: Any = None) -> None:
         self._isolated_desktop = desktop
+        self._router = router
 
     def _record_episode(self, record: TaskRecord, result: TaskResult) -> None:
         if self._episodes is None:
@@ -248,6 +250,10 @@ class TaskQueue:
                 sid = await asyncio.to_thread(self._isolated_desktop.ensure)
                 isolated_ready = sid is not None
                 if isolated_ready:
+                    # Everything that drives mouse/keyboard/capture now
+                    # acts on Alfred's desktop instead of the user's.
+                    if self._router is not None:
+                        self._router.use_isolated()
                     _progress(
                         f"Working on my own desktop (session {sid}) so this "
                         "stays out of your way."
@@ -317,6 +323,11 @@ class TaskQueue:
             self._persist(task_id, result.status, result.summary)
             self._record_episode(record, result)
             self._learn_app_knowledge(result)
+
+            # Point the tools back at the user's desktop before anything
+            # else runs, whatever happened above.
+            if self._router is not None:
+                self._router.use_users_desktop()
 
             # Alfred tidies up after itself: close what it opened in the
             # isolated session so the next task starts from a clean desk.

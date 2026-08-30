@@ -52,6 +52,7 @@ from src.singleton import AlreadyRunning, SingleInstance
 from src.tools.task_tool import RunTaskTool, TaskStatusTool
 from src.windows.child_session import ChildSessionClient
 from src.windows.isolated_desktop import IsolatedDesktop
+from src.windows.session_router import ROUTER as session_router
 from src.windows.child_session.bootstrap import ensure_agent_running
 
 
@@ -114,11 +115,13 @@ async def main() -> None:
     screenshot_tool = ComputerScreenshotTool(
         child_session_client,
         vision=providers.vision,
+        router=session_router,
     )
 
     desktop_control_tool = DesktopControlTool(
         child_session_client,
         vision=providers.vision,
+        router=session_router,
     )
 
     ui_control_tool = UIControlTool()
@@ -227,7 +230,7 @@ async def main() -> None:
         enabled=settings.skills_enabled,
     )
     task_queue.attach_skills(skill_library)
-    task_queue.attach_isolated_desktop(isolated_desktop)
+    task_queue.attach_isolated_desktop(isolated_desktop, session_router)
     print(
         f"[Skills] {len(skill_store.all(include_disabled=True))} learned; "
         f"library {'on' if settings.skills_enabled else 'off'}."
@@ -434,6 +437,7 @@ async def main() -> None:
         if audit is not None:
             audit.close()
 
+        session_router.close()
         isolated_desktop.shutdown()
         task_store.close()
         skill_store.close()
