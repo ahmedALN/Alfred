@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from src.tools.base import AlfredTool
+from src.windows.screens import assess, draws_its_own_ui
 from src.windows.uia import UiaError, UiaSession, normalise_keys
 
 _ACTIONS = (
@@ -28,7 +29,17 @@ _SEARCH_HINT = re.compile(
 
 # Things you open by name: a library row, a tree node, a tile, a link.
 _ROW_TYPES = {"ListItem", "TreeItem", "DataItem"}
-_CLICKABLE_TYPES = {"Button", "Hyperlink", "MenuItem", "TabItem", "Text"}
+_CLICKABLE_TYPES = {"Button", "Hyperlink", "MenuItem", "TabItem"}
+# A Text is usually the label INSIDE the thing you meant to click. It
+# often works, because the label sits on top of the link - but when both
+# are on offer the link is the safer target.
+_LABEL_TYPES = {"Text"}
+
+# Actions that act on one control and so need the right window read.
+_NEEDS_WINDOW = {
+    "click", "double_click", "right_click", "invoke", "get", "select",
+    "expand", "type",
+}
 
 # Field names that mean "secret" - Alfred never types into these.
 _SECRET_NAME = re.compile(
@@ -232,6 +243,22 @@ class UIControlTool(AlfredTool):
     # ---------------------------------------------------- picking a target
 
     @staticmethod
+    def _type_into(ui: Any, field: Any, text: str) -> bool:
+        """Put text in a field and check it actually arrived."""
+        try:
+            ui.click(ref=field.ref)
+            ui.send_key("^a")
+            ui.type_text(text)
+        except UiaError:
+            return False
+
+        # Reading it back is what turns "I typed" into "it is there".
+        try:
+            return text.strip().lower() in ui.get_text(field.ref).strip().lower()
+        except UiaError:
+            return False
+
+    @staticmethod
     def _pick_search_field(controls: list[Any]) -> Any:
         """The control most likely to be this app's search box.
 
@@ -262,9 +289,30 @@ class UIControlTool(AlfredTool):
 
         return best
 
+    @classmethod
+    def _pick_item(cls, controls: list[Any], wanted: str) -> Any:
+        """The control that best answers "open <wanted>".
+
+        Anything genuinely interactive is tried first. A Text is usually
+        the label sitting on top of the thing you meant - in Steam's
+        results the row is a Hyperlink "Hades 17 Sep, 2020" with a Text
+        "Hades" over it, and the label is the better literal match while
+        the link is the thing that navigates. Labels are still used when
+        nothing interactive matches at all, because in plenty of apps
+        the label IS the control.
+        """
+        interactive = [
+            c for c in controls
+            if c.control_type in (_ROW_TYPES | _CLICKABLE_TYPES)
+        ]
+
+        return (
+            cls._best_match(interactive, wanted)
+            or cls._best_match(controls, wanted)
+        )
+
     @staticmethod
-    def _pick_item(controls: list[Any], wanted: str) -> Any:
-        """The control that best answers "open <wanted>"."""
+    def _best_match(controls: list[Any], wanted: str) -> Any:
         want = wanted.strip().lower()
         if not want:
             return None
@@ -279,7 +327,15 @@ class UIControlTool(AlfredTool):
             if name == want or identifier == want:
                 score = 100
             elif name.startswith(want):
-                score = 60
+                # Where the match ends matters. MultiMC lists "1.21.11
+                # Instance" beside "1.21.11afk1 Instance" and
+                # "1.21.11-Hardcore Instance"; only the first is what
+                # "the 1.21.11 instance" means, and it is the one where
+                # the name ends at a word boundary.
+                rest = name[len(want):]
+                score = 85 if (not rest or rest[0] in " 	:-_(" ) else 60
+                if rest[:1].isalnum():
+                    score = 45
             elif want in name:
                 score = 30
             elif identifier and want in identifier:
@@ -290,7 +346,9 @@ class UIControlTool(AlfredTool):
             if control.control_type in _ROW_TYPES:
                 score += 8
             elif control.control_type in _CLICKABLE_TYPES:
-                score += 5
+                score += 6
+            elif control.control_type in _LABEL_TYPES:
+                score += 1
 
             if not control.enabled:
                 score -= 40
@@ -303,6 +361,44 @@ class UIControlTool(AlfredTool):
                 best, best_score = control, score
 
         return best
+
+    @staticmethod
+    def _needs_user(ui: Any, window: str | None,
+                    pid: int | None) -> dict[str, Any]:
+        """Whatever this screen is asking the user, if anything.
+
+        A profile picker or a sign-in screen is a populated, perfectly
+        healthy window - nothing downstream can tell it apart from the
+        app being ready, so the agent starts clicking and picks an
+        account at random.
+        """
+        try:
+            title, controls = ui.tree(window, pid, limit=80)
+        except UiaError:
+            return {}
+
+        if draws_its_own_ui(controls):
+            return {
+                "renders_own_ui": True,
+                "window": title,
+                "instruction": (
+                    "This window paints its own interface and exposes "
+                    "nothing to the accessibility layer - Roblox and most "
+                    "games are like this. ui_control cannot see inside "
+                    "it. Do not retry or wait longer. Use "
+                    "desktop_control (screenshot, then click by "
+                    "coordinates), or do the job on the app's website in "
+                    "a browser, which is accessible."
+                ),
+            }
+
+        need = assess(title, controls)
+        if need is None:
+            return {}
+
+        found = need.as_dict()
+        found["window"] = title
+        return found
 
     def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
         action = arguments.get("action")
@@ -320,6 +416,24 @@ class UIControlTool(AlfredTool):
         timeout = float(timeout) if isinstance(timeout, (int, float)) else None
 
         ui = self._backend()
+
+        # Targeting a control BY NAME in a named window has to read that
+        # window first. Without this, "click 'Don't update yet' in
+        # MultiMC" resolved against whatever tree happened to be cached -
+        # usually the wrong window, or none at all - and failed with "no
+        # control matches" while the control was plainly on screen.
+        # A ref is never re-read: that would renumber it.
+        if (
+            action in _NEEDS_WINDOW
+            and window
+            and ref is None
+            and isinstance(name, str)
+            and name
+        ):
+            try:
+                ui.tree(window, pid, limit=200, contains=name)
+            except UiaError:
+                pass
 
         try:
             if action == "windows":
@@ -468,8 +582,15 @@ class UIControlTool(AlfredTool):
                         "error": "'search' needs 'text' - what to search for.",
                     }
 
-                _, controls = ui.tree(window, pid, limit=300)
+                # A filtered read finds "Search the store" in a fraction
+                # of the time a full one takes, and most apps label
+                # their box. The whole tree is the fallback.
+                _, controls = ui.tree(window, pid, limit=60, contains="search")
                 field = self._pick_search_field(controls)
+
+                if field is None:
+                    _, controls = ui.tree(window, pid, limit=300)
+                    field = self._pick_search_field(controls)
 
                 if field is None:
                     # The picker skips masked fields, so a sign-in form
@@ -481,6 +602,10 @@ class UIControlTool(AlfredTool):
                             "error": "that window is asking for a password",
                             "instruction": _SECRET_REFUSAL,
                         }
+
+                    asking = self._needs_user(ui, window, pid)
+                    if asking:
+                        return {"status": "needs_user", **asking}
 
                     return {
                         "status": "error",
@@ -497,9 +622,28 @@ class UIControlTool(AlfredTool):
 
                 # Click rather than SetValue: many search boxes only run
                 # their handler on real keystrokes.
-                ui.click(ref=field.ref)
-                ui.send_key("^a")
-                ui.type_text(text)
+                landed = self._type_into(ui, field, text)
+
+                if not landed:
+                    # Apps interrupt: Steam threw a "Special Offers"
+                    # window over the top mid-search. Saying it worked
+                    # when the box is still empty is the worst outcome,
+                    # so try once more and then say so.
+                    landed = self._type_into(ui, field, text)
+
+                if not landed:
+                    return {
+                        "status": "error",
+                        "error": (
+                            f"could not get {text!r} into "
+                            f"{field.name or 'the search box'} - something "
+                            "took the focus"
+                        ),
+                        "instruction": (
+                            "Check 'windows' for a popup that appeared over "
+                            "the app, close or dismiss it, then search again."
+                        ),
+                    }
 
                 out: dict[str, Any] = {
                     "status": "success",
@@ -541,9 +685,13 @@ class UIControlTool(AlfredTool):
                     nearby = [
                         c.name for c in controls
                         if c.name and c.control_type in (
-                            _ROW_TYPES | _CLICKABLE_TYPES
+                            _ROW_TYPES | _CLICKABLE_TYPES | _LABEL_TYPES
                         )
                     ][:12]
+                    asking = self._needs_user(ui, window, pid)
+                    if asking:
+                        return {"status": "needs_user", **asking}
+
                     return {
                         "status": "not_found",
                         "error": f"nothing named like {wanted!r} in that window",
@@ -591,7 +739,9 @@ class UIControlTool(AlfredTool):
                     window, pid, timeout or 25.0, min_controls=minimum,
                 )
                 if ready:
-                    return {"status": "success", "ready": True}
+                    out = {"status": "success", "ready": True}
+                    out.update(self._needs_user(ui, window, pid))
+                    return out
 
                 # Say what IS on screen. Steam waiting on "Sign in to
                 # Steam" is a different problem from Steam not starting,
@@ -601,7 +751,7 @@ class UIControlTool(AlfredTool):
                 except UiaError:
                     open_now = []
 
-                return {
+                failure: dict[str, Any] = {
                     "status": "error",
                     "ready": False,
                     "error": (
@@ -616,6 +766,9 @@ class UIControlTool(AlfredTool):
                         "app simply needs longer, wait_ready again."
                     ),
                 }
+                # A specific diagnosis replaces the general advice.
+                failure.update(self._needs_user(ui, window, pid))
+                return failure
 
             return {"status": "error", "error": "unhandled action"}
 

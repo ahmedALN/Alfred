@@ -126,6 +126,7 @@ class IsolatedDesktop:
             self._recycle_if_stale()
 
             if self._host is None or self._host.poll() is not None:
+                self._reap_orphan_hosts()
                 try:
                     self._host = subprocess.Popen(
                         [str(self._host_exe)],
@@ -153,6 +154,53 @@ class IsolatedDesktop:
 
             print("[Isolated] session did not become ready in time.")
             return None
+
+    def _reap_orphan_hosts(self) -> None:
+        """Close host windows left over from previous runs.
+
+        Each host holds a session open and sits in the window list as
+        "Alfred Child Session (Disconnected)". They are harmless one at
+        a time and absurd fourteen at a time, which is what a day of
+        starting and recycling sessions produces.
+        """
+        mine = self._host.pid if self._host is not None else None
+
+        try:
+            listing = subprocess.run(
+                ["tasklist", "/FI", "IMAGENAME eq ChildSessionProbe.exe",
+                 "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, timeout=15,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            ).stdout
+        except (OSError, subprocess.SubprocessError):
+            return
+
+        pids: list[int] = []
+        for line in listing.splitlines():
+            parts = [p.strip('" ') for p in line.split('","')]
+            if len(parts) < 2:
+                continue
+            try:
+                pid = int(parts[1])
+            except ValueError:
+                continue
+            if pid != mine:
+                pids.append(pid)
+
+        if not pids:
+            return
+
+        for pid in pids:
+            try:
+                subprocess.run(
+                    ["taskkill", "/F", "/PID", str(pid)],
+                    capture_output=True, timeout=10,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            except (OSError, subprocess.SubprocessError):
+                continue
+
+        print(f"[Isolated] cleared {len(pids)} leftover session host(s).")
 
     def _recycle_if_stale(self) -> None:
         """Log off a leftover session whose agent is never coming back.

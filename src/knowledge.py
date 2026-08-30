@@ -94,6 +94,27 @@ WINDOWS_PLAYBOOK: list[tuple[str, str]] = [
      "open_app finds them by their desktop shortcut instead, so 'steam', "
      "'multimc', 'brawlhalla' and 'fortnite' all resolve by name."),
 
+    ("correction", "If a window reports only System / Minimise / "
+     "Maximise / Close, it paints its own interface and publishes no "
+     "accessibility tree - Roblox and virtually every game are like "
+     "this, and wait_ready says so with renders_own_ui. Do not retry, "
+     "wait longer or read deeper; there is nothing to find. Use "
+     "desktop_control, or do the job on the app's website instead."),
+    ("system", "For Roblox specifically, the website is accessible where "
+     "the client is not: open roblox.com, search there, and pressing "
+     "Play on a game's page hands off to the installed client. Same "
+     "trick for any launcher with a web equivalent."),
+    ("correction", "When wait_ready returns needs_user, STOP and ask. "
+     "'choose_profile' comes with the actual account names - read them "
+     "out and let the user pick, then open_item that name. 'sign_in' "
+     "means tell them which app wants signing in and wait. Never guess "
+     "an account and never type credentials."),
+    ("system", "A launcher with a command line beats clicking it: "
+     "MultiMC takes MultiMC.exe --launch <instance>, and Steam takes "
+     "steam://rungameid/<id>. MultiMC's launch controls are not exposed "
+     "to the accessibility layer at all, so double-clicking an instance "
+     "only selects it."),
+
     # --- the web ------------------------------------------------------
     ("correction", "To reach a specific web page, pass the URL straight to "
      "open_app: open_app app='https://www.youtube.com/@Deji/videos'. It "

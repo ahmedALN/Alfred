@@ -64,13 +64,16 @@ class FakeUia:
 
     def type_text(self, text, ref=None, name=None):
         self.calls.append(("type", text, ref, name))
+        self.typed = text
 
     def send_key(self, keys):
         self.calls.append(("key", keys))
 
     def get_text(self, ref=None, name=None):
         self.calls.append(("get", ref, name))
-        return "God's Plan"
+        # A field reads back what was put in it, which is what lets
+        # 'search' tell "typed" from "actually landed".
+        return getattr(self, "typed", None) or "God's Plan"
 
     def select(self, item, ref=None, name=None):
         self.calls.append(("select", item, ref, name))
@@ -608,7 +611,7 @@ def test_search_finds_the_apps_own_search_box():
     assert out["field"] == "Search games"
     assert out["guessed_field"] is False
     kinds = [c[0] for c in t._uia.calls]
-    assert kinds == ["tree", "click", "key", "type", "key"]
+    assert kinds == ["tree", "click", "key", "type", "get", "key"]
 
 
 def test_search_presses_enter_by_default_and_can_be_told_not_to():
@@ -710,15 +713,15 @@ def test_open_item_offers_nearby_names_when_nothing_matches():
 
 def test_a_whole_word_title_beats_a_fragment_in_a_path():
     """Searching in Explorer renames it to "notepad - Search Results in
-    Windows - File Explorer", at which point a terminal called
-    "C:\WINDOWS\system32\cmd.exe" was the shorter match for "Windows"
-    and the next action went there instead."""
+    Windows - File Explorer", at which point a terminal whose title is a
+    system32 path was the shorter match for "Windows" and the next
+    action went there instead."""
     from src.windows.uia import _title_score
 
     assert _title_score("Windows", "Windows") > _title_score(
         "Windows PowerShell", "Windows")
     assert _title_score("Windows PowerShell", "Windows") > _title_score(
-        "C:\WINDOWS\system32\cmd.exe", "Windows")
+        r"C:\WINDOWS\system32\cmd.exe", "Windows")
 
 
 def test_a_title_that_does_not_contain_it_scores_nothing():
@@ -754,4 +757,74 @@ def test_a_failed_wait_says_what_is_actually_on_screen():
 
     assert out["status"] == "error"
     assert out["windows_open"] == ["Sign in to Steam"]
-    assert "credentials" in out["instruction"]
+    # And when the window itself says what it wants, that replaces the
+    # general advice: this tree has a password field in it.
+    assert out["needs_user"] == "sign_in"
+    assert "Do NOT type" in out["instruction"]
+
+
+def test_a_link_is_preferred_over_the_text_label_inside_it():
+    """Steam's results carry both: a Hyperlink "Hades 17 Sep, 2020" and
+    a Text "Hades" sitting on top of it. The label often works because
+    it overlays the link, but the link is the thing that navigates."""
+    controls = [
+        _c(0, "Text", "Hades"),
+        _c(1, "Hyperlink", "Hades 17 Sep, 2020"),
+    ]
+    out = _app(controls).execute(
+        {"action": "open_item", "window": "Steam", "name": "Hades"}
+    )
+    assert out["control"] == "Hyperlink"
+
+
+def test_an_exact_label_still_wins_when_no_link_matches():
+    controls = [
+        _c(0, "Text", "Latest save"),
+        _c(1, "Hyperlink", "Something else"),
+    ]
+    out = _app(controls).execute(
+        {"action": "open_item", "window": "Game", "name": "Latest save"}
+    )
+    assert out["opened"] == "Latest save"
+
+
+def test_a_version_does_not_match_a_longer_version_beside_it():
+    """MultiMC lists "1.21.11 Instance" next to "1.21.11afk1 Instance"
+    and "1.21.11-Hardcore Instance". Only the first is what "the 1.21.11
+    instance" means."""
+    instances = [
+        _c(0, "ListItem", "1.21.11afk1 Instance"),
+        _c(1, "ListItem", "1.21.11-Hardcore Instance"),
+        _c(2, "ListItem", "1.21.11 Instance"),
+        _c(3, "ListItem", "1.21.8 Instance"),
+    ]
+    out = _app(instances).execute(
+        {"action": "open_item", "window": "MultiMC", "name": "1.21.11"}
+    )
+    assert out["opened"] == "1.21.11 Instance"
+
+
+def test_the_only_candidate_is_still_used_even_if_it_runs_on():
+    instances = [_c(0, "ListItem", "1.21.11afk1 Instance")]
+    out = _app(instances).execute(
+        {"action": "open_item", "window": "MultiMC", "name": "1.21.11"}
+    )
+    assert out["opened"] == "1.21.11afk1 Instance"
+
+
+def test_naming_a_window_reads_it_before_clicking_by_name():
+    """"Click 'Don't update yet' in MultiMC" used to resolve against
+    whatever tree happened to be cached, and failed with "no control
+    matches" while the control was plainly on screen."""
+    t = _tool()
+    t.execute({"action": "click", "window": "MultiMC", "name": "Search"})
+
+    kinds = [c[0] for c in t._uia.calls]
+    assert kinds.index("tree") < kinds.index("click")
+
+
+def test_a_ref_is_never_re_read_because_that_would_renumber_it():
+    t = _tool()
+    t.execute({"action": "click", "window": "MultiMC", "ref": 1})
+
+    assert not any(c[0] == "tree" for c in t._uia.calls)

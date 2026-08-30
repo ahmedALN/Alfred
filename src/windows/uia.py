@@ -190,7 +190,14 @@ class UiaSession:
 
                 hwnd = win32functions.GetForegroundWindow()
                 win = dt.window(handle=hwnd)
-            win.wait("exists", timeout=4)
+            # dt.window(...) hands back an unresolved specification that
+            # has to be waited on; _best_window hands back an element
+            # that is already there. Only the first kind has .wait, and
+            # calling it on the second broke every lookup on the user's
+            # own desktop.
+            waiter = getattr(win, "wait", None)
+            if callable(waiter):
+                waiter("exists", timeout=4)
             return win
         except Exception as exc:  # noqa: BLE001
             raise UiaError(f"window not found: {exc}") from exc
