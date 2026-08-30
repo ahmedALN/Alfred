@@ -4,8 +4,18 @@ import re
 from typing import Any
 
 from src.tools.base import AlfredTool
-from src.windows.screens import assess, draws_its_own_ui
-from src.windows.uia import UiaError, UiaSession, normalise_keys
+from src.windows.screens import (
+    assess,
+    dismiss_target,
+    draws_its_own_ui,
+    is_noise,
+)
+from src.windows.uia import (
+    UiaError,
+    UiaSession,
+    _title_score,
+    normalise_keys,
+)
 
 _ACTIONS = (
     "windows", "focus", "tree", "find", "click", "double_click",
@@ -17,7 +27,7 @@ _ACTIONS = (
     # control. One call is both faster (one model turn, not five) and
     # more accurate, because choosing the field is done here against the
     # real tree instead of guessed from a list.
-    "search", "open_item",
+    "search", "open_item", "clear_popups",
 )
 
 # What an app's search box tends to be called.
@@ -109,7 +119,11 @@ class UIControlTool(AlfredTool):
         "window= name= (find a list row, tile, tree node, link or "
         "button by name and open it - double-clicks rows, clicks "
         "buttons; returns 'not_found' with nearby names if there is "
-        "no match). "
+        "no match); clear_popups window= (close promos and splash "
+        "windows sitting over the app, and report anything that "
+        "needs the user instead of clicking past it - search and "
+        "open_item do this for you when they cannot find their "
+        "target). "
         "Prefer this over desktop_control - it is exact. Alfred refuses to "
         "type into password fields."
     )
@@ -243,8 +257,182 @@ class UIControlTool(AlfredTool):
     # ---------------------------------------------------- picking a target
 
     @staticmethod
-    def _type_into(ui: Any, field: Any, text: str) -> bool:
-        """Put text in a field and check it actually arrived."""
+    def _why_not_found(ui: Any, nearby: list[str]) -> str:
+        """Advice that fits the reason, not a generic apology."""
+        scanned = getattr(ui, "_last_scanned", 0) or 0
+
+        # Far more elements present than could be named means the app
+        # draws controls the accessibility layer cannot label - MultiMC's
+        # Launch panel is 23 unnamed Custom controls, plainly visible on
+        # screen and invisible to any search by name.
+        if scanned > max(40, len(nearby) * 4):
+            return (
+                f"This window has {scanned} elements but only "
+                f"{len(nearby)} that can be addressed by name - the rest "
+                "are drawn without labels, which is normal for Qt apps "
+                "and game launchers. It is on screen; it just has no "
+                "name. Use desktop_control: 'look' to see the window, "
+                "then click the button by its position."
+            )
+
+        return (
+            "Relay these names and ask which one they meant, or scroll "
+            "and try again."
+        )
+
+    # ------------------------------------------------- what is in the way
+
+    @staticmethod
+    def _owner_of(ui: Any, window: str | None, pid: int | None):
+        """The window we mean to work in, and which process owns it."""
+        try:
+            listing = ui.windows()
+        except UiaError:
+            return None, None, []
+
+        if pid is not None:
+            mine = [w for w in listing if w.get("pid") == pid]
+            best = mine[0] if mine else None
+        elif window:
+            scored = [
+                (_title_score(w.get("title", ""), window), w) for w in listing
+            ]
+            scored = [(sc, w) for sc, w in scored if sc > 0]
+            best = max(scored, key=lambda x: x[0])[1] if scored else None
+        else:
+            best = None
+
+        if best is None:
+            return None, None, listing
+
+        return best.get("title"), best.get("pid"), listing
+
+    def _survey_popups(self, ui: Any, window: str | None,
+                       pid: int | None) -> list[dict[str, Any]]:
+        """The app's OTHER windows, and what each one is.
+
+        Steam's "Special Offers" and MultiMC's update prompt are both
+        separate top-level windows owned by the same process, sitting
+        between the agent and the thing it came to do. Nothing in a
+        window's own tree reveals them.
+        """
+        title, owner, listing = self._owner_of(ui, window, pid)
+
+        if owner is None:
+            return []
+
+        found: list[dict[str, Any]] = []
+
+        for other in listing:
+            if other.get("pid") != owner or other.get("title") == title:
+                continue
+
+            other_title = other.get("title") or ""
+
+            try:
+                _, controls = ui.tree(other_title, limit=80)
+            except UiaError:
+                continue
+
+            need = assess(other_title, controls)
+
+            if need is not None:
+                found.append({"title": other_title, "kind": need.kind,
+                              "need": need})
+            elif is_noise(other_title, controls):
+                found.append({"title": other_title, "kind": "noise",
+                              "dismiss": dismiss_target(controls)})
+
+        return found
+
+    def _clear_noise(self, ui: Any, window: str | None,
+                     pid: int | None) -> dict[str, Any]:
+        """Close what is merely in the way; report what is not.
+
+        A promo is closed without asking - nothing depends on it. An
+        update prompt, a sign-in or a profile picker is a decision, and
+        those are handed back rather than clicked past.
+        """
+        closed: list[str] = []
+        stubborn: list[str] = []
+        asking: dict[str, Any] = {}
+
+        for popup in self._survey_popups(ui, window, pid):
+            if popup["kind"] != "noise":
+                if not asking:
+                    asking = popup["need"].as_dict()
+                    asking["window"] = popup["title"]
+                continue
+
+            try:
+                # Re-read and re-pick from THAT read: the survey's refs
+                # were numbered against a tree that no longer exists,
+                # and clicking a stale ref lands on whatever now holds
+                # that number.
+                # Raise it first. A popup sitting BEHIND the app still
+                # exists in the window list, and clicking its Close
+                # button's coordinates would land on whatever is on top.
+                try:
+                    ui.focus_window(popup["title"])
+                except UiaError:
+                    pass
+
+                _, fresh = ui.tree(popup["title"], limit=80)
+                target = dismiss_target(fresh)
+
+                if target is not None:
+                    ui.click(ref=target.ref)
+                else:
+                    # No obvious button - Escape closes most of them.
+                    ui.focus_window(popup["title"])
+                    ui.send_key("{ESC}")
+            except UiaError:
+                continue
+
+            # Say it closed only if it actually went.
+            try:
+                gone = not any(
+                    w.get("title") == popup["title"] for w in ui.windows()
+                )
+            except UiaError:
+                gone = False
+
+            if not gone:
+                # Some windows ignore their own Close button when they
+                # are not focused, or have none that works. Escape is
+                # the last polite option.
+                try:
+                    ui.focus_window(popup["title"])
+                    ui.send_key("{ESC}")
+                    gone = not any(
+                        w.get("title") == popup["title"] for w in ui.windows()
+                    )
+                except UiaError:
+                    pass
+
+            if gone:
+                closed.append(popup["title"])
+            else:
+                stubborn.append(popup["title"])
+
+        out: dict[str, Any] = {}
+        if closed:
+            out["closed_popups"] = closed
+        if stubborn:
+            out["would_not_close"] = stubborn
+        if asking:
+            out.update(asking)
+        return out
+
+    @staticmethod
+    def _type_into(ui: Any, field: Any, text: str) -> bool | None:
+        """Put text in a field and check it arrived.
+
+        True it is there, False something else is, None the field will
+        not say. Steam's search box reports an empty value whether or
+        not you have typed in it, and treating "cannot tell" as "did not
+        work" turned a working search into a reported failure.
+        """
         try:
             ui.click(ref=field.ref)
             ui.send_key("^a")
@@ -252,11 +440,20 @@ class UIControlTool(AlfredTool):
         except UiaError:
             return False
 
-        # Reading it back is what turns "I typed" into "it is there".
         try:
-            return text.strip().lower() in ui.get_text(field.ref).strip().lower()
+            value = ui.get_text(field.ref).strip()
         except UiaError:
-            return False
+            return None
+
+        if text.strip().lower() in value.lower():
+            return True
+
+        # Empty, or just echoing its own label, means it does not
+        # expose a value - not that the text went astray.
+        if not value or value.lower() == (field.name or "").strip().lower():
+            return None
+
+        return False
 
     @staticmethod
     def _pick_search_field(controls: list[Any]) -> Any:
@@ -574,6 +771,15 @@ class UIControlTool(AlfredTool):
                     return {"status": "error", "error": "'menu' needs 'path'."}
                 return {"status": "success", "menu": ui.menu_select(path)}
 
+            if action == "clear_popups":
+                cleared = self._clear_noise(ui, window, pid)
+                return {
+                    "status": "needs_user" if "needs_user" in cleared
+                    else "success",
+                    **cleared,
+                    **({} if cleared else {"note": "nothing was in the way"}),
+                }
+
             if action == "search":
                 text = arguments.get("text") or arguments.get("query")
                 if not isinstance(text, str) or not text.strip():
@@ -591,6 +797,17 @@ class UIControlTool(AlfredTool):
                 if field is None:
                     _, controls = ui.tree(window, pid, limit=300)
                     field = self._pick_search_field(controls)
+
+                if field is None:
+                    # Something may be sitting over the app. Steam puts
+                    # "Special Offers" between the agent and its own
+                    # search box.
+                    cleared = self._clear_noise(ui, window, pid)
+                    if "needs_user" in cleared:
+                        return {"status": "needs_user", **cleared}
+                    if cleared.get("closed_popups"):
+                        _, controls = ui.tree(window, pid, limit=300)
+                        field = self._pick_search_field(controls)
 
                 if field is None:
                     # The picker skips masked fields, so a sign-in form
@@ -624,14 +841,14 @@ class UIControlTool(AlfredTool):
                 # their handler on real keystrokes.
                 landed = self._type_into(ui, field, text)
 
-                if not landed:
+                if landed is False:
                     # Apps interrupt: Steam threw a "Special Offers"
                     # window over the top mid-search. Saying it worked
-                    # when the box is still empty is the worst outcome,
-                    # so try once more and then say so.
+                    # when the box holds something else is the worst
+                    # outcome, so try once more and then say so.
                     landed = self._type_into(ui, field, text)
 
-                if not landed:
+                if landed is False:
                     return {
                         "status": "error",
                         "error": (
@@ -653,6 +870,11 @@ class UIControlTool(AlfredTool):
                         _SEARCH_HINT.search(f"{field.name} {field.automation_id}")
                     ),
                 }
+
+                if landed is None:
+                    # Say plainly that it could not be confirmed rather
+                    # than implying it was.
+                    out["verified"] = False
 
                 if arguments.get("submit", True):
                     ui.send_key("{ENTER}")
@@ -682,6 +904,14 @@ class UIControlTool(AlfredTool):
                     target = self._pick_item(controls, wanted)
 
                 if target is None:
+                    cleared = self._clear_noise(ui, window, pid)
+                    if "needs_user" in cleared:
+                        return {"status": "needs_user", **cleared}
+                    if cleared.get("closed_popups"):
+                        _, controls = ui.tree(window, pid, limit=400)
+                        target = self._pick_item(controls, wanted)
+
+                if target is None:
                     nearby = [
                         c.name for c in controls
                         if c.name and c.control_type in (
@@ -696,10 +926,7 @@ class UIControlTool(AlfredTool):
                         "status": "not_found",
                         "error": f"nothing named like {wanted!r} in that window",
                         "nearby": nearby,
-                        "instruction": (
-                            "Relay these names and ask which one they meant, "
-                            "or scroll and try again."
-                        ),
+                        "instruction": self._why_not_found(ui, nearby),
                     }
 
                 # A library row opens on double click; a button or link
@@ -739,8 +966,18 @@ class UIControlTool(AlfredTool):
                     window, pid, timeout or 25.0, min_controls=minimum,
                 )
                 if ready:
-                    out = {"status": "success", "ready": True}
+                    out: dict[str, Any] = {"status": "success", "ready": True}
                     out.update(self._needs_user(ui, window, pid))
+
+                    # The app can be perfectly ready while a separate
+                    # window asks whether to update it. That is still a
+                    # question for the user, before the task starts.
+                    if "needs_user" not in out:
+                        for popup in self._survey_popups(ui, window, pid):
+                            if popup["kind"] != "noise":
+                                out.update(popup["need"].as_dict())
+                                out["window"] = popup["title"]
+                                break
                     return out
 
                 # Say what IS on screen. Steam waiting on "Sign in to

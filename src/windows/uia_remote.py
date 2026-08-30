@@ -47,6 +47,7 @@ class RemoteUia:
 
     def __init__(self, client_factory: Callable[[], Any]) -> None:
         self._client_factory = client_factory
+        self._last_scanned: int = 0
 
     # ---------------------------------------------------------------- core
 
@@ -106,6 +107,8 @@ class RemoteUia:
         controls = [
             _control(c) for c in data.get("controls", []) if isinstance(c, dict)
         ]
+        scanned = data.get("scanned")
+        self._last_scanned = scanned if isinstance(scanned, int) else 0
         return str(data.get("window") or ""), controls
 
     def find(self, query: str, limit: int = 20) -> list[Control]:

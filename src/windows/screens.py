@@ -35,6 +35,33 @@ _SIGN_IN = re.compile(
     re.I,
 )
 
+# "A new update is available!" - a decision, not noise. The user wants
+# to be asked before an app updates itself mid-task.
+_UPDATE = re.compile(
+    r"\b(a new (version|update)|new (version|update) (is )?available|"
+    r"update (is )?available|update now|would you like to update|"
+    r"download (the )?update|install (the )?update|"
+    r"upgrade (is )?available)\b",
+    re.I,
+)
+
+# Windows an app throws up that nobody asked for and nothing depends on.
+_NOISE = re.compile(
+    r"\b(special offer|offers|what'?s new|news|announcement|promo|"
+    r"promotion|sale|advert|rate (us|this)|tell us|survey|newsletter|"
+    r"subscribe|tip of the day|did you know|welcome to|"
+    r"introducing|now available)\b",
+    re.I,
+)
+
+# Buttons that make a popup go away without agreeing to anything.
+_DISMISS = re.compile(
+    r"^(close|dismiss|no thanks?|no, thanks|not now|later|maybe later|"
+    r"skip|got it|remind me later|continue without|cancel|"
+    r"don'?t (update|show)( yet| again| this again)?|×|x)$",
+    re.I,
+)
+
 _CONSENT = re.compile(
     r"\b(terms of service|licen[cs]e agreement|end user licen|"
     r"privacy policy|i agree|accept the terms|eula)\b",
@@ -70,6 +97,12 @@ class ScreenNeed:
 
 
 _INSTRUCTIONS = {
+    "update": (
+        "Ask the user whether to update before carrying on - name the "
+        "app. If they say not now, dismiss it with ui_control "
+        "clear_popups and continue the task. Never start an update "
+        "without asking."
+    ),
     "sign_in": (
         "Do NOT type anything into this. Tell the user the app is asking "
         "them to sign in, say which app, and ask them to do it - then "
@@ -162,6 +195,13 @@ def assess(title: str, controls: list[Any]) -> ScreenNeed | None:
                 options,
             )
 
+    if _UPDATE.search(haystack):
+        return ScreenNeed(
+            "update",
+            f"{title or 'This app'} is offering an update.",
+            _options(controls),
+        )
+
     if _SIGN_IN.search(haystack):
         return ScreenNeed(
             "sign_in",
@@ -175,3 +215,37 @@ def assess(title: str, controls: list[Any]) -> ScreenNeed | None:
         )
 
     return None
+
+
+def is_noise(title: str, controls: list[Any]) -> bool:
+    """A popup nothing depends on: a promo, an advert, a news splash.
+
+    Steam throws "Special Offers" over its own window as a separate
+    top-level window, and it sits between the agent and the search box.
+    Closing it is not a decision anybody needs to be consulted about.
+    """
+    if assess(title, controls) is not None:
+        return False        # it is asking something; that is not noise
+
+    haystack = title + chr(10) + _texts(controls)
+    return bool(_NOISE.search(haystack))
+
+
+def dismiss_target(controls: list[Any]) -> Any | None:
+    """The control that closes a popup without agreeing to anything."""
+    best = None
+
+    for control in controls:
+        if getattr(control, "control_type", "") not in _CHOOSABLE:
+            continue
+
+        name = (getattr(control, "name", "") or "").strip()
+        if not name or not _DISMISS.match(name):
+            continue
+
+        # "Close" is the safest of these, so prefer it outright.
+        if name.strip().lower() == "close":
+            return control
+        best = best or control
+
+    return best

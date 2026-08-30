@@ -86,3 +86,60 @@ def test_an_empty_tree_is_not_a_diagnosis():
     """Nothing at all means the window is not ready, which is a
     different problem with a different answer."""
     assert not draws_its_own_ui([])
+
+
+# ------------------------------------------------ popups in the way
+
+
+from src.windows.screens import dismiss_target, is_noise  # noqa: E402
+
+UPDATE_POPUP = [
+    _c("Text", "A new update is available!"),
+    _c("Button", "Update now"),
+    _c("Button", "Don't update yet"),
+]
+
+PROMO_POPUP = [
+    _c("Text", "Special Offers"),
+    _c("Button", "Weekend Deal. Jackbox Games"),
+    _c("Button", "Close"),
+]
+
+
+def test_an_update_prompt_is_a_decision_not_an_obstacle():
+    """MultiMC's update window swallows clicks meant for the instance
+    list, which is why double-clicking an instance did nothing. Closing
+    it quietly would hide a choice the user wants to make."""
+    need = assess("MultiMC", UPDATE_POPUP)
+
+    assert need.kind == "update"
+    assert not is_noise("MultiMC", UPDATE_POPUP)
+    assert "never" in need.as_dict()["instruction"].lower()
+
+
+def test_a_promo_is_noise_and_goes_without_asking():
+    assert is_noise("Special Offers", PROMO_POPUP)
+    assert dismiss_target(PROMO_POPUP).name == "Close"
+
+
+def test_a_sign_in_window_is_never_treated_as_noise():
+    signin = [_c("Text", "Sign in to continue"), _c("Button", "Close")]
+
+    assert not is_noise("Epic Games", signin)
+    assert assess("Epic Games", signin).kind == "sign_in"
+
+
+def test_dismissing_an_update_uses_the_decline_button():
+    """If the user says "not now", that is the button - never 'Update
+    now'."""
+    assert dismiss_target(UPDATE_POPUP).name == "Don't update yet"
+
+
+def test_a_window_with_no_way_out_offers_none():
+    assert dismiss_target([_c("Text", "Loading...")]) is None
+
+
+def test_an_ordinary_app_window_is_neither():
+    normal = [_c("Button", "Store"), _c("ListItem", "Hades")]
+
+    assert not is_noise("Steam", normal) and assess("Steam", normal) is None

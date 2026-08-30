@@ -109,11 +109,28 @@ WINDOWS_PLAYBOOK: list[tuple[str, str]] = [
      "out and let the user pick, then open_item that name. 'sign_in' "
      "means tell them which app wants signing in and wait. Never guess "
      "an account and never type credentials."),
-    ("system", "A launcher with a command line beats clicking it: "
-     "MultiMC takes MultiMC.exe --launch <instance>, and Steam takes "
-     "steam://rungameid/<id>. MultiMC's launch controls are not exposed "
-     "to the accessibility layer at all, so double-clicking an instance "
-     "only selects it."),
+    ("correction", "Before working in an app, clear what is in the way. "
+     "ui_control clear_popups closes promos and splash windows on its "
+     "own - Steam's 'Special Offers' is a separate window that sits "
+     "between you and the search box - and REPORTS anything that is "
+     "actually a decision. search and open_item do this automatically "
+     "when they cannot find their target."),
+    ("correction", "An update prompt is a decision, not an obstacle. "
+     "MultiMC opens with 'A new update is available!' and that window "
+     "swallows clicks meant for the instance list, which is why "
+     "double-clicking an instance appeared to do nothing. Ask the user "
+     "whether to update, then act on their answer - never update an app "
+     "on your own initiative, and never dismiss the question silently."),
+    ("system", "MultiMC: double-clicking an instance launches it, once "
+     "nothing is covering the window. The Launch button in the right "
+     "panel has no accessible name so it cannot be clicked by name; the "
+     "instance row can. MultiMC.exe --launch <instance> also works."),
+    ("system", "When a window reports far more elements than it has "
+     "named controls, its buttons are drawn without labels - normal for "
+     "Qt apps and game launchers. ui_control says so in the not_found "
+     "instruction. Those controls cannot be found by name at all, so "
+     "reach for a keyboard route, the row itself, or the app's command "
+     "line rather than hunting."),
 
     # --- the web ------------------------------------------------------
     ("correction", "To reach a specific web page, pass the URL straight to "

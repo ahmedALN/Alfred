@@ -133,6 +133,7 @@ class UiaSession:
         self._last_window = None
         self._last_title: str = ""
         self._last_spec: tuple[str | None, int | None] = (None, None)
+        self._last_scanned: int = 0
 
     # ---------------------------------------------------------------- core
 
@@ -315,6 +316,12 @@ class UiaSession:
             self.focus(win)
             descendants = self._descendants(win, max_depth)
 
+        # How much was there versus how much could be named. A window
+        # full of unnamed Custom controls - MultiMC's Launch panel, most
+        # Qt and game UIs - looks empty to a name-based search while
+        # being perfectly visible on screen.
+        self._last_scanned = len(descendants)
+
         want = (contains or "").strip().lower()
         ref = 0
         seen: set[str] = set()
@@ -473,6 +480,7 @@ class UiaSession:
               double: bool = False, right: bool = False) -> str:
         el = self._resolve(ref, name)
         label = _label(el)
+        self._raise_owner(el)
         try:
             if right:
                 el.right_click_input()
@@ -488,6 +496,36 @@ class UiaSession:
             return label
         except Exception as exc:  # noqa: BLE001
             raise UiaError(f"could not click {label or ref}: {exc}") from exc
+
+    @staticmethod
+    def _raise_owner(el) -> None:
+        """Bring the element's window to the front before touching it.
+
+        A mouse click goes to a screen position, not to a control. With
+        the target window behind another one, the click lands on
+        whatever is on top - during testing a search for "Celeste" was
+        typed into an entirely different application and sent. The
+        isolated backend has always activated the window first; this is
+        the same rule for the user's own desktop.
+        """
+        try:
+            top = el.top_level_parent()
+        except Exception:  # noqa: BLE001
+            return
+
+        try:
+            if top.has_focus():
+                return
+        except Exception:  # noqa: BLE001
+            pass
+
+        for _ in range(2):
+            try:
+                top.set_focus()
+                time.sleep(0.2)
+                return
+            except Exception:  # noqa: BLE001
+                time.sleep(0.2)
 
     def invoke(self, ref: int | None = None, name: str | None = None) -> str:
         el = self._resolve(ref, name)
@@ -518,6 +556,9 @@ class UiaSession:
                 el.click_input()
             except Exception:  # noqa: BLE001
                 pass
+        if self._last_window is not None:
+            self._raise_owner(self._last_window)
+
         from pywinauto.keyboard import send_keys
 
         send_keys(
