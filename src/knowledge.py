@@ -149,6 +149,23 @@ WINDOWS_PLAYBOOK: list[tuple[str, str]] = [
      "Instance Folder, Create Shortcut, Export Instance, Delete, Copy "
      "Instance. None of them has an accessible name."),
 
+    ("correction", "Once inside an app's sub-window - a settings dialog, "
+     "an instance editor, a preferences pane - read its tree separately "
+     "by its own title. Controls that were unnamed in the main window "
+     "are very often properly named in there, so drop back to plain "
+     "click-by-name rather than carrying on with positions."),
+    ("system", "MultiMC: 'Add Instance' creates one (pick a source, type "
+     "the Name, PICK A VERSION explicitly, OK). Select an instance and "
+     "open_item 'Edit Instance' to open 'Console window for <name>', "
+     "where the Version tab has Install Fabric / Forge / NeoForge / "
+     "Quilt - click one, pick the loader version from the list, OK. "
+     "Confirm by re-reading the tab for 'Fabric Loader'."),
+    ("correction", "To add a mod file, prefer copying the .jar into the "
+     "instance's mods folder with powershell over driving a file-open "
+     "dialog. 'View Folder' on the Loader mods tab opens the right "
+     "place. A file copy is exact; a file dialog is several fragile "
+     "steps that can silently land elsewhere."),
+
     # --- the web ------------------------------------------------------
     ("correction", "To reach a specific web page, pass the URL straight to "
      "open_app: open_app app='https://www.youtube.com/@Deji/videos'. It "
