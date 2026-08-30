@@ -99,6 +99,7 @@ def build_loop(
         tick_seconds=90.0,
         min_speak_gap_seconds=min_speak_gap,
         startup_grace_seconds=0.0,
+        speak_proactive=True,
         monotonic=clock,
         fullscreen_probe=lambda: False,
     )
@@ -295,3 +296,56 @@ def test_confirm_then_yes_executes_action(tmp_path):
         ("powershell", {"command": "New-Item C:\\temp\\x.ps1 -ItemType File"})
     ]
     audit.close()
+
+
+# ------------------------------------------- proactive speech is opt-in
+
+
+def test_the_brain_does_not_talk_to_itself_out_loud(tmp_path):
+    """Most of what the brain comes up with on a tick is a note to
+    itself - "I'm remembering that ui_control has a tree action". Spoken,
+    that is Alfred muttering his own reference material at the user."""
+    loop, spoken, audit, _ = build_loop(
+        tmp_path,
+        [Proposal(kind=ProposalKind.SPEAK, message="I'm noting that ...")],
+    )
+    loop._speak_proactive = False
+
+    asyncio.run(loop.run_once())
+
+    assert spoken == []
+
+
+def test_what_it_would_have_said_is_still_kept(tmp_path):
+    """Silenced, not discarded - the observation stays auditable."""
+    loop, spoken, audit, _ = build_loop(
+        tmp_path,
+        [Proposal(kind=ProposalKind.SPEAK, message="disk is nearly full")],
+    )
+    loop._speak_proactive = False
+
+    asyncio.run(loop.run_once())
+
+    held = [
+        row for row in audit.recent(limit=100)
+        if row["kind"] == "spoken"
+        and "nearly full" in str(row["payload"])
+    ]
+    assert held, "the suppressed line should still be recorded"
+    assert held[0]["payload"]["suppressed"] is True
+
+
+def test_it_still_acts_while_silent(tmp_path):
+    """Silence is about chatter, not about doing nothing."""
+    registry = FakeRegistry()
+    loop, spoken, _, _ = build_loop(
+        tmp_path,
+        [Proposal(ProposalKind.ACT, "checked your disk usage",
+                  tool="system_info", args={"query": "disks"})],
+        registry=registry,
+    )
+    loop._speak_proactive = False
+
+    asyncio.run(loop.run_once())
+
+    assert registry.executed and spoken == []

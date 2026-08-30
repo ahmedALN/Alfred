@@ -53,6 +53,7 @@ def _loop(tmp_path, clock, proposals, grace=60.0):
         get_session_id=lambda: "s",
         min_speak_gap_seconds=0.0,
         startup_grace_seconds=grace,
+        speak_proactive=True,
         monotonic=clock,
         fullscreen_probe=lambda: False,
     )

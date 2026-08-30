@@ -117,6 +117,7 @@ class BrainLoop:
         quiet_hours: str | None = None,
         heartbeat_ticks: int = 0,
         startup_grace_seconds: float = 60.0,
+        speak_proactive: bool = False,
         monotonic: Callable[[], float] = time.monotonic,
         wallclock: Callable[[], datetime] = datetime.now,
         fullscreen_probe: Callable[[], bool] = is_fullscreen_foreground,
@@ -137,6 +138,11 @@ class BrainLoop:
         self._min_speak_gap = min_speak_gap_seconds
         self._quiet_window = _parse_quiet_hours(quiet_hours)
         self._heartbeat_ticks = heartbeat_ticks
+        # The brain thinks on a timer, and most of what it comes up
+        # with is a note to itself. Speaking those turns Alfred into
+        # someone muttering their own reference material at you.
+        # Off by default: it still observes, acts and remembers.
+        self._speak_proactive = speak_proactive
 
         self._monotonic = monotonic
         self._wallclock = wallclock
@@ -327,6 +333,7 @@ class BrainLoop:
             parts[0] if len(parts) == 1
             else "A few things - " + "; ".join(parts)
         )
+
         await self._say(
             f"(System: proactive) {combined}",
             force=force_high or bool(urgent),
@@ -563,6 +570,24 @@ class BrainLoop:
 
     async def _say(self, text: str, *, force: bool) -> None:
         now = self._monotonic()
+
+        # Everything reaching here is the brain speaking unprompted -
+        # tick observations, action summaries, its own notes. Silenced
+        # means silenced: nothing is lost, it is recorded and remembered,
+        # it just is not read out. 'force' is about rate limits and quiet
+        # hours, so it does not override this.
+        if not self._speak_proactive:
+            self._audit.record(
+                "spoken",
+                {"suppressed": True, "reason": "proactive speech off",
+                 "text": text},
+            )
+            if self._episodes is not None:
+                try:
+                    self._episodes.record("proactive", text)
+                except Exception:  # noqa: BLE001
+                    pass
+            return
 
         if not force and now - self._last_spoke_at < self._min_speak_gap:
             self._audit.record(

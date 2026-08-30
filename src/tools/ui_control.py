@@ -60,8 +60,11 @@ class UIControlTool(AlfredTool):
         "forward); tree window= [contains=] (list controls, each with a "
         "ref); find query= (search the current window's controls); click / "
         "double_click / right_click / invoke ref=|name=; type text= "
-        "[into=ref|name=]; key keys= (e.g. '^l' Ctrl+L, '{ENTER}', "
-        "'{ESC}', '{TAB}'); get ref=|name= (read a control's text); select "
+        "into=ref (ALWAYS name the field - giving only the window types "
+        "into whatever happens to be focused inside it); key keys= (e.g. '^l' Ctrl+L, '{ENTER}', "
+        "'{ESC}', '{TAB}') - 'keys' may also accompany 'type' to press a "
+        "key straight after, e.g. type text='drake' into=7 keys='{ENTER}'; "
+        "get ref=|name= (read a control's text); select "
         "item= ref=|name= (combo box / list / tab); expand ref=|name=; "
         "scroll direction= [amount=] ; menu path='File->Save As'; "
         "wait_ready window= [timeout=] (wait for a just-launched app to "
@@ -243,8 +246,31 @@ class UIControlTool(AlfredTool):
                 refused = self._secret_guard(ui, into, name, text)
                 if refused is not None:
                     return refused
+
+                # Naming a window and no control used to mean "type into
+                # whatever happens to have focus" - which could be any
+                # app at all, including one of the user's. If a window is
+                # named, it gets the keystrokes.
+                if into is None and not name and window:
+                    try:
+                        ui.focus_window(window, pid)
+                    except UiaError:
+                        pass
+
                 ui.type_text(text, into, name if into is None else None)
-                return {"status": "success", "typed": text}
+                result: dict[str, Any] = {"status": "success", "typed": text}
+
+                # Models write type(text=..., keys='{ENTER}') to mean
+                # "type this, then press Enter". That used to be dropped
+                # in silence, so a search was filled in and never run.
+                follow_up = normalise_keys(
+                    arguments.get("keys") or arguments.get("key")
+                )
+                if follow_up:
+                    ui.send_key(follow_up)
+                    result["then_pressed"] = follow_up
+
+                return result
 
             if action == "key":
                 keys = normalise_keys(

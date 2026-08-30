@@ -461,3 +461,56 @@ def test_a_menu_path_with_no_parts_is_an_error():
 
     with pytest.raises(UiaError):
         session.menu_select("->")
+
+
+# ------------------------------------------- typing into the right place
+
+
+def test_naming_a_window_focuses_it_before_typing():
+    """Without this, 'type into Spotify' typed into whatever happened to
+    have focus - which could be one of the user's own windows."""
+    t = _tool()
+    t.execute({"action": "type", "text": "drake", "window": "Spotify"})
+
+    kinds = [c[0] for c in t._uia.calls]
+    assert kinds.index("focus") < kinds.index("type")
+
+
+def test_a_named_field_is_used_directly_without_stealing_focus():
+    t = _tool()
+    t.execute({"action": "type", "text": "drake", "into": 1})
+
+    assert not any(c[0] == "focus" for c in t._uia.calls)
+    assert ("type", "drake", 1, None) in t._uia.calls
+
+
+def test_keys_alongside_type_are_pressed_afterwards():
+    """Models write type(text=..., keys='{ENTER}') to mean "type this
+    then run it". Dropping the keys filled a search box and never
+    searched."""
+    t = _tool()
+    out = t.execute({
+        "action": "type", "text": "drake", "into": 1, "keys": "{ENTER}",
+    })
+
+    assert out["then_pressed"] == "{ENTER}"
+    calls = [c[0] for c in t._uia.calls]
+    assert calls.index("type") < calls.index("key")
+
+
+def test_type_without_keys_presses_nothing():
+    t = _tool()
+    out = t.execute({"action": "type", "text": "drake", "into": 1})
+
+    assert "then_pressed" not in out
+    assert not any(c[0] == "key" for c in t._uia.calls)
+
+
+def test_a_password_field_is_still_refused_before_any_focus_happens():
+    t = _tool()
+    out = t.execute({
+        "action": "type", "text": "hunter2", "into": 3, "window": "Bank",
+    })
+
+    assert out["status"] == "refused"
+    assert t._uia.calls == []

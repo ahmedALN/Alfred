@@ -374,6 +374,7 @@ async def main() -> None:
             quiet_hours=settings.brain_quiet_hours,
             heartbeat_ticks=settings.brain_heartbeat_ticks,
             startup_grace_seconds=settings.brain_startup_grace_seconds,
+            speak_proactive=settings.brain_speak_proactive,
         )
 
         session.attach_brain(brain)

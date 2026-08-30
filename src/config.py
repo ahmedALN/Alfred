@@ -42,6 +42,8 @@ class Settings:
     brain_enabled: bool
     brain_autonomy: str
     brain_tick_seconds: float
+    # Whether the brain's unprompted observations are spoken aloud.
+    brain_speak_proactive: bool
     brain_min_speak_gap_seconds: float
     brain_quiet_hours: str | None
     brain_heartbeat_ticks: int
@@ -151,6 +153,9 @@ def load_settings() -> Settings:
             "alfred_apps.sqlite3",
         ),
         brain_enabled=_get_bool("ALFRED_BRAIN_ENABLED", True),
+        brain_speak_proactive=_get_bool(
+            "ALFRED_BRAIN_SPEAK_PROACTIVE", False
+        ),
         brain_autonomy=autonomy,
         brain_tick_seconds=_get_float("ALFRED_BRAIN_TICK_SECONDS", 90.0),
         brain_min_speak_gap_seconds=_get_float(
