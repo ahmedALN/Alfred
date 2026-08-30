@@ -31,7 +31,7 @@ SUPPORTED = ("gemini", "ollama", "openai")
 # explicit *_MODEL. Keys are (provider, capability).
 _DEFAULT_MODELS: dict[tuple[str, str], str] = {
     ("gemini", "embed"): "gemini-embedding-001",
-    ("gemini", "vision"): "gemini-flash-latest",
+    ("gemini", "vision"): "gemini-flash-lite-latest",
     ("ollama", "chat"): "qwen3.5",
     ("ollama", "embed"): "nomic-embed-text",
     ("ollama", "vision"): "moondream",
@@ -270,7 +270,40 @@ def _build_embed(
     )
 
 
-def _build_vision(
+def _ollama_can_see(model: str, base_url: str) -> bool:
+    """Does this local model claim to accept images?
+
+    Only a claim: Ollama reports qwen3.5:4b as vision-capable and it
+    still answers a screenshot with fifty lines of literal "<name>".
+    What a model says it can do and what it does are different
+    questions, and only the second one matters - see _is_useless.
+    """
+    try:
+        import httpx
+
+        response = httpx.post(
+            f"{base_url.rstrip('/')}/api/show",
+            json={"name": model},
+            timeout=6.0,
+        )
+        response.raise_for_status()
+        info = response.json()
+    except Exception:  # noqa: BLE001
+        return False
+
+    families = (info.get("details") or {}).get("families") or []
+    families = [str(f).lower() for f in families]
+
+    # Vision models carry an image encoder alongside the language model.
+    if any(f in ("clip", "mllama", "vision", "siglip") for f in families):
+        return True
+
+    return "vision" in str(info.get("capabilities", "")).lower() or (
+        "vision" in [str(c).lower() for c in (info.get("capabilities") or [])]
+    )
+
+
+def _one_vision(
     provider: str, model: str, settings: Any, gemini_client: Any
 ) -> VisionProvider:
     if provider == "gemini":
@@ -282,3 +315,36 @@ def _build_vision(
     return OpenAICompatibleVisionProvider(
         model, settings.openai_base_url or "", settings.openai_api_key
     )
+
+
+def _build_vision(
+    provider: str, model: str, settings: Any, gemini_client: Any
+) -> VisionProvider:
+    """Prefer a model that can actually see, and chain the rest behind it.
+
+    Screenshots are what Alfred falls back to when nothing else can read
+    a window - a game, a launcher drawing its own buttons. Getting a
+    confident description from a model that cannot see is worse than
+    getting nothing, because it looks exactly like an answer.
+    """
+    from src.ai.providers.fallback import FallbackVisionProvider
+
+    chain: list[VisionProvider] = [
+        _one_vision(provider, model, settings, gemini_client)
+    ]
+
+    # A capable rung behind the configured one. The chain notices a model
+    # that fills in the template instead of reading the screen, and puts
+    # it on cooldown - so a local model that cannot really see costs one
+    # call, not every call.
+    if provider != "gemini" and getattr(settings, "gemini_api_key", ""):
+        chain.append(
+            GeminiVisionProvider(
+                gemini_client, _DEFAULT_MODELS[("gemini", "vision")]
+            )
+        )
+
+    if len(chain) == 1:
+        return chain[0]
+
+    return FallbackVisionProvider(chain)

@@ -255,6 +255,13 @@ WINDOWS_PLAYBOOK: list[tuple[str, str]] = [
      "profile lists both the controls seen and any buttons learned by "
      "position, and open_item accepts those names directly."),
 
+    ("system", "desktop_control 'look' reads the screen with a vision "
+     "model and returns each thing it can see with a click position. It "
+     "is the way into a window with no accessibility tree - a game, a "
+     "launcher drawing its own buttons. It costs several seconds and a "
+     "cloud call, so it is the fallback, not the habit: try ui_control "
+     "first, always."),
+
     # --- the web ------------------------------------------------------
     ("correction", "For a question of FACT - who someone is, what the "
      "latest version is, what a page says - use the web tool, not a "
