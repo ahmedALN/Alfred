@@ -3,8 +3,9 @@ from __future__ import annotations
 import subprocess
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Iterator
 
 from src.windows.child_session import (
     ChildSessionClient,
@@ -33,8 +34,16 @@ class IsolatedDesktop:
     experience but not a failure.
     """
 
-    def __init__(self, host_exe: Path | None = None) -> None:
+    def __init__(
+        self,
+        host_exe: Path | None = None,
+        client_provider: Callable[[], ChildSessionClient] | None = None,
+    ) -> None:
         self._host_exe = host_exe or _HOST_EXE
+        # The agent in the session accepts ONE connection at a time, so
+        # everything here shares the router's rather than opening a
+        # second one and being refused as ERROR_PIPE_BUSY.
+        self._client_provider = client_provider
         self._host: subprocess.Popen[bytes] | None = None
         self._lock = threading.RLock()
         # Apps Alfred started in there, so it can clean up after itself.
@@ -114,6 +123,8 @@ class IsolatedDesktop:
                 )
                 return None
 
+            self._recycle_if_stale()
+
             if self._host is None or self._host.poll() is not None:
                 try:
                     self._host = subprocess.Popen(
@@ -143,35 +154,98 @@ class IsolatedDesktop:
             print("[Isolated] session did not become ready in time.")
             return None
 
+    def _recycle_if_stale(self) -> None:
+        """Log off a leftover session whose agent is never coming back.
+
+        The agent starts from a logon trigger, so a session that is
+        logged on but has no agent - Alfred was killed, the agent
+        crashed, the machine was left mid-task - can never heal itself:
+        the logon it needed already happened. Waiting the full timeout
+        and giving up leaves isolation permanently broken until the user
+        reboots. Logging the session off means the next one starts
+        clean.
+        """
+        stale = self.session_id
+
+        if stale is None:
+            return
+
+        if self._host is not None and self._host.poll() is None:
+            # Our own host is up; the agent is simply still starting.
+            return
+
+        # It may be a session we are racing rather than a dead one.
+        deadline = time.monotonic() + 8.0
+        while time.monotonic() < deadline:
+            if self._agent_ready():
+                return
+            time.sleep(1.0)
+
+        print(f"[Isolated] session {stale} has no agent - recycling it.")
+
+        try:
+            subprocess.run(
+                ["logoff", str(stale)],
+                check=False,
+                timeout=20,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            print(f"[Isolated] could not log off session {stale}: {exc}")
+            return
+
+        # The id only clears once the logoff completes.
+        deadline = time.monotonic() + 20.0
+        while time.monotonic() < deadline:
+            if self.session_id is None:
+                break
+            time.sleep(0.5)
+
+        self._baseline = set()
+        self._launched.clear()
+
     def _agent_ready(self) -> bool:
         if self.session_id is None:
             return False
-        client = ChildSessionClient("child")
         try:
-            client.connect()
-            client.session()
+            with self._session_client() as client:
+                client.session()
             return True
         except ChildSessionError:
             return False
-        finally:
-            client.close()
 
     # --------------------------------------------------------------- acting
 
     def client(self) -> ChildSessionClient:
-        """A connected client for the isolated session. Caller closes it."""
+        """A connected client for the isolated session."""
+        if self._client_provider is not None:
+            return self._client_provider()
+
         client = ChildSessionClient("child")
         client.connect()
         return client
 
+    @contextmanager
+    def _session_client(self) -> Iterator[ChildSessionClient]:
+        """A client for the duration of one call.
+
+        A borrowed connection is left open - it belongs to the router,
+        and closing it would break the very next call.
+        """
+        client = self.client()
+        try:
+            yield client
+        finally:
+            if self._client_provider is None:
+                client.close()
+
     def launch(self, path: str, args: str | None = None) -> dict[str, Any]:
         """Open an app inside the isolated session, remembering the pid so
         it can be cleaned up when the task finishes."""
-        client = self.client()
-        try:
+        with self._session_client() as client:
             result = client.launch(path, args)
-        finally:
-            client.close()
 
         pid = result.get("pid")
         if isinstance(pid, int):
@@ -189,11 +263,8 @@ class IsolatedDesktop:
             self._baseline = set()
 
     def apps(self) -> list[dict[str, Any]]:
-        client = self.client()
-        try:
+        with self._session_client() as client:
             return client.list_apps()
-        finally:
-            client.close()
 
     # -------------------------------------------------------------- cleanup
 
@@ -218,6 +289,7 @@ class IsolatedDesktop:
         except ChildSessionError as exc:
             return {"closed": [], "failed": mine, "note": str(exc)}
 
+        targets = []
         try:
             open_now = client.list_apps()
             targets: list[int] = []
@@ -243,7 +315,8 @@ class IsolatedDesktop:
         except ChildSessionError as exc:
             return {"closed": [], "failed": targets, "note": str(exc)}
         finally:
-            client.close()
+            if self._client_provider is None:
+                client.close()
 
     def shutdown(self) -> None:
         """Tear the whole session down (also ends everything inside it)."""

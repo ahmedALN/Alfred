@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 import sys
 import urllib.request
 from pathlib import Path
@@ -98,13 +99,23 @@ def build_native() -> None:
     projects = {
         "DesktopBridge": _NATIVE / "DesktopBridge" / "DesktopBridge.csproj",
         "ChildInputAgent": _NATIVE / "ChildInputAgent" / "ChildInputAgent.csproj",
+        # The host that creates Alfred's private session. Without it,
+        # "without disturbing me" has nowhere to work.
+        "ChildSessionProbe": (
+            _NATIVE / "ChildSessionProbe" / "ChildSessionProbe.csproj"
+        ),
     }
-    exes_ok = list((_NATIVE).rglob("DesktopBridge.exe")) and \
-        list((_NATIVE).rglob("ChildInputAgent.exe"))
+    exes_ok = all(
+        list(_NATIVE.rglob(f"{name}.exe")) for name in projects
+    )
 
     if exes_ok and not _ask("Native helpers already built. Rebuild?", default=False):
         print(f"{_OK} native helpers")
         return
+
+    # A running helper holds its own exe open, and the build fails ten
+    # retries later with an error about a locked file.
+    _stop_native_helpers()
 
     for name, proj in projects.items():
         if not proj.exists():
@@ -118,6 +129,19 @@ def build_native() -> None:
         print(f"{_OK if r.returncode == 0 else _WARN} {name}")
         if r.returncode != 0:
             print(r.stdout[-800:])
+
+    print("     tip: scripts/build-native.ps1 rebuilds these later "
+          "and restarts the agent for you")
+
+
+def _stop_native_helpers() -> None:
+    """Stop helpers that would otherwise hold their exe open."""
+    for name in ("ChildInputAgent.exe", "ChildSessionProbe.exe"):
+        subprocess.run(
+            ["taskkill", "/F", "/IM", name],
+            capture_output=True, text=True,
+        )
+    time.sleep(0.8)
 
 
 def ensure_env() -> None:

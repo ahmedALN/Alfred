@@ -88,15 +88,17 @@ def test_nothing_happens_when_isolation_was_not_requested():
     assert d.ensured == 0 and r.isolated is False
 
 
-def test_ui_control_is_refused_because_it_cannot_reach_that_session():
-    """UI Automation is session-scoped; silently running it would act on
-    the user's screen - exactly what they asked to avoid."""
-    s = _session()
-    result = asyncio.run(s._apply_isolation("ui_control"))
+def test_ui_control_now_reaches_the_private_desktop():
+    """It used to be refused: UI Automation is session-scoped, so the
+    copy inside Alfred could not see that session. The accessibility
+    layer runs inside the session now, so the precise tool works there
+    too - screenshot-and-guess is no longer the only option."""
+    d, r = FakeDesktop(), FakeRouter()
+    s = _session(desktop=d, router=r)
 
-    assert result is not None
-    assert result["status"] == "error"
-    assert "desktop_control" in result["instruction"]
+    assert asyncio.run(s._apply_isolation("ui_control")) is None
+    assert d.ensured == 1
+    assert r.isolated is True
 
 
 def test_a_failed_session_is_reported_not_hidden():

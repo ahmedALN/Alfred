@@ -51,8 +51,20 @@ class SessionRouter:
         reachable agent - a degraded result the user can see beats a
         task that fails outright.
         """
+        return self.client_for(self._target, fallback=True)
+
+    def client_for(
+        self, target: str, fallback: bool = False
+    ) -> ChildSessionClient:
+        """A connected client for a named target, whatever is current.
+
+        The agent accepts one connection at a time, so everything that
+        talks to a session has to share the same one - a second
+        connection is refused as ERROR_PIPE_BUSY. Callers that must not
+        be silently redirected (opening an app on the private desktop,
+        say) leave ``fallback`` off and handle the failure themselves.
+        """
         with self._lock:
-            target = self._target
             client = self._clients.get(target)
 
             if client is not None:
@@ -68,7 +80,7 @@ class SessionRouter:
                 fresh.connect()
             except ChildSessionError:
                 fresh.close()
-                if target == "child":
+                if fallback and target == "child":
                     print(
                         "[Router] no agent in the isolated session - "
                         "falling back to the user's desktop."

@@ -118,17 +118,37 @@ class UIControlTool(AlfredTool):
             "required": ["action"],
         }
 
-    def __init__(self, session: UiaSession | None = None) -> None:
+    def __init__(
+        self,
+        session: UiaSession | None = None,
+        router: Any = None,
+        remote: Any = None,
+    ) -> None:
         self._uia = session or UiaSession()
+        # UI Automation is session-scoped, so the local backend can only
+        # ever see the user's screen. When Alfred is working on its own
+        # desktop the identical calls have to run inside that session,
+        # via the agent that lives there.
+        self._router = router
+        self._remote = remote
 
     # ----------------------------------------------------------------
 
-    def _secret_guard(self, ref: int | None, name: str | None,
+    def _backend(self) -> Any:
+        if (
+            self._remote is not None
+            and self._router is not None
+            and getattr(self._router, "isolated", False)
+        ):
+            return self._remote
+        return self._uia
+
+    def _secret_guard(self, ui: Any, ref: int | None, name: str | None,
                       text: str) -> dict[str, Any] | None:
         """Refuse to type into a masked or obviously-secret field."""
         info = None
         try:
-            info = self._uia.control_info(ref, name)
+            info = ui.control_info(ref, name)
         except Exception:  # noqa: BLE001
             info = None
 
@@ -164,17 +184,19 @@ class UIControlTool(AlfredTool):
         timeout = arguments.get("timeout")
         timeout = float(timeout) if isinstance(timeout, (int, float)) else None
 
+        ui = self._backend()
+
         try:
             if action == "windows":
-                wins = self._uia.windows()
+                wins = ui.windows()
                 return {"status": "success", "count": len(wins), "windows": wins}
 
             if action == "focus":
-                title = self._uia.focus_window(window, pid)
+                title = ui.focus_window(window, pid)
                 return {"status": "success", "focused": title or window}
 
             if action == "tree":
-                title, controls = self._uia.tree(
+                title, controls = ui.tree(
                     window, pid, contains=arguments.get("contains"),
                 )
                 return {
@@ -188,7 +210,7 @@ class UIControlTool(AlfredTool):
                 query = arguments.get("query") or name
                 if not isinstance(query, str) or not query:
                     return {"status": "error", "error": "'find' needs 'query'."}
-                hits = self._uia.find(query)
+                hits = ui.find(query)
                 return {
                     "status": "success",
                     "count": len(hits),
@@ -196,7 +218,7 @@ class UIControlTool(AlfredTool):
                 }
 
             if action in ("click", "double_click", "right_click"):
-                out = self._uia.click(
+                out = ui.click(
                     ref, name,
                     double=(action == "double_click"),
                     right=(action == "right_click"),
@@ -204,7 +226,7 @@ class UIControlTool(AlfredTool):
                 return {"status": "success", "clicked": out or name or ref}
 
             if action == "invoke":
-                out = self._uia.invoke(ref, name)
+                out = ui.invoke(ref, name)
                 return {"status": "success", "invoked": out or name or ref}
 
             if action == "type":
@@ -218,10 +240,10 @@ class UIControlTool(AlfredTool):
                     raw_into = arguments.get("into")
                     if name is None and isinstance(raw_into, str) and raw_into:
                         name = raw_into
-                refused = self._secret_guard(into, name, text)
+                refused = self._secret_guard(ui, into, name, text)
                 if refused is not None:
                     return refused
-                self._uia.type_text(text, into, name if into is None else None)
+                ui.type_text(text, into, name if into is None else None)
                 return {"status": "success", "typed": text}
 
             if action == "key":
@@ -234,11 +256,11 @@ class UIControlTool(AlfredTool):
                         "error": "'key' needs 'keys', e.g. '^a', 'ctrl+a' or "
                                  "'{ENTER}'.",
                     }
-                self._uia.send_key(keys)
+                ui.send_key(keys)
                 return {"status": "success", "keys": keys}
 
             if action == "get":
-                return {"status": "success", "text": self._uia.get_text(ref, name)}
+                return {"status": "success", "text": ui.get_text(ref, name)}
 
             if action == "select":
                 item = arguments.get("item")
@@ -246,19 +268,19 @@ class UIControlTool(AlfredTool):
                     return {"status": "error", "error": "'select' needs 'item'."}
                 return {
                     "status": "success",
-                    "selected": self._uia.select(item, ref, name),
+                    "selected": ui.select(item, ref, name),
                 }
 
             if action == "expand":
                 return {
                     "status": "success",
-                    "expanded": self._uia.expand(ref, name),
+                    "expanded": ui.expand(ref, name),
                 }
 
             if action == "scroll":
                 return {
                     "status": "success",
-                    "scrolled": self._uia.scroll(
+                    "scrolled": ui.scroll(
                         str(arguments.get("direction", "down")),
                         int(arguments.get("amount", 3) or 3),
                         ref, name,
@@ -269,24 +291,24 @@ class UIControlTool(AlfredTool):
                 path = arguments.get("path")
                 if not isinstance(path, str) or not path:
                     return {"status": "error", "error": "'menu' needs 'path'."}
-                return {"status": "success", "menu": self._uia.menu_select(path)}
+                return {"status": "success", "menu": ui.menu_select(path)}
 
             if action == "exists":
                 if not isinstance(name, str):
                     return {"status": "error", "error": "'exists' needs 'name'."}
                 return {
                     "status": "success",
-                    "exists": self._uia.exists(name, window),
+                    "exists": ui.exists(name, window),
                 }
 
             if action == "wait_for":
                 if not isinstance(name, str):
                     return {"status": "error", "error": "'wait_for' needs 'name'."}
-                found = self._uia.wait_for(name, window, timeout or 10.0)
+                found = ui.wait_for(name, window, timeout or 10.0)
                 return {"status": "success", "found": found}
 
             if action == "wait_ready":
-                ready = self._uia.wait_ready(window, pid, timeout or 25.0)
+                ready = ui.wait_ready(window, pid, timeout or 25.0)
                 return {
                     "status": "success" if ready else "error",
                     "ready": ready,

@@ -108,6 +108,10 @@ private static int Main(
     int currentSession =
         GetCurrentSessionId();
 
+    // Per-session, owned by this process: two agents sharing one file
+    // through cmd's '>>' meant the second could not start at all.
+    AgentLog.Start(currentSession);
+
     Console.WriteLine(
         $"Current session: {currentSession}"
     );
@@ -469,6 +473,11 @@ private static string HandleRequest(
 
             case "list_apps":
                 return HandleListApps();
+
+            case "uia":
+                return UiaService.Handle(
+                    root
+                );
 
             case "shutdown":
                 return Success(
@@ -1204,6 +1213,7 @@ private static string HandleClose(JsonElement root)
 
     var closed = new List<int>();
     var failed = new List<int>();
+    var skipped = new List<int>();
     int mySession = GetCurrentSessionId();
 
     foreach (int pid in pids)
@@ -1217,6 +1227,16 @@ private static string HandleClose(JsonElement root)
             if (proc.SessionId != mySession)
             {
                 failed.Add(pid);
+                continue;
+            }
+
+            // Nor the session's own scaffolding. "Close everything you
+            // opened" once took out the shell and the console hosting
+            // this agent, which killed the connection mid-answer and
+            // left the session unusable until it was recycled.
+            if (IsLoadBearing(proc))
+            {
+                skipped.Add(pid);
                 continue;
             }
 
@@ -1253,9 +1273,189 @@ private static string HandleClose(JsonElement root)
         {
             closed,
             failed,
+            skipped,
             session = mySession
         }
     );
+}
+
+// The session cannot function without these, and this agent cannot
+// answer once its own host is gone.
+private static readonly HashSet<string> LoadBearing =
+    new(StringComparer.OrdinalIgnoreCase)
+{
+    "explorer",       // the session's shell
+    "dwm",            // the compositor
+    "sihost",
+    "csrss",
+    "winlogon",
+    "fontdrvhost",
+    "ctfmon",
+    "TextInputHost",  // owns the on-screen keyboard surface
+    "ChildInputAgent",
+    "WindowsTerminal",
+    "OpenConsole",
+    "conhost",
+    "cmd",
+};
+
+private static bool IsLoadBearing(System.Diagnostics.Process proc)
+{
+    if (proc.Id == Environment.ProcessId)
+    {
+        return true;
+    }
+
+    // The console this agent is attached to. Killing it takes the agent
+    // down with it, which is how "close everything" once ended the very
+    // connection that was carrying out the request.
+    if (proc.Id == ConsoleHostProcessId())
+    {
+        return true;
+    }
+
+    try
+    {
+        if (LoadBearing.Contains(proc.ProcessName))
+        {
+            return true;
+        }
+    }
+    catch
+    {
+        // No name available; fall through to the ancestry check.
+    }
+
+    // Whatever launched this agent - a console, a scheduled-task host -
+    // takes the agent down with it.
+    return IsAncestorOfSelf(proc.Id);
+}
+
+private static bool IsAncestorOfSelf(int pid)
+{
+    int current = Environment.ProcessId;
+
+    for (int hop = 0; hop < 6; hop++)
+    {
+        int parent = GetParentProcessId(current);
+
+        if (parent <= 0)
+        {
+            return false;
+        }
+
+        if (parent == pid)
+        {
+            return true;
+        }
+
+        current = parent;
+    }
+
+    return false;
+}
+
+[DllImport("kernel32.dll")]
+private static extern IntPtr GetConsoleWindow();
+
+private static int ConsoleHostProcessId()
+{
+    try
+    {
+        IntPtr console = GetConsoleWindow();
+
+        if (console == IntPtr.Zero)
+        {
+            return 0;
+        }
+
+        return (int)GetWindowProcessId(console);
+    }
+    catch
+    {
+        return 0;
+    }
+}
+
+private const uint Th32SnapProcess = 0x00000002;
+
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+private struct PROCESSENTRY32W
+{
+    public uint dwSize;
+    public uint cntUsage;
+    public uint th32ProcessID;
+    public IntPtr th32DefaultHeapID;
+    public uint th32ModuleID;
+    public uint cntThreads;
+    public uint th32ParentProcessID;
+    public int pcPriClassBase;
+    public uint dwFlags;
+
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+    public string szExeFile;
+}
+
+[DllImport("kernel32.dll", SetLastError = true)]
+private static extern IntPtr CreateToolhelp32Snapshot(
+    uint flags,
+    uint processId);
+
+[DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+private static extern bool Process32FirstW(
+    IntPtr snapshot,
+    ref PROCESSENTRY32W entry);
+
+[DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+private static extern bool Process32NextW(
+    IntPtr snapshot,
+    ref PROCESSENTRY32W entry);
+
+[DllImport("kernel32.dll", SetLastError = true)]
+private static extern bool CloseHandle(IntPtr handle);
+
+// Toolhelp rather than WMI: no extra package, no COM, and it answers
+// in microseconds.
+private static int GetParentProcessId(int pid)
+{
+    IntPtr snapshot = CreateToolhelp32Snapshot(Th32SnapProcess, 0);
+
+    if (snapshot == IntPtr.Zero || snapshot == new IntPtr(-1))
+    {
+        return 0;
+    }
+
+    try
+    {
+        var entry = new PROCESSENTRY32W
+        {
+            dwSize = (uint)Marshal.SizeOf<PROCESSENTRY32W>()
+        };
+
+        if (!Process32FirstW(snapshot, ref entry))
+        {
+            return 0;
+        }
+
+        do
+        {
+            if (entry.th32ProcessID == (uint)pid)
+            {
+                return (int)entry.th32ParentProcessID;
+            }
+        }
+        while (Process32NextW(snapshot, ref entry));
+    }
+    catch
+    {
+        // Snapshot went stale mid-walk.
+    }
+    finally
+    {
+        CloseHandle(snapshot);
+    }
+
+    return 0;
 }
 
 private static string HandleListApps()
@@ -1806,6 +2006,185 @@ private static bool TryGetInt64(
     }
 
     return true;
+}
+
+// ================================================================
+// Bridge for the accessibility layer (Uia.cs)
+//
+// UiaService drives real controls, and when a pattern is missing it
+// falls back to real mouse and keyboard input. That input has to go
+// through exactly the same SendInput path as everything else here -
+// a second implementation would be a second thing to get wrong.
+// ================================================================
+
+internal static string UiaOk(object data)
+{
+    return Success(data);
+}
+
+internal static string UiaFail(string error, string message)
+{
+    return Error(error, message);
+}
+
+internal static int UiaSessionId()
+{
+    return GetCurrentSessionId();
+}
+
+internal static IntPtr UiaForegroundWindow()
+{
+    return GetForegroundWindow();
+}
+
+internal static bool UiaActivateWindow(IntPtr hwnd)
+{
+    return ActivateWindow(hwnd);
+}
+
+internal static void UiaMoveCursor(int x, int y)
+{
+    SetCursorPos(x, y);
+}
+
+internal static bool UiaClickAt(
+    int x,
+    int y,
+    string button,
+    bool doubleClick)
+{
+    if (!SetCursorPos(x, y))
+    {
+        return false;
+    }
+
+    // Windows needs a moment to register the move before the press, or
+    // the click lands wherever the pointer was.
+    Thread.Sleep(40);
+
+    bool ok = button.ToLowerInvariant() switch
+    {
+        "right" => SendMouseButton(MouseRightDown, MouseRightUp),
+        "middle" => SendMouseButton(MouseMiddleDown, MouseMiddleUp),
+        _ => SendMouseButton(MouseLeftDown, MouseLeftUp),
+    };
+
+    if (ok && doubleClick)
+    {
+        Thread.Sleep(60);
+        ok = SendMouseButton(MouseLeftDown, MouseLeftUp);
+    }
+
+    return ok;
+}
+
+internal const int WmGetObject = 0x003D;
+internal const int ObjIdClient = unchecked((int)0xFFFFFFFC);
+internal const uint SmtoAbortIfHung = 0x0002;
+
+/// <summary>
+/// Chromium-based apps - Chrome, Edge, Opera, most Electron apps -
+/// keep their renderer's accessibility tree switched off until
+/// something asks for it, which is why a browser reports a handful of
+/// elements where a person can see hundreds. WM_GETOBJECT is that ask;
+/// it is what a screen reader sends.
+/// </summary>
+internal static void UiaWakeAccessibility(IntPtr hwnd)
+{
+    try
+    {
+        SendMessageTimeout(
+            hwnd,
+            WmGetObject,
+            IntPtr.Zero,
+            new IntPtr(ObjIdClient),
+            SmtoAbortIfHung,
+            600,
+            out _
+        );
+    }
+    catch
+    {
+        // The app is hung or gone; the caller carries on regardless.
+    }
+}
+
+internal static bool UiaTypeText(string text)
+{
+    return SendUnicodeText(text);
+}
+
+internal static bool UiaWheel(int notches)
+{
+    INPUT[] inputs =
+    {
+        new INPUT
+        {
+            Type = InputMouse,
+            Union = new InputUnion
+            {
+                Mouse = new MOUSEINPUT
+                {
+                    Dx = 0,
+                    Dy = 0,
+                    MouseData =
+                        unchecked((uint)(notches * WheelDelta)),
+                    Flags = MouseWheel,
+                    Time = 0,
+                    ExtraInfo = IntPtr.Zero
+                }
+            }
+        }
+    };
+
+    return SendInput(
+        (uint)inputs.Length,
+        inputs,
+        Marshal.SizeOf(typeof(INPUT))
+    ) == inputs.Length;
+}
+
+internal static bool UiaKeyChord(IReadOnlyList<string> tokens)
+{
+    var resolved = new List<ushort>();
+
+    foreach (string token in tokens)
+    {
+        if (!TryResolveKey(token, out ushort vk))
+        {
+            return false;
+        }
+
+        resolved.Add(vk);
+    }
+
+    if (resolved.Count == 0)
+    {
+        return false;
+    }
+
+    var sequence = new List<INPUT>();
+
+    for (int i = 0; i < resolved.Count - 1; i++)
+    {
+        sequence.Add(CreateVkInput(resolved[i], false));
+    }
+
+    sequence.Add(CreateVkInput(resolved[^1], false));
+    sequence.Add(CreateVkInput(resolved[^1], true));
+
+    for (int i = resolved.Count - 2; i >= 0; i--)
+    {
+        sequence.Add(CreateVkInput(resolved[i], true));
+    }
+
+    INPUT[] inputs = sequence.ToArray();
+
+    return SendInput(
+        (uint)inputs.Length,
+        inputs,
+        Marshal.SizeOf(typeof(INPUT))
+    ) == inputs.Length;
 }
 
 private static string Success(
@@ -2864,6 +3243,19 @@ private static extern bool
     "kernel32.dll")]
 private static extern uint
     GetCurrentThreadId();
+
+[DllImport(
+    "user32.dll",
+    SetLastError = true,
+    CharSet = CharSet.Unicode)]
+private static extern IntPtr SendMessageTimeout(
+    IntPtr hWnd,
+    int msg,
+    IntPtr wParam,
+    IntPtr lParam,
+    uint flags,
+    uint timeoutMs,
+    out IntPtr result);
 
 [DllImport(
     "user32.dll",

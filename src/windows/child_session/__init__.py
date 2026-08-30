@@ -553,6 +553,21 @@ class ChildSessionClient:
         apps = _payload(self._request({"op": "list_apps"})).get("apps")
         return apps if isinstance(apps, list) else []
 
+    def uia(self, action: str, **arguments: Any) -> dict[str, Any]:
+        """Drive the accessibility layer inside this session.
+
+        UI Automation is session-scoped, so this is the only way to
+        reach the controls of a session Alfred is not itself running in.
+        Arguments that are None are dropped rather than sent as null.
+        """
+        request: dict[str, Any] = {"op": "uia", "action": action}
+
+        for key, value in arguments.items():
+            if value is not None:
+                request[key] = value
+
+        return _payload(self._request(request))
+
     def capture_window(self, hwnd: int) -> dict[str, Any]:
         """
         Point the capture at one window (by HWND). Subsequent

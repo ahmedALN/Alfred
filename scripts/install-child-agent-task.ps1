@@ -12,8 +12,8 @@
       Task name : AlfredChildAgent
       Trigger   : at logon (which includes a child session starting)
       Runs as   : you, non-elevated, in whatever session logged on
-      Action    : ChildInputAgent.exe, with output captured to
-                  logs\child-agent.log so we can see any crash
+      Action    : ChildInputAgent.exe, which writes its own
+                  logs\child-agent.s<session>.log so we can see any crash
 
     Run in an ADMIN PowerShell:
         powershell -ExecutionPolicy Bypass -File "C:\Users\ahmed\Alfred\scripts\install-child-agent-task.ps1"
@@ -29,7 +29,6 @@ $ErrorActionPreference = 'Stop'
 $TaskName = 'AlfredChildAgent'
 $Root     = Split-Path -Parent $PSScriptRoot
 $LogDir   = Join-Path $Root 'logs'
-$LogFile  = Join-Path $LogDir 'child-agent.log'
 
 function Assert-Admin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -68,7 +67,7 @@ Write-Host "  name    : $TaskName"
 Write-Host "  trigger : at logon (a child session starting counts)"
 Write-Host "  runs as : $env:USERNAME, NOT elevated"
 Write-Host "  action  : $exe"
-Write-Host "  log     : $LogFile"
+Write-Host ("  log     : " + (Join-Path $LogDir 'child-agent.s<session>.log'))
 Write-Host ""
 if (-not $Force) {
     if ((Read-Host "Proceed? (y/N)") -notmatch '^(y|yes)$') {
@@ -76,10 +75,13 @@ if (-not $Force) {
     }
 }
 
-# cmd wrapper so stdout/stderr land in a log - if the agent dies inside
-# the child session we need to see why, not just see it missing.
-$action = New-ScheduledTaskAction -Execute 'cmd.exe' `
-    -Argument ('/c ""{0}" >> "{1}" 2>&1"' -f $exe, $LogFile)
+# The agent writes its own per-session log now, so it runs directly.
+#
+# It used to be wrapped in cmd with '>> child-agent.log'. With an agent
+# in the user's session AND one in Alfred's, the first held that file
+# and the second could not redirect to it - cmd exited 1, no agent
+# started, and isolation failed with "session did not become ready".
+$action = New-ScheduledTaskAction -Execute $exe
 
 $trigger   = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME `

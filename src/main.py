@@ -52,6 +52,7 @@ from src.singleton import AlreadyRunning, SingleInstance
 from src.tools.task_tool import RunTaskTool, TaskStatusTool
 from src.windows.child_session import ChildSessionClient
 from src.windows.isolated_desktop import IsolatedDesktop
+from src.windows.uia_remote import RemoteUia
 from src.windows.session_router import ROUTER as session_router
 from src.windows.child_session.bootstrap import ensure_agent_running
 
@@ -110,7 +111,11 @@ async def main() -> None:
 
     # Alfred's own desktop, brought up on demand when a task says
     # "without disturbing me".
-    isolated_desktop = IsolatedDesktop()
+    isolated_desktop = IsolatedDesktop(
+        # One connection to that session, shared with the tools - the
+        # agent there refuses a second.
+        client_provider=lambda: session_router.client_for("child"),
+    )
 
     screenshot_tool = ComputerScreenshotTool(
         child_session_client,
@@ -124,7 +129,13 @@ async def main() -> None:
         router=session_router,
     )
 
-    ui_control_tool = UIControlTool()
+    # The accessibility layer only reaches the session it runs in, so
+    # ui_control gets both: the local one for the user's screen, and the
+    # in-session agent for Alfred's private desktop.
+    ui_control_tool = UIControlTool(
+        router=session_router,
+        remote=RemoteUia(session_router.client),
+    )
 
     # Background task agent: delegate multi-step jobs (persisted so a
     # job survives an Alfred restart).

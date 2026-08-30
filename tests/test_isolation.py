@@ -140,3 +140,80 @@ def test_cleanup_is_safe_with_no_session():
     type(d).running = property(lambda self: False)
     result = d.cleanup()
     assert result["closed"] == [] and "no session" in result["note"]
+
+
+# ------------------------------------------------------- recovery
+
+
+def _stale(monkeypatch, session, agent_ready, recorder):
+    """An IsolatedDesktop looking at a leftover session."""
+    import src.windows.isolated_desktop as mod
+
+    d = IsolatedDesktop()
+    type(d).session_id = property(lambda self: session[0])
+    d._agent_ready = lambda: agent_ready[0]        # type: ignore[method-assign]
+
+    def fake_run(args, **kwargs):
+        recorder.append(list(args))
+        session[0] = None                          # the logoff took effect
+        return None
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(mod.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(
+        mod.time, "monotonic", _clock()
+    )
+    return d
+
+
+def _clock():
+    """Time that advances fast enough to exhaust the grace period in a
+    few ticks, but not so fast that the first check is skipped."""
+    ticks = iter(range(0, 100000, 3))
+
+    def now():
+        return next(ticks)
+    return now
+
+
+def test_a_session_whose_agent_died_is_logged_off_not_waited_on(monkeypatch):
+    """The agent starts from a logon trigger, so a session that is
+    logged on without one can never heal itself - waiting the full
+    timeout leaves isolation broken until the user reboots."""
+    recorded: list[list[str]] = []
+    d = _stale(monkeypatch, [7], [False], recorded)
+
+    d._recycle_if_stale()
+
+    assert recorded == [["logoff", "7"]]
+
+
+def test_a_healthy_session_is_left_alone(monkeypatch):
+    recorded: list[list[str]] = []
+    d = _stale(monkeypatch, [7], [True], recorded)
+
+    d._recycle_if_stale()
+
+    assert recorded == []
+
+
+def test_nothing_to_recycle_when_there_is_no_session(monkeypatch):
+    recorded: list[list[str]] = []
+    d = _stale(monkeypatch, [None], [False], recorded)
+
+    d._recycle_if_stale()
+
+    assert recorded == []
+
+
+def test_recycling_forgets_the_old_sessions_baseline(monkeypatch):
+    """Those pids belong to a session that no longer exists; keeping
+    them would make cleanup skip the new session's real apps."""
+    recorded: list[list[str]] = []
+    d = _stale(monkeypatch, [7], [False], recorded)
+    d._baseline = {1, 2, 3}
+    d._launched = [9]
+
+    d._recycle_if_stale()
+
+    assert d._baseline == set() and d._launched == []

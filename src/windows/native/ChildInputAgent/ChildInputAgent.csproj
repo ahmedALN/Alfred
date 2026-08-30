@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PlatformTarget>x64</PlatformTarget>
+    <UseWPF>true</UseWPF>
     <AssemblyName>ChildInputAgent</AssemblyName>
     <RootNamespace>Alfred.ChildInputAgent</RootNamespace>
   </PropertyGroup>

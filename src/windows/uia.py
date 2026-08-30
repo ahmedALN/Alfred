@@ -643,3 +643,101 @@ def _escape(text: str) -> str:
     for ch in "+^%~()[]":
         text = text.replace(ch, "{" + ch + "}")
     return text
+
+
+# Reverse of the table above: pywinauto syntax back to plain tokens, for
+# backends that speak in key names rather than send_keys strings.
+_FROM_PYWINAUTO = {
+    "ENTER": "enter", "ESC": "esc", "TAB": "tab", "SPACE": "space",
+    "BACKSPACE": "backspace", "DEL": "delete", "HOME": "home",
+    "END": "end", "PGUP": "pageup", "PGDN": "pagedown", "UP": "up",
+    "DOWN": "down", "LEFT": "left", "RIGHT": "right", "INSERT": "insert",
+    "VK_LWIN": "win", "PRTSC": "printscreen", "CAPSLOCK": "capslock",
+    **{f"F{i}": f"f{i}" for i in range(1, 25)},
+}
+
+_PYWINAUTO_MODIFIER = {"^": "ctrl", "%": "alt", "+": "shift"}
+
+
+def key_tokens(keys: Any) -> list[list[str]]:
+    """The same key spec as a list of chords, e.g. ``[["ctrl", "a"]]``.
+
+    ``normalise_keys`` speaks pywinauto; the in-session agent speaks
+    plain key names. This decodes either form - what a model emits, or
+    what ``normalise_keys`` produced from it - so the two backends can
+    be driven from one argument.
+    """
+    if isinstance(keys, (list, tuple)):
+        tokens = [str(k).strip().lower() for k in keys if str(k).strip()]
+        return [tokens] if tokens else []
+
+    if not isinstance(keys, str):
+        return []
+
+    text = keys.strip()
+    if not text:
+        return []
+
+    # '+' is ambiguous: pywinauto means shift, people mean "and". It is
+    # only pywinauto's when it leads, as in '+n'; everywhere else the
+    # unambiguous markers decide.
+    pywinauto = any(ch in text for ch in "^%{}()") or text[0] in "+^%"
+
+    if not pywinauto:
+        parts = [p.strip().lower() for p in re.split(r"[+\-]", text) if p.strip()]
+        return [parts] if parts else []
+
+    chords: list[list[str]] = []
+    modifiers: list[str] = []
+    i = 0
+
+    while i < len(text):
+        char = text[i]
+
+        if char in _PYWINAUTO_MODIFIER:
+            modifiers.append(_PYWINAUTO_MODIFIER[char])
+            i += 1
+            continue
+
+        if char == "{":
+            end = text.find("}", i)
+            if end < 0:
+                break
+            inner = text[i + 1:end]
+            i = end + 1
+
+            # An escaped brace/paren is literal text, not a key name.
+            if inner in ("{", "}", "(", ")", "+", "^", "%", "~", "[", "]"):
+                chords.append([*modifiers, inner])
+                modifiers = []
+                continue
+
+            named = _FROM_PYWINAUTO.get(inner.upper())
+            if named == "win" and i < len(text):
+                # {VK_LWIN} before more keys is the Windows modifier.
+                modifiers.append("win")
+                continue
+
+            chords.append([*modifiers, named or inner.lower()])
+            modifiers = []
+            continue
+
+        if char == "(":
+            end = text.find(")", i)
+            if end < 0:
+                break
+            for member in text[i + 1:end]:
+                if member.strip():
+                    chords.append([*modifiers, member.lower()])
+            i = end + 1
+            modifiers = []
+            continue
+
+        chords.append([*modifiers, char.lower()])
+        modifiers = []
+        i += 1
+
+    if modifiers and not chords:
+        chords.append(modifiers)
+
+    return [c for c in chords if c]

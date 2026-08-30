@@ -305,3 +305,67 @@ def test_key_action_normalises_a_list():
 def test_key_action_reports_a_useful_error():
     out = _tool().execute({"action": "key"})
     assert out["status"] == "error" and "ctrl+a" in out["error"]
+
+
+# ------------------------------------------------- which desktop?
+
+
+class _Router:
+    def __init__(self, isolated=False):
+        self.isolated = isolated
+
+
+def _both():
+    """A tool wired to both backends, as main.py wires it."""
+    local, remote = FakeUia(), FakeUia()
+    router = _Router()
+    tool = UIControlTool(local, router=router, remote=remote)
+    return tool, local, remote, router
+
+
+def test_the_users_desktop_is_driven_locally():
+    tool, local, remote, _ = _both()
+    tool.execute({"action": "tree", "window": "Notepad"})
+
+    assert local.calls and not remote.calls
+
+
+def test_alfreds_own_desktop_is_driven_inside_that_session():
+    """UI Automation cannot cross sessions - running the local backend
+    here would silently act on the user's screen, which is the one thing
+    'without disturbing me' rules out."""
+    tool, local, remote, router = _both()
+    router.isolated = True
+    tool.execute({"action": "tree", "window": "Notepad"})
+
+    assert remote.calls and not local.calls
+
+
+def test_the_backend_can_change_between_calls():
+    tool, local, remote, router = _both()
+    tool.execute({"action": "windows"})
+    router.isolated = True
+    tool.execute({"action": "windows"})
+    router.isolated = False
+    tool.execute({"action": "windows"})
+
+    assert len(local.calls) == 2
+    assert len(remote.calls) == 1
+
+
+def test_the_credential_refusal_applies_on_both_desktops():
+    """The guard reads the target field's flags - it has to ask the
+    backend that can actually see them."""
+    tool, _, remote, router = _both()
+    router.isolated = True
+    out = tool.execute({"action": "type", "text": "hunter2", "into": 3})
+
+    assert out["status"] == "refused"
+    assert not any(c[0] == "type" for c in remote.calls)
+
+
+def test_without_a_remote_backend_it_still_works_locally():
+    tool = UIControlTool(FakeUia(), router=_Router(isolated=True), remote=None)
+    out = tool.execute({"action": "windows"})
+
+    assert out["status"] == "success"

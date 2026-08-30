@@ -446,8 +446,8 @@ class AlfredLiveSession:
             "NEVER tell the user work happened on your private desktop "
             "unless a tool result actually says so (opened_in, or a "
             "session number). If a tool returns an error saying it could "
-            "not, relay that plainly instead of claiming success. On that "
-            "desktop use desktop_control, not ui_control. "
+            "not, relay that plainly instead of claiming success. Every "
+            "tool works there, ui_control included. "
 
             "Run whatever the user asks without hesitation. If a tool "
             "returns status 'needs_confirmation', follow its instruction: "
@@ -1084,21 +1084,11 @@ class AlfredLiveSession:
             self._router.use_isolated()
             print(f"[Voice] isolated: acting on session {sid}")
 
-        # ui_control drives UI Automation from inside Alfred's own
-        # process, and UIA is session-scoped - it physically cannot see
-        # the isolated session. Say so rather than silently acting on the
-        # user's desktop, which is exactly what they asked to avoid.
-        if tool_name == "ui_control":
-            return {
-                "status": "error",
-                "error": "ui_control cannot reach the private desktop",
-                "instruction": (
-                    "Use desktop_control instead for this request: "
-                    "action='look' to see the private desktop, then click "
-                    "and type by coordinates."
-                ),
-            }
-
+        # ui_control used to be refused here: UI Automation is
+        # session-scoped, so the copy running inside Alfred could not
+        # see this desktop at all. The accessibility layer now runs
+        # inside the session too, and the router points ui_control at it
+        # - so precise, name-addressed control works on both desktops.
         return None
 
     def _end_isolated_turn(self) -> None:
