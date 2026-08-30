@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 from src.tools.base import AlfredTool
@@ -15,6 +16,53 @@ from src.windows.apps import AppLauncher
 _READABLE_BROWSERS = ("chrome", "msedge", "firefox")
 
 _WEB = ("http://", "https://", "www.")
+
+
+def _await_window(before: set, url: str = "",
+                  timeout: float = 20.0) -> str | None:
+    """The window that appeared, once it has settled on its real title.
+
+    A cold browser window took thirteen seconds to show up on this
+    machine, so this waits properly rather than reporting the
+    placeholder name a window is born with.
+    """
+    import time
+
+    from src.windows.toplevel import titles
+
+    deadline = time.monotonic() + timeout
+    best = None
+
+    while time.monotonic() < deadline:
+        fresh = [t for t in (titles() - before) if t.strip()]
+        if fresh:
+            # A browser window is born "New Tab" and renamed once the
+            # page loads; wait for the rename rather than reporting the
+            # placeholder.
+            best = max(fresh, key=len)
+            if _settled(best, url):
+                return best
+        time.sleep(0.5)
+
+    return best
+
+
+def _settled(title: str, url: str) -> bool:
+    """Has the window stopped announcing that it is still loading?
+
+    A browser window is born "New Tab", then shows the bare address, and
+    only then the page's real name. The first two are of no use to
+    anything that has to find it again.
+    """
+    lowered = title.strip().lower()
+
+    if lowered.startswith(("new tab", "untitled", "about:blank")):
+        return False
+
+    host = re.sub(r"^https?://", "", (url or "").strip().lower())
+    host = host.split("/")[0].removeprefix("www.")
+
+    return not (host and lowered.startswith(host))
 
 
 def _is_web(target: str) -> bool:
@@ -171,20 +219,31 @@ class OpenAppTool(AlfredTool):
                     # can leave the page in a background tab - present,
                     # but invisible to every tool that follows.
                     flag = "-new-window" if readable == "firefox"                         else "--new-window"
+                    from src.windows.toplevel import titles
+
+                    before = titles()
                     out = self.launcher.open(
                         app_name=readable, target=target,
                         arguments=f"{flag} {app}",
                     )
                     payload = out.as_dict()
+
+                    # Say WHICH window, rather than leaving the next step
+                    # to guess from the URL. A stale window with a
+                    # similar title - an old tab of the same site in
+                    # another browser - otherwise wins the guess.
+                    opened = _await_window(before, app)
+                    if opened:
+                        payload["window_title"] = opened
                     payload["opened_url"] = app
                     payload["browser"] = readable
                     payload["instruction"] = (
                         "Opened in a browser whose page content can be "
-                        "read. The window is named after the PAGE, not "
-                        "the URL, and it is still loading - the title "
-                        "here is the one it had a moment ago. Next: "
-                        "ui_control wait_ready with min_controls=40 on "
-                        "the site's name, then tree with limit=300."
+                        "read. Use the EXACT 'window_title' above for "
+                        "every following step - not the URL, and not a "
+                        "shortened version, because an old window of the "
+                        "same site may still be open. Next: ui_control "
+                        "wait_ready min_controls=40, then links."
                     )
                     return payload
                 except Exception:  # noqa: BLE001

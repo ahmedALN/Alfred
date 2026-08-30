@@ -219,7 +219,21 @@ class UiaSession:
             return False
 
     def _best_window(self, dt, wanted: str):
-        """The open window that best answers ``wanted``."""
+        """The open window that best answers ``wanted``.
+
+        When several match equally - an old tab of the same site in
+        another browser, a second copy of an app - the one nearest the
+        front is the one meant. A stale "Deji - YouTube - Opera" left
+        over from an hour ago otherwise beat the Chrome window that had
+        just been opened for the job.
+        """
+        try:
+            from src.windows.toplevel import ordered_titles
+
+            depth = {t: i for i, t in enumerate(ordered_titles())}
+        except Exception:  # noqa: BLE001
+            depth = {}
+
         best = None
         best_score = 0
 
@@ -244,6 +258,12 @@ class UiaSession:
             # continuity matters most.
             if self._same_as_last(candidate):
                 score += 250
+
+            # Nearer the front wins a tie, and only a tie: 40 points
+            # across the whole Z-order cannot outrank a better title.
+            place = depth.get(title)
+            if place is not None:
+                score += max(0, 40 - place * 2)
 
             if score > best_score:
                 best, best_score = candidate, score

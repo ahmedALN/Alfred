@@ -310,8 +310,15 @@ async def main() -> None:
 
     _agent_tools = set(registry.names()) - {"run_task", "task_status"}
     task_agent = TaskAgent(
-        chat=providers.chat,
+        # Executing is where the tool calls are emitted, and that is a
+        # function-calling job: the local 4B model plans a sensible step
+        # and then fails to call anything, worse the more tools there
+        # are. It gets the same strong chain as planning.
+        chat=providers.plan_chat,
         plan_chat=providers.plan_chat,
+        # Verifying is a yes/no judgement over one substep, so it stays
+        # on the fast local model - the reason it was split out.
+        verify_chat=providers.chat,
         registry=registry,
         policy=Policy(
             autonomy=settings.brain_autonomy,
