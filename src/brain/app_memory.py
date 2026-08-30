@@ -256,9 +256,27 @@ class AppMemory:
     # ------------------------------------------------------------- reads
 
     def known_apps(self) -> list[str]:
+        """Apps Alfred knows something about, best-known first.
+
+        Ordered by how much is actually known, not by how often the app
+        has been opened - the two apps mapped most thoroughly here had
+        never been opened THROUGH Alfred, so they were missing from a
+        line that claims to list what it knows its way around.
+        """
         with self._lock:
             rows = self._conn.execute(
-                "SELECT key FROM apps ORDER BY opens DESC"
+                """
+                SELECT a.key AS key,
+                       a.opens
+                       + 2 * (SELECT COUNT(*) FROM app_controls c
+                              WHERE c.app_key = a.key)
+                       + 3 * (SELECT COUNT(*) FROM app_notes n
+                              WHERE n.app_key = a.key)
+                       + 3 * (SELECT COUNT(*) FROM app_landmarks l
+                              WHERE l.app_key = a.key) AS depth
+                FROM apps a
+                ORDER BY depth DESC, a.opens DESC
+                """
             ).fetchall()
         return [r["key"] for r in rows]
 

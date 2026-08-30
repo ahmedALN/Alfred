@@ -278,3 +278,31 @@ def test_an_app_can_hold_enough_notes_to_describe_itself(tmp_path):
 
     assert len(m.app("MultiMC")["notes"]) >= 12
     m.close()
+
+
+def test_known_apps_ranks_by_what_is_known_not_by_visits(tmp_path):
+    """The two apps mapped most thoroughly had never been opened THROUGH
+    Alfred, so ordering by visits left them off a line that claims to
+    list what it knows its way around."""
+    m = _mem(tmp_path)
+
+    m.note_open("Notepad")
+    m.note_open("Notepad")
+    m.note_open("Notepad")
+
+    m.note_open("MultiMC")          # opened once, but deeply mapped
+    for i in range(6):
+        m.note_landmark("MultiMC", f"Button {i}", 0.9, 0.1 + i / 20)
+    m.note("MultiMC", "a genuinely useful thing about this app")
+
+    order = m.known_apps()
+    assert order.index("multimc") < order.index("notepad")
+    m.close()
+
+
+def test_an_app_with_nothing_known_still_appears(tmp_path):
+    m = _mem(tmp_path)
+    m.note_open("Calculator")
+
+    assert "calculator" in m.known_apps()
+    m.close()
