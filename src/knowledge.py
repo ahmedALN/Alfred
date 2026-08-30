@@ -262,6 +262,20 @@ WINDOWS_PLAYBOOK: list[tuple[str, str]] = [
      "cloud call, so it is the fallback, not the habit: try ui_control "
      "first, always."),
 
+    ("correction", "Meeting an app whose buttons have no names: do NOT "
+     "start clicking to find out what they do - in MultiMC one of them "
+     "is Delete. ui_control offers this as needs_user 'offer_mapping'; "
+     "ASK the user, and if they agree run ui_control map. It reads each "
+     "control off the screen one at a time and remembers it by position, "
+     "and takes about a minute. Anything that looks destructive is "
+     "deliberately NOT learned - the user has to point those out."),
+    ("system", "ui_control map is the whole-app version of "
+     "learn_control: it photographs each nameless control on its own and "
+     "reads the label off it. Reading a whole panel at once and matching "
+     "labels to controls afterwards does not work - the labels come back "
+     "right and the correspondence comes back wrong, which is a wrong "
+     "click presented as a learned fact."),
+
     # --- the web ------------------------------------------------------
     ("correction", "For a question of FACT - who someone is, what the "
      "latest version is, what a page says - use the web tool, not a "

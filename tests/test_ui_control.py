@@ -39,6 +39,14 @@ class FakeUia:
             ctrls = [x for x in ctrls if c in x.name.lower()]
         return "Spotify Premium", ctrls
 
+    def unnamed(self, title_re=None, pid=None, limit=40):
+        self.calls.append(("unnamed", title_re))
+        return "Window", list(getattr(self, "_blanks", []))
+
+    def capture_window(self, title_re=None, pid=None):
+        self.calls.append(("capture", title_re))
+        return b"png", [0, 0, 1000, 1000]
+
     def find(self, query, limit=20):
         self.calls.append(("find", query))
         q = query.lower()
@@ -999,3 +1007,194 @@ def test_a_window_showing_only_its_frame_counts_as_asleep():
 
     assert _actionable_count(frame) == 0
     assert _actionable_count(real) == 4
+
+
+# ------------------------------------- meeting an app for the first time
+
+
+def _blank(n):
+    return [{"index": i, "type": "Custom", "center": [900, 100 + i * 20],
+             "rel": [0.9, 0.1 + i / 50], "size": [80, 19]} for i in range(n)]
+
+
+def test_an_unknown_app_full_of_nameless_buttons_is_offered_for_mapping():
+    """Working an app out means clicking unknown controls in someone's
+    software, so it is asked about rather than assumed."""
+    ui = _Positioned()
+    ui._blanks = _blank(15)
+    out = UIControlTool(ui, memory=_Memory()).execute(
+        {"action": "open_item", "window": "MultiMC", "name": "Launch"}
+    )
+
+    assert out["status"] == "needs_user"
+    assert out["needs_user"] == "offer_mapping"
+    assert "15 controls with no names" in out["question"]
+    assert "ASK the user" in out["instruction"]
+    assert ui.clicked_at == []
+
+
+def test_an_app_already_mapped_is_not_offered_again():
+    ui = _Positioned()
+    ui._blanks = _blank(15)
+    known = _Memory({"launch": {"label": "Launch", "rel_x": 0.9,
+                                "rel_y": 0.2}})
+    out = UIControlTool(ui, memory=known).execute(
+        {"action": "open_item", "window": "MultiMC", "name": "Nonesuch"}
+    )
+
+    assert out.get("needs_user") != "offer_mapping"
+
+
+def test_an_app_with_barely_anything_nameless_is_not_worth_asking_about():
+    ui = _Positioned()
+    ui._blanks = _blank(2)
+    out = UIControlTool(ui, memory=_Memory()).execute(
+        {"action": "open_item", "window": "Notepad", "name": "Nonesuch"}
+    )
+
+    assert out["status"] == "not_found"
+
+
+def _png(width=1000, height=1000):
+    """A real image, because the reader crops it."""
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (width, height), "white").save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+class _Mappable(_Positioned):
+    """A window with a stack of nameless buttons."""
+
+    def __init__(self, count=3):
+        super().__init__()
+        self._blanks = [
+            {"index": i, "type": "Custom", "center": [900, 100 + i * 20],
+              "rel": [0.9, 0.1 + i / 50], "size": [80, 19]}
+            for i in range(count)
+        ]
+
+    def capture_window(self, title_re=None, pid=None):
+        self.calls.append(("capture", title_re))
+        return _png(), [0, 0, 1000, 1000]
+
+
+class _Reads:
+    """A vision model that reads one control per picture."""
+
+    def __init__(self, *labels):
+        self._labels = list(labels)
+        self.calls = 0
+
+    def analyze(self, png, prompt, **kw):
+        answer = (
+            self._labels[self.calls] if self.calls < len(self._labels)
+            else "NONE"
+        )
+        self.calls += 1
+        return answer
+
+
+def test_each_control_is_read_on_its_own():
+    """Reading a whole panel and then matching labels to controls
+    drifted every time; one control per picture cannot."""
+    ui = _Mappable(3)
+    memory = _Memory()
+    vision = _Reads("Launch", "Launch Offline", "Edit Instance")
+    out = UIControlTool(ui, memory=memory, vision=vision).execute(
+        {"action": "map", "window": "MultiMC"}
+    )
+
+    assert out["status"] == "success"
+    assert out["learned"] == ["Launch", "Launch Offline", "Edit Instance"]
+    assert vision.calls == 3
+    # Each label sits on the control that was actually in its picture.
+    assert [round(m[3], 3) for m in memory.learned] == [0.1, 0.12, 0.14]
+
+
+def test_a_control_with_no_readable_text_is_left_nameless():
+    ui = _Mappable(3)
+    memory = _Memory()
+    out = UIControlTool(
+        ui, memory=memory, vision=_Reads("Launch", "NONE", "Edit Instance")
+    ).execute({"action": "map", "window": "MultiMC"})
+
+    assert out["learned"] == ["Launch", "Edit Instance"]
+    assert out["unlabelled"] == 1
+
+
+def test_a_window_that_reads_as_nothing_learns_nothing():
+    ui = _Mappable(3)
+    memory = _Memory()
+    out = UIControlTool(ui, memory=memory, vision=_Reads()).execute(
+        {"action": "map", "window": "MultiMC"}
+    )
+
+    assert out["status"] == "error"
+    assert memory.learned == []
+    assert "Do not guess" in out["instruction"]
+
+
+def test_mapping_never_learns_a_destructive_button_from_a_picture():
+    """Reading a screen is accurate, but a landmark is a position, and
+    Delete is the one control where being a row out is unrecoverable."""
+    ui = _Mappable(3)
+    memory = _Memory()
+    out = UIControlTool(
+        ui, memory=memory, vision=_Reads("Launch", "Delete", "Copy Instance")
+    ).execute({"action": "map", "window": "MultiMC"})
+
+    assert out["learned"] == ["Launch", "Copy Instance"]
+    assert out["not_learned_destructive"] == ["Delete"]
+    assert "Delete" in out["instruction"]
+
+
+def test_the_destructive_list_covers_the_usual_words():
+    from src.windows.mapping import DESTRUCTIVE
+
+    for word in ("Delete", "Remove Instance", "Uninstall", "Reset to "
+                 "defaults", "Erase all data", "Format drive"):
+        assert DESTRUCTIVE.search(word), word
+
+    for word in ("Launch", "Edit Instance", "View Mods", "Copy Instance"):
+        assert not DESTRUCTIVE.search(word), word
+
+
+def test_mapping_says_so_when_there_is_nothing_to_map():
+    ui = _Positioned()
+    ui._blanks = []
+    out = UIControlTool(ui, memory=_Memory(), vision=object()).execute(
+        {"action": "map", "window": "Notepad"}
+    )
+
+    assert out["status"] == "success" and out["learned"] == []
+    assert "already" in out["note"]
+
+
+def test_mapping_without_an_eye_says_so_rather_than_guessing():
+    ui = _Positioned()
+    ui._blanks = _blank(6)
+    out = UIControlTool(ui, memory=_Memory(), vision=None).execute(
+        {"action": "map", "window": "MultiMC"}
+    )
+
+    assert out["status"] == "error" and "vision" in out["error"]
+
+
+def test_a_screen_that_cannot_be_read_falls_back_to_asking_the_user():
+    class _Broken:
+        def analyze(self, *a, **k):
+            raise RuntimeError("the model is down")
+
+    ui = _Positioned()
+    ui._blanks = _blank(6)
+    out = UIControlTool(ui, memory=_Memory(), vision=_Broken()).execute(
+        {"action": "map", "window": "MultiMC"}
+    )
+
+    assert out["status"] == "error"
+    assert "learn_control" in out["instruction"]
+

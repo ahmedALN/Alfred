@@ -168,6 +168,10 @@ class UiaSession:
                     entry["rect"] = [r.left, r.top, r.right, r.bottom]
                 except Exception:  # noqa: BLE001
                     pass
+                try:
+                    entry["hwnd"] = int(w.handle)
+                except Exception:  # noqa: BLE001
+                    pass
                 out.append(entry)
                 if len(out) >= limit:
                     break
@@ -699,6 +703,30 @@ class UiaSession:
             _escape(text), pause=0.01,
             with_spaces=True, with_tabs=True, with_newlines=True,
         )
+
+    def capture_window(self, title_re: str | None = None,
+                       pid: int | None = None) -> tuple[bytes, list[int]]:
+        """A PNG of one window, and where it sits on screen.
+
+        Mapping an app means comparing what the accessibility layer can
+        locate against what a person can read, so both have to come from
+        the same picture.
+        """
+        win = self.window(title_re, pid)
+        self._last_window = win
+        self._last_spec = (title_re, pid)
+
+        try:
+            rect = win.rectangle()
+            image = win.capture_as_image()
+        except Exception as exc:  # noqa: BLE001
+            raise UiaError(f"could not capture the window: {exc}") from exc
+
+        import io
+
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        return buffer.getvalue(), [rect.left, rect.top, rect.right, rect.bottom]
 
     def click_point(self, x: int, y: int, double: bool = False) -> None:
         """Click a screen position.

@@ -4,6 +4,11 @@ import re
 from typing import Any
 
 from src.tools.base import AlfredTool
+from src.windows.mapping import DESTRUCTIVE, read_one
+
+# Reading one control takes a couple of seconds, and mapping is a
+# one-off the user has agreed to - but it should still finish.
+_MAP_BUDGET = 30
 from src.windows.screens import (
     assess,
     dismiss_target,
@@ -28,7 +33,7 @@ _ACTIONS = (
     # more accurate, because choosing the field is done here against the
     # real tree instead of guessed from a list.
     "search", "open_item", "clear_popups", "learn_control", "unnamed",
-    "links",
+    "links", "map",
 )
 
 # What an app's search box tends to be called.
@@ -117,7 +122,7 @@ class UIControlTool(AlfredTool):
         "double_click, right_click, invoke, type, key, get, select, "
         "expand, scroll, menu, exists, wait_for, wait_ready. "
         "LEARNING: unnamed (controls with no name), learn_control "
-        "(remember one by where it sits). "
+        "(remember one by where it sits); map (work the whole window out at once - reads the labels off the screen and remembers every nameless button, ASK THE USER FIRST). "
         "Alfred never types passwords or other credentials."
     )
 
@@ -213,6 +218,7 @@ class UIControlTool(AlfredTool):
         router: Any = None,
         remote: Any = None,
         memory: Any = None,
+        vision: Any = None,
     ) -> None:
         self._uia = session or UiaSession()
         # Where labels learned for unnamed controls are kept, so an app
@@ -224,6 +230,9 @@ class UIControlTool(AlfredTool):
         # via the agent that lives there.
         self._router = router
         self._remote = remote
+        # Reads the labels off a screenshot when an app draws controls
+        # the accessibility layer cannot name.
+        self._vision = vision
 
     # ----------------------------------------------------------------
 
@@ -287,6 +296,50 @@ class UIControlTool(AlfredTool):
             "Relay these names and ask which one they meant, or scroll "
             "and try again."
         )
+
+    def _offer_mapping(self, ui: Any, window: str | None,
+                       pid: int | None) -> dict[str, Any]:
+        """Is this an app Alfred has never worked out, and could?
+
+        An app whose buttons have no names is unusable by name until
+        somebody works it out - and doing that without being asked means
+        clicking unknown controls in someone's software. So it is
+        offered, once, and only when there is really something to learn.
+        """
+        if self._memory is None or not window:
+            return {}
+
+        try:
+            if self._memory.landmarks(window):
+                return {}          # already known
+        except Exception:  # noqa: BLE001
+            return {}
+
+        try:
+            title, blanks = ui.unnamed(window, pid, limit=60)
+        except UiaError:
+            return {}
+
+        if len(blanks) < 4:
+            return {}              # not worth asking about
+
+        return {
+            "needs_user": "offer_mapping",
+            "window": title or window,
+            "question": (
+                f"{title or window} has {len(blanks)} controls with no "
+                "names - I have not worked this app out before. Shall I "
+                "map it now, so I can use it by name from here on?"
+            ),
+            "instruction": (
+                "ASK the user, in those words or better, and wait. This "
+                "is a new app to Alfred and mapping it is their call. If "
+                "they agree, run ui_control map on this window and tell "
+                "them what was learned. If they decline, carry on without "
+                "it - say what you cannot do rather than guessing at "
+                "unnamed buttons."
+            ),
+        }
 
     # ------------------------------------------------ learned landmarks
 
@@ -879,6 +932,117 @@ class UIControlTool(AlfredTool):
                     return {"status": "error", "error": "'menu' needs 'path'."}
                 return {"status": "success", "menu": ui.menu_select(path)}
 
+            if action == "map":
+                if self._memory is None:
+                    return {"status": "error",
+                            "error": "no app memory to map into"}
+                if self._vision is None:
+                    return {"status": "error",
+                            "error": "no vision model available to read labels"}
+
+                title, blanks = ui.unnamed(window, pid, limit=60)
+                if not blanks:
+                    return {
+                        "status": "success",
+                        "window": title,
+                        "learned": [],
+                        "note": (
+                            "nothing here is nameless - this app can be "
+                            "driven by name already"
+                        ),
+                    }
+
+                try:
+                    png, rect = ui.capture_window(window, pid)
+                except UiaError as exc:
+                    return {"status": "error", "error": str(exc)}
+
+                width = max(1, rect[2] - rect[0])
+                height = max(1, rect[3] - rect[1])
+
+                # One control per picture. Reading a whole panel and
+                # then working out which label belongs to which control
+                # drifted every time - the labels came back right and
+                # the correspondence came back wrong, which is the worst
+                # shape for the error to take, because a wrong position
+                # is a wrong click. Cropping one control removes the
+                # question: there is only one thing in the picture.
+                matched: list[dict[str, Any]] = []
+                for control in blanks[:_MAP_BUDGET]:
+                    width, height = control.get("size", [0, 0])
+                    if height > 60 or width > 400:
+                        continue          # a panel or an icon, not a button
+
+                    label = read_one(png, rect, control, self._vision)
+                    if not label:
+                        continue
+
+                    matched.append({
+                        "label": label,
+                        "rel": control["rel"],
+                        "center": control["center"],
+                    })
+
+                if not matched:
+                    return {
+                        "status": "error",
+                        "error": (
+                            f"could not read any labels in {title!r}"
+                        ),
+                        "instruction": (
+                            "Say the screen could not be read, and offer "
+                            "the alternative: the user names a button and "
+                            "Alfred records it with learn_control name= "
+                            "x= y=. Do not guess."
+                        ),
+                    }
+
+                app = window or title
+                learned: list[str] = []
+                refused: list[str] = []
+
+                for entry in matched:
+                    if DESTRUCTIVE.search(entry["label"]):
+                        # A label read off a screen is right about WHAT
+                        # and approximate about WHERE. One row out on
+                        # this list deletes the thing next to the thing
+                        # you meant.
+                        refused.append(entry["label"])
+                        continue
+                    self._memory.note_landmark(
+                        app, entry["label"], entry["rel"][0], entry["rel"][1],
+                        source="read from screen",
+                    )
+                    learned.append(entry["label"])
+
+                return {
+                    "status": "success",
+                    "window": title,
+                    "nameless_controls": len(blanks),
+                    "learned": learned,
+                    "not_learned_destructive": refused,
+                    "unlabelled": len(blanks) - len(matched),
+                    "instruction": (
+                        f"Learned {len(learned)} of {len(blanks)} "
+                        "nameless controls, remembered by position so "
+                        "they survive the window moving. Tell the user "
+                        "which ones, and that open_item now takes those "
+                        "names."
+                        + (
+                            " Deliberately NOT learned, because reading a "
+                            "position off a screen is not exact enough to "
+                            "risk them: "
+                            + ", ".join(refused)
+                            + ". Ask the user to point those out if they "
+                            "are ever needed."
+                            if refused else ""
+                        )
+                        + " If something else matters and was missed, ask "
+                        "what the button at that spot is called and use "
+                        "learn_control."
+                    ),
+                }
+
             if action == "unnamed":
                 title, found = ui.unnamed(window, pid)
                 known = []
@@ -1137,6 +1301,11 @@ class UIControlTool(AlfredTool):
                         target = self._pick_item(controls, wanted)
 
                 if target is None:
+                    offer = self._offer_mapping(ui, window, pid)
+                    if offer:
+                        return {"status": "needs_user", **offer}
+
+                if target is None:
                     nearby = [
                         c.name for c in controls
                         if c.name and c.control_type in (
@@ -1203,6 +1372,10 @@ class UIControlTool(AlfredTool):
                                 out.update(popup["need"].as_dict())
                                 out["window"] = popup["title"]
                                 break
+
+                    if "needs_user" not in out:
+                        out.update(self._offer_mapping(ui, window, pid))
+
                     return out
 
                 # Say what IS on screen. Steam waiting on "Sign in to

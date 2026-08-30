@@ -137,6 +137,9 @@ async def main() -> None:
     ui_control_tool = UIControlTool(
         router=session_router,
         remote=RemoteUia(session_router.client),
+        # Reads the labels off a screenshot when an app draws its own
+        # buttons and names none of them.
+        vision=providers.vision,
     )
 
     # Background task agent: delegate multi-step jobs (persisted so a
