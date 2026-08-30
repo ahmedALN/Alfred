@@ -280,7 +280,10 @@ class AppMemory:
             ).fetchall()
             notes = self._conn.execute(
                 "SELECT note, kind, uses FROM app_notes WHERE app_key = ? "
-                "ORDER BY uses DESC, id DESC LIMIT 6",
+                "ORDER BY uses DESC, id DESC LIMIT 14",   # what an app taught
+                # us is the most useful thing in here - six was
+                # not enough to describe one screen, let alone an
+                # app with a toolbar, a panel and a sub-window.
                 (key,),
             ).fetchall()
         return {
@@ -307,6 +310,17 @@ class AppMemory:
             by_action.setdefault(c["action"], []).append(label)
         for action, names in by_action.items():
             lines.append(f"  {action}: " + ", ".join(names[:8]))
+
+        marks = self.landmarks(name)
+        if marks:
+            # Without this the planner has no idea these names
+            # exist - they are not in the app's tree, only in
+            # what we learned about it.
+            lines.append(
+                "  buttons with no name in the app, usable by "
+                "name via ui_control open_item: "
+                + ", ".join(m["label"] for m in marks[:20])
+            )
 
         for n in data["notes"]:
             lines.append(f"  note: {n['note']}")

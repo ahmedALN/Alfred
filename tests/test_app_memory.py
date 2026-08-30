@@ -245,3 +245,36 @@ def test_landmarks_come_back_in_screen_order(tmp_path):
 
     assert [x["label"] for x in m.landmarks("MultiMC")] == ["Launch", "Delete"]
     m.close()
+
+
+def test_learned_buttons_appear_in_the_profile(tmp_path):
+    """The planner has no other way to know these names exist - they are
+    not in the app's tree, only in what was learned about it."""
+    m = _mem(tmp_path)
+    m.note_open("MultiMC")
+    m.note_landmark("MultiMC", "Launch", 0.9, 0.19)
+    m.note_landmark("MultiMC", "Delete", 0.9, 0.42)
+
+    text = m.profile("MultiMC")
+    assert "Launch" in text and "Delete" in text
+    assert "no name in the app" in text
+    m.close()
+
+
+def test_an_app_with_nothing_learned_says_nothing_about_it(tmp_path):
+    m = _mem(tmp_path)
+    m.note_open("Notepad")
+
+    assert "no name in the app" not in m.profile("Notepad")
+    m.close()
+
+
+def test_an_app_can_hold_enough_notes_to_describe_itself(tmp_path):
+    """Six was not enough for an app with a toolbar, a panel and a
+    sub-window."""
+    m = _mem(tmp_path)
+    for i in range(14):
+        m.note("MultiMC", f"a distinct thing worth remembering number {i}")
+
+    assert len(m.app("MultiMC")["notes"]) >= 12
+    m.close()

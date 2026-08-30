@@ -346,6 +346,10 @@ class UIControlTool(AlfredTool):
         y = int(top + (bottom - top) * float(found["rel_y"]))
 
         try:
+            # Bring THIS app forward first. A landmark is a screen
+            # position, so whatever is on top receives the click - and
+            # after opening a folder the window in front is Explorer.
+            ui.focus_window(window, pid)
             ui.click_point(x, y)
         except UiaError:
             return None
