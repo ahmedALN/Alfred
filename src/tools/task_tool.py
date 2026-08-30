@@ -44,11 +44,19 @@ class RunTaskTool(AlfredTool):
         if not isinstance(goal, str) or not goal.strip():
             return {"status": "error", "error": "'goal' must be a non-empty string."}
 
-        task_id = self._queue.submit(goal, source="voice")
+        # Set by the voice session when the request said "without
+        # disturbing me". It cannot be recovered from the goal, because
+        # the model rewrites the goal in its own words and drops the
+        # phrase on the way.
+        isolated = arguments.get("_isolated")
+        isolated = True if isolated is True else None
+
+        task_id = self._queue.submit(goal, source="voice", isolated=isolated)
 
         return {
             "status": "started",
             "task_id": task_id,
+            **({"running_on": "alfred's private desktop"} if isolated else {}),
             "note": (
                 "Working on it in the background. Tell the user you've "
                 "started and will report back; don't wait. If a step is "

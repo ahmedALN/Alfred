@@ -49,6 +49,16 @@ internal sealed class UiaService
     // Alfred. Every action gets a ceiling and returns a clean error.
     private const int DefaultActionTimeoutMs = 25000;
 
+    // How deep to walk unless the caller says otherwise.
+    //
+    // This was 14, to stop a browser's enormous tree hanging the call.
+    // The node budget is what actually bounds that; the depth limit just
+    // silently truncated. On a YouTube channel page, depth 14 found 18
+    // controls and NOT ONE video link - depth 25 found 173 controls and
+    // all 30 videos, in the same 0.2s. Alfred could not click what it
+    // could not see.
+    private const int DefaultMaxDepth = 30;
+
     // Controls worth showing a planner. Mirrors _ACTIONABLE in uia.py.
     private static readonly HashSet<string> Actionable = new(
         StringComparer.Ordinal)
@@ -571,7 +581,7 @@ internal sealed class UiaService
         int? pid = ReadInt(root, "pid");
         string? contains = ReadString(root, "contains");
         int limit = ReadInt(root, "limit") ?? 80;
-        int maxDepth = ReadInt(root, "max_depth") ?? 14;
+        int maxDepth = ReadInt(root, "max_depth") ?? DefaultMaxDepth;
 
         AutomationElement window = ResolveWindow(title, pid);
 
@@ -808,7 +818,7 @@ internal sealed class UiaService
             AutomationElement window = ResolveWindow(_specTitle, _specPid);
             _window = window;
             _windowTitle = SafeName(window);
-            BuildRecords(Descendants(window, 14, 4000), null, 80);
+            BuildRecords(Descendants(window, DefaultMaxDepth, 4000), null, 80);
         }
         catch (UiaFailure)
         {
@@ -830,7 +840,7 @@ internal sealed class UiaService
     {
         AutomationElement? el = ResolveCached(reference, name);
 
-        if (el is not null)
+        if (el is not null && StillMatches(el, name))
         {
             return el;
         }
@@ -838,7 +848,7 @@ internal sealed class UiaService
         RereadLastWindow();
         el = ResolveCached(reference, name);
 
-        if (el is not null)
+        if (el is not null && StillMatches(el, name))
         {
             return el;
         }
@@ -848,6 +858,49 @@ internal sealed class UiaService
             + $"name={(name is null ? "null" : "'" + name + "'")} - run "
             + "'tree' first, or the control may not be on screen yet"
         );
+    }
+
+    /// <summary>
+    /// Is this element still the one that was asked for?
+    ///
+    /// Cached elements go stale on a live page - a tree read a second
+    /// ago has been rebuilt underneath, and the handle that was "Deji"
+    /// now points at something called "Unwatched". Clicking it anyway
+    /// and reporting success is worse than failing: the user is told the
+    /// right thing happened while the wrong thing did.
+    /// </summary>
+    private static bool StillMatches(AutomationElement el, string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return true;
+        }
+
+        string want = name!.Trim().ToLowerInvariant();
+
+        try
+        {
+            string live = (el.Current.Name ?? string.Empty)
+                .Trim()
+                .ToLowerInvariant();
+
+            if (live.Contains(want, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            // The label may be empty or generic while the id still
+            // identifies it.
+            string id = (el.Current.AutomationId ?? string.Empty)
+                .Trim()
+                .ToLowerInvariant();
+
+            return id.Length > 0 && id.Contains(want, StringComparison.Ordinal);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private AutomationElement? ResolveCached(int? reference, string? name)
@@ -1763,7 +1816,7 @@ internal sealed class UiaService
 
         string want = name.Trim().ToLowerInvariant();
 
-        foreach (AutomationElement el in Descendants(window, 14, 4000))
+        foreach (AutomationElement el in Descendants(window, DefaultMaxDepth, 4000))
         {
             try
             {
@@ -1862,7 +1915,7 @@ internal sealed class UiaService
                 _specPid = pid;
                 _windowTitle = SafeName(el);
 
-                BuildRecords(Descendants(el, 14, 4000), null, 80);
+                BuildRecords(Descendants(el, DefaultMaxDepth, 4000), null, 80);
 
                 if (_controls.Count >= minimum)
                 {

@@ -67,8 +67,9 @@ class UIControlTool(AlfredTool):
         "get ref=|name= (read a control's text); select "
         "item= ref=|name= (combo box / list / tab); expand ref=|name=; "
         "scroll direction= [amount=] ; menu path='File->Save As'; "
-        "wait_ready window= [timeout=] (wait for a just-launched app to "
-        "become usable); wait_for name= [timeout=]; exists name=. "
+        "wait_ready window= [timeout=] [min_controls=] (wait for a "
+        "just-launched app or a loading web page to become usable - on a "
+        "website pass min_controls=40 or you will read it half-built); wait_for name= [timeout=]; exists name=. "
         "Prefer this over desktop_control - it is exact. Alfred refuses to "
         "type into password fields."
     )
@@ -117,6 +118,26 @@ class UIControlTool(AlfredTool):
                 },
                 "amount": {"type": "integer"},
                 "timeout": {"type": "number"},
+                "limit": {
+                    "type": "integer",
+                    "description": (
+                        "Max controls for 'tree' (default 80, up to 500). "
+                        "Raise it on a busy page - a website's real "
+                        "content sits after its navigation."
+                    ),
+                },
+                "max_depth": {
+                    "type": "integer",
+                    "description": "How deep to walk, for 'tree'. Default 30.",
+                },
+                "min_controls": {
+                    "type": "integer",
+                    "description": (
+                        "For 'wait_ready': how many controls count as "
+                        "loaded. A web page reports a handful while it is "
+                        "still building - ask for 40+ before reading it."
+                    ),
+                },
             },
             "required": ["action"],
         }
@@ -199,8 +220,17 @@ class UIControlTool(AlfredTool):
                 return {"status": "success", "focused": title or window}
 
             if action == "tree":
+                # A rich page has hundreds of controls and the
+                # interesting ones are rarely in the first 80: on a
+                # YouTube channel the videos start around 80, so the
+                # default cut the list off just before the content.
+                limit = _as_int(arguments.get("limit")) or 80
+                depth = _as_int(arguments.get("max_depth"))
                 title, controls = ui.tree(
-                    window, pid, contains=arguments.get("contains"),
+                    window, pid,
+                    limit=max(1, min(limit, 500)),
+                    contains=arguments.get("contains"),
+                    **({"max_depth": depth} if depth else {}),
                 )
                 return {
                     "status": "success",
@@ -334,7 +364,15 @@ class UIControlTool(AlfredTool):
                 return {"status": "success", "found": found}
 
             if action == "wait_ready":
-                ready = ui.wait_ready(window, pid, timeout or 25.0)
+                # A website's accessibility tree fills in lazily: a
+                # YouTube channel reports 18 controls one moment and 170
+                # the next. Waiting for a real number of controls is the
+                # difference between reading a half-built page and the
+                # actual content.
+                minimum = _as_int(arguments.get("min_controls")) or 3
+                ready = ui.wait_ready(
+                    window, pid, timeout or 25.0, min_controls=minimum,
+                )
                 return {
                     "status": "success" if ready else "error",
                     "ready": ready,

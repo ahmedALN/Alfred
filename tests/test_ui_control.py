@@ -514,3 +514,62 @@ def test_a_password_field_is_still_refused_before_any_focus_happens():
 
     assert out["status"] == "refused"
     assert t._uia.calls == []
+
+
+# --------------------------------------------- reading a busy page
+
+
+class _DeepUia(FakeUia):
+    """Records the reach of each tree read."""
+
+    def tree(self, title_re=None, pid=None, limit=80, max_depth=30,
+             contains=None):
+        self.calls.append(("tree", title_re, limit, max_depth))
+        return "YouTube", list(self._controls)[:limit]
+
+    def wait_ready(self, title_re=None, pid=None, timeout=25.0,
+                   min_controls=3):
+        self.calls.append(("wait_ready", title_re, timeout, min_controls))
+        return len(self._controls) >= min_controls
+
+
+def test_a_busy_page_can_be_read_past_the_default_cut_off():
+    """A website's first 80 controls are its navigation - on a YouTube
+    channel the videos start around 80, so the default stopped just
+    before the content."""
+    t = UIControlTool(_DeepUia())
+    t.execute({"action": "tree", "window": "YouTube", "limit": 300})
+
+    assert ("tree", "YouTube", 300, 30) in t._uia.calls
+
+
+def test_the_read_limit_is_capped_so_a_huge_page_cannot_run_away():
+    t = UIControlTool(_DeepUia())
+    t.execute({"action": "tree", "window": "YouTube", "limit": 99999})
+
+    assert t._uia.calls[0][2] == 500
+
+
+def test_tree_depth_can_be_raised_for_a_deeply_nested_page():
+    t = UIControlTool(_DeepUia())
+    t.execute({"action": "tree", "window": "YouTube", "max_depth": 45})
+
+    assert t._uia.calls[0][3] == 45
+
+
+def test_waiting_can_require_a_real_number_of_controls():
+    """A loading page reports a handful of controls; without this,
+    wait_ready returns the moment the window exists."""
+    t = UIControlTool(_DeepUia())
+    t.execute({
+        "action": "wait_ready", "window": "YouTube", "min_controls": 40,
+    })
+
+    assert t._uia.calls[0] == ("wait_ready", "YouTube", 25.0, 40)
+
+
+def test_waiting_still_defaults_to_just_being_open():
+    t = UIControlTool(_DeepUia())
+    t.execute({"action": "wait_ready", "window": "Notepad"})
+
+    assert t._uia.calls[0][3] == 3

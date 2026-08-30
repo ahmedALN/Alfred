@@ -92,7 +92,7 @@ class RemoteUia:
         title_re: str | None = None,
         pid: int | None = None,
         limit: int = 80,
-        max_depth: int = 14,
+        max_depth: int = 30,
         contains: str | None = None,
     ) -> tuple[str, list[Control]]:
         data = self._call(

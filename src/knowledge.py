@@ -80,9 +80,51 @@ WINDOWS_PLAYBOOK: list[tuple[str, str]] = [
     ("system", "Launchers (Steam, Epic, Battle.net, Xbox) are ordinary "
      "apps with real accessibility trees even when the games they launch "
      "are not - do the launcher part with ui_control."),
-    ("system", "A web browser: ui_control tree, type the URL or query into "
-     "the address bar (often named 'Address and search bar'), press "
-     "Enter with ui_control key '{ENTER}'."),
+    # --- the web ------------------------------------------------------
+    ("correction", "To reach a specific web page, pass the URL straight to "
+     "open_app: open_app app='https://www.youtube.com/@Deji/videos'. It "
+     "opens in the default browser, already on that page. Do NOT open a "
+     "browser and then try to drive its address bar - that is several "
+     "fragile steps to arrive where one reliable step lands you."),
+    ("correction", "Never type into a browser without naming the field. "
+     "ui_control type with only a window types into whatever has focus, "
+     "which in a browser is the page, not the search box. Read the tree, "
+     "find the field, and pass into=<ref>."),
+    ("system", "If you really must use the address bar, focus it with "
+     "ui_control key '^l' first, then type, then '{ENTER}'. Ctrl+L works "
+     "in every mainstream browser."),
+    ("correction", "A web page's accessibility tree fills in AFTER the "
+     "window appears - a YouTube channel reports 18 controls one moment "
+     "and 173 the next. Always ui_control wait_ready with "
+     "min_controls=40 before reading a page, or you will read it "
+     "half-built and conclude the content is not there."),
+    ("correction", "On a website, ui_control tree with the default "
+     "limit=80 stops before the content: a site's first 80 controls are "
+     "its navigation. Pass limit=300 (or contains=) when reading a page."),
+    ("system", "A YouTube channel's uploads live at "
+     "https://www.youtube.com/@<handle>/videos, newest first. To play the "
+     "latest: open_app that URL, wait_ready min_controls=40, tree "
+     "limit=300, then click the FIRST Hyperlink whose name is long (a "
+     "video title, usually ending '<n> minutes') - skip 'Go to channel "
+     "...', 'Home', 'Shorts' and other navigation."),
+    ("system", "A YouTube video page exposes real player controls: "
+     "'Play', 'Pause (k)', 'Mute (m)', 'Full screen (f)', a 'Volume' "
+     "slider. After opening a video, confirm it is playing by finding "
+     "'Pause' - and if only 'Play' responds, click it. The window title "
+     "becomes the video title, which is how you report what started."),
+    ("correction", "If a page's tree stays tiny (under ~20 controls) even "
+     "after wait_ready, that browser is not exposing its content to the "
+     "accessibility layer. Do not keep guessing at coordinates - open the "
+     "same URL in Chrome instead (powershell Start-Process chrome.exe "
+     "-ArgumentList '<url>'), whose tree is reliable."),
+    ("correction", "Searching a site by typing its name into a search box "
+     "is the slow path. Most sites take a query in the URL - YouTube: "
+     "https://www.youtube.com/results?search_query=<terms>. Build the URL "
+     "and open_app it."),
+    ("correction", "'Open/play the latest video' is not finished when the "
+     "channel page is showing. Click the video itself, then confirm - the "
+     "window title becomes the video title, and a Pause control appears "
+     "once it is playing. Report what actually started playing."),
     ("system", "File Explorer: press Ctrl+L or click the address bar to "
      "type a path directly, then Enter. Ctrl+A selects all items in the "
      "current folder."),

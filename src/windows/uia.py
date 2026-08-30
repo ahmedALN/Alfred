@@ -18,6 +18,15 @@ _NEEDS_NAME = {"Group", "List", "Menu", "Tab", "Text"}
 
 _MENU_SEPARATOR = re.compile(r"\s*(?:->|>)\s*")
 
+# How deep to walk a control tree unless told otherwise.
+#
+# This was 14, to stop a browser's enormous tree hanging the call. The
+# node budget is what actually bounds that; the depth limit just
+# silently truncated. On a YouTube channel page depth 14 found 18
+# controls and NOT ONE video link - depth 25 found all 30 videos in the
+# same 0.2s. Alfred could not click what it could not see.
+_DEFAULT_MAX_DEPTH = 30
+
 _REGEX_META = re.compile(r"[.^$*+?()\[\]{}|\\]")
 
 
@@ -196,7 +205,7 @@ class UiaSession:
         title_re: str | None = None,
         pid: int | None = None,
         limit: int = 80,
-        max_depth: int = 14,
+        max_depth: int = _DEFAULT_MAX_DEPTH,
         contains: str | None = None,
     ) -> tuple[str, list[Control]]:
         """Read a window's actionable controls.
@@ -283,7 +292,7 @@ class UiaSession:
 
     def _resolve(self, ref: int | None = None, name: str | None = None):
         el = self._resolve_cached(ref, name)
-        if el is not None:
+        if el is not None and self._still_matches(el, name):
             return el
 
         # Stale cache (the UI moved on) - re-read the last window once.
@@ -293,13 +302,50 @@ class UiaSession:
             except UiaError:
                 pass
             el = self._resolve_cached(ref, name)
-            if el is not None:
+            if el is not None and self._still_matches(el, name):
                 return el
 
         raise UiaError(
             f"no control matches ref={ref} name={name!r} - run 'tree' first, "
             "or the control may not be on screen yet"
         )
+
+    @staticmethod
+    def _still_matches(el, name: str | None) -> bool:
+        """Is this element still the one that was asked for?
+
+        Cached elements go stale on a live page - a YouTube tree read a
+        second ago has been rebuilt underneath, and the handle that was
+        "Deji" now points at something called "Unwatched". Clicking it
+        anyway and reporting success is worse than failing: the user is
+        told the right thing happened while the wrong thing did.
+        """
+        if not name:
+            return True
+
+        want = name.strip().lower()
+        if not want:
+            return True
+
+        try:
+            live = (el.window_text() or "").strip().lower()
+        except Exception:  # noqa: BLE001
+            return False
+
+        if want in live:
+            return True
+
+        # The label may be empty or generic while the id still identifies
+        # it - a link whose accessible name is carried by its id.
+        try:
+            info = el.element_info
+            aid = (getattr(info, "automation_id", "") or "").strip().lower()
+            if aid and want in aid:
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+
+        return False
 
     def _resolve_cached(self, ref: int | None, name: str | None):
         if ref is not None and ref in self._by_ref:

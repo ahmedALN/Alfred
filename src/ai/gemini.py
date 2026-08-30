@@ -136,6 +136,7 @@ class AlfredLiveSession:
         self._isolated_desktop: Any = None
         self._router: Any = None
         self._turn_isolated = False
+        self._handed_to_task = False
 
         # Turn-time memory recall: facts already shown this session, and
         # a simple gap so we surface at most one memory block per window.
@@ -1054,12 +1055,27 @@ class AlfredLiveSession:
         "open_app", "ui_control", "desktop_control", "computer_screenshot",
     }
 
-    async def _apply_isolation(self, tool_name: str) -> dict[str, Any] | None:
+    async def _apply_isolation(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
         """Point the desktop tools at Alfred's own session when asked.
 
         Returns a tool response to send INSTEAD of running the tool, or
         None to let it proceed.
         """
+        # Handing the work to the background agent hands isolation with
+        # it. The model composes run_task's goal in its own words and
+        # drops the phrase while doing so, so re-reading the goal finds
+        # nothing - which is how "without disturbing me" ended up
+        # opening Chrome on the user's screen.
+        if tool_name == "run_task" and self._turn_isolated:
+            if arguments is not None:
+                arguments["_isolated"] = True
+            self._handed_to_task = True
+            return None
+
         if tool_name not in self._DESKTOP_TOOLS:
             return None
         if not self._turn_isolated:
@@ -1096,6 +1112,13 @@ class AlfredLiveSession:
         if not self._turn_isolated:
             return
         self._turn_isolated = False
+
+        # A background task now owns the private desktop and tidies up
+        # after itself. Cleaning up here would close the apps it is in
+        # the middle of using.
+        if self._handed_to_task:
+            self._handed_to_task = False
+            return
 
         if self._router is not None:
             self._router.use_users_desktop()
@@ -1141,7 +1164,7 @@ class AlfredLiveSession:
             # it so BEFORE the tool runs. Enforced here rather than relying
             # on the model to route through run_task, because it answers
             # simple requests inline.
-            isolation = await self._apply_isolation(call.name)
+            isolation = await self._apply_isolation(call.name, arguments)
             if isolation is not None:
                 function_responses.append(
                     types.FunctionResponse(

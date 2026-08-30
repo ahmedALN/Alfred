@@ -177,3 +177,39 @@ def test_open_app_uses_the_normal_launcher_otherwise():
 
     assert launcher.opened == ["Notepad"]
     assert d.launched == []
+
+
+# ------------------------------------------------- handing off to a task
+
+
+def test_isolation_travels_with_a_backgrounded_task():
+    """The model rewrites run_task's goal in its own words and drops the
+    phrase while doing it, so re-reading the goal finds nothing - which
+    is how "without disturbing me" opened Chrome on the user's screen."""
+    s = _session()
+    arguments = {"goal": "research Deji's channel and open his latest video"}
+
+    assert asyncio.run(s._apply_isolation("run_task", arguments)) is None
+    assert arguments["_isolated"] is True
+
+
+def test_an_ordinary_task_is_not_marked_isolated():
+    s = _session(isolated_request=False)
+    arguments = {"goal": "tidy my downloads"}
+
+    asyncio.run(s._apply_isolation("run_task", arguments))
+
+    assert "_isolated" not in arguments
+
+
+def test_the_turn_does_not_tidy_up_under_a_running_task():
+    """The task owns the private desktop now and cleans up after itself;
+    cleaning up here would close the apps it is still using."""
+    d, r = FakeDesktop(), FakeRouter()
+    s = _session(desktop=d, router=r)
+    asyncio.run(s._apply_isolation("run_task", {"goal": "research"}))
+
+    s._end_isolated_turn()
+
+    assert d.cleaned == 0
+    assert s._turn_isolated is False
