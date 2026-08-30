@@ -982,3 +982,20 @@ def test_a_window_titled_more_fully_than_the_app_still_finds_them():
     )
 
     assert out["via"] == "learned position"
+
+
+def test_a_window_showing_only_its_frame_counts_as_asleep():
+    """A dormant Chromium app still reports its window chrome. Counting
+    raw elements made that look healthy, so the wake never fired and
+    Steam came back empty in under a second."""
+    from src.windows.uia import _actionable_count
+
+    class _El:
+        def __init__(self, kind):
+            self.element_info = type("i", (), {"control_type": kind})()
+
+    frame = [_El("TitleBar"), _El("Pane"), _El("Pane"), _El("Window")]
+    real = [_El("Button"), _El("Edit"), _El("ListItem"), _El("Button")]
+
+    assert _actionable_count(frame) == 0
+    assert _actionable_count(real) == 4

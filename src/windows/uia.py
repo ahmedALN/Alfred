@@ -348,7 +348,12 @@ class UiaSession:
         # build the tree, so this waits rather than deciding after one
         # try that the window is empty.
         for pause in (0.4, 1.5, 3.0):
-            if len(descendants) >= 4:
+            # Count controls worth having, not raw elements. A dormant
+            # Steam still reports its window frame, so a raw count of
+            # four looked healthy while the tree held nothing usable -
+            # and the wake never fired. The agent-side walk has always
+            # counted it this way.
+            if _actionable_count(descendants) >= 4:
                 break
             self._wake_accessibility(win)
             self.focus(win)
@@ -880,6 +885,18 @@ class UiaSession:
 # ==================================================================
 # helpers
 # ==================================================================
+
+
+def _actionable_count(descendants) -> int:
+    """How many of these are controls a caller could actually use."""
+    total = 0
+    for el in descendants:
+        try:
+            if el.element_info.control_type in _ACTIONABLE:
+                total += 1
+        except Exception:  # noqa: BLE001
+            continue
+    return total
 
 
 def _label(el) -> str:
