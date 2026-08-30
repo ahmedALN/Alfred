@@ -158,11 +158,17 @@ class UiaSession:
                 if not title:
                     continue
                 info = w.element_info
-                out.append({
+                entry = {
                     "title": title[:90],
                     "pid": getattr(info, "process_id", None),
                     "class": getattr(info, "class_name", "") or "",
-                })
+                }
+                try:
+                    r = w.rectangle()
+                    entry["rect"] = [r.left, r.top, r.right, r.bottom]
+                except Exception:  # noqa: BLE001
+                    pass
+                out.append(entry)
                 if len(out) >= limit:
                     break
             except Exception:  # noqa: BLE001
@@ -362,6 +368,70 @@ class UiaSession:
                 continue
 
         return title, list(self._controls)
+
+    def unnamed(self, title_re: str | None = None, pid: int | None = None,
+                limit: int = 40) -> tuple[str, list[dict[str, Any]]]:
+        """Controls that are visible but have no name.
+
+        A Qt app or a game launcher draws its buttons without labels, so
+        a search by name finds nothing while the user is looking right
+        at them. These cannot be identified from the tree - only located
+        - which is enough to click one and ask what it did.
+        """
+        win = self.window(title_re, pid)
+        self._last_window = win
+        self._last_spec = (title_re, pid)
+
+        try:
+            wr = win.rectangle()
+        except Exception as exc:  # noqa: BLE001
+            raise UiaError(f"could not measure the window: {exc}") from exc
+
+        width = max(1, wr.width())
+        height = max(1, wr.height())
+        found: list[dict[str, Any]] = []
+
+        for el in self._descendants(win, 30):
+            try:
+                if (el.window_text() or "").strip():
+                    continue
+                info = el.element_info
+                if (getattr(info, "automation_id", "") or "").strip():
+                    continue
+                kind = info.control_type
+                if kind in ("Pane", "Group", "Window", "TitleBar", "Thumb"):
+                    continue
+
+                r = el.rectangle()
+                if r.width() < 16 or r.height() < 10:
+                    continue
+                if r.width() > width * 0.9 and r.height() > height * 0.9:
+                    continue
+
+                cx = (r.left + r.right) // 2
+                cy = (r.top + r.bottom) // 2
+                found.append({
+                    "type": kind,
+                    "center": [cx, cy],
+                    "rel": [round((cx - wr.left) / width, 4),
+                            round((cy - wr.top) / height, 4)],
+                    "size": [r.width(), r.height()],
+                })
+                if len(found) >= limit:
+                    break
+            except Exception:  # noqa: BLE001
+                continue
+
+        found.sort(key=lambda c: (c["center"][1], c["center"][0]))
+        for i, c in enumerate(found):
+            c["index"] = i
+
+        title = ""
+        try:
+            title = win.window_text() or ""
+        except Exception:  # noqa: BLE001
+            pass
+        return title, found
 
     def find(self, query: str, limit: int = 20) -> list[Control]:
         """Search the CURRENT window for controls mentioning ``query``.
@@ -565,6 +635,24 @@ class UiaSession:
             _escape(text), pause=0.01,
             with_spaces=True, with_tabs=True, with_newlines=True,
         )
+
+    def click_point(self, x: int, y: int, double: bool = False) -> None:
+        """Click a screen position.
+
+        The last resort for a control the accessibility layer will not
+        name - a learned landmark rather than a guess.
+        """
+        from pywinauto import mouse
+
+        if self._last_window is not None:
+            self._raise_owner(self._last_window)
+
+        mouse.move(coords=(int(x), int(y)))
+        time.sleep(0.06)
+        mouse.click(coords=(int(x), int(y)))
+        if double:
+            time.sleep(0.06)
+            mouse.click(coords=(int(x), int(y)))
 
     def send_key(self, keys: str) -> None:
         from pywinauto.keyboard import send_keys

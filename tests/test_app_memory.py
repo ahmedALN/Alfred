@@ -184,3 +184,64 @@ def test_learns_the_window_title_from_a_ui_control_result(tmp_path):
     assert m.learn_from_steps(steps) >= 1
     assert m.app("notepad")["window_title"] == "Untitled - Notepad"
     m.close()
+
+
+# ------------------------------------------ controls with no name
+
+
+def test_a_landmark_is_remembered_as_a_place_in_the_window(tmp_path):
+    """MultiMC's Launch button has no name at any depth - only a
+    position. Stored as a fraction so it survives the window moving."""
+    m = _mem(tmp_path)
+    m.note_landmark("MultiMC", "Launch", 0.904, 0.197)
+
+    found = m.find_landmark("MultiMC", "Launch")
+    assert found["rel_x"] == 0.904 and found["rel_y"] == 0.197
+    m.close()
+
+
+def test_an_exact_label_beats_a_longer_one(tmp_path):
+    m = _mem(tmp_path)
+    m.note_landmark("MultiMC", "Launch", 0.9, 0.197)
+    m.note_landmark("MultiMC", "Launch Offline", 0.9, 0.215)
+
+    assert m.find_landmark("MultiMC", "Launch")["label"] == "Launch"
+    assert m.find_landmark("MultiMC", "offline")["label"] == "Launch Offline"
+    m.close()
+
+
+def test_relearning_moves_the_landmark_rather_than_duplicating_it(tmp_path):
+    m = _mem(tmp_path)
+    m.note_landmark("MultiMC", "Launch", 0.9, 0.19)
+    m.note_landmark("MultiMC", "Launch", 0.9, 0.42)
+
+    assert len(m.landmarks("MultiMC")) == 1
+    assert m.find_landmark("MultiMC", "Launch")["rel_y"] == 0.42
+    m.close()
+
+
+def test_a_position_outside_the_window_is_refused(tmp_path):
+    """A landmark off the window would click who knows what."""
+    m = _mem(tmp_path)
+    m.note_landmark("MultiMC", "Nowhere", 1.4, -0.2)
+
+    assert m.landmarks("MultiMC") == []
+    m.close()
+
+
+def test_an_unknown_label_finds_nothing(tmp_path):
+    m = _mem(tmp_path)
+    m.note_landmark("MultiMC", "Launch", 0.9, 0.19)
+
+    assert m.find_landmark("MultiMC", "banana") is None
+    assert m.find_landmark("Steam", "Launch") is None
+    m.close()
+
+
+def test_landmarks_come_back_in_screen_order(tmp_path):
+    m = _mem(tmp_path)
+    m.note_landmark("MultiMC", "Delete", 0.9, 0.42)
+    m.note_landmark("MultiMC", "Launch", 0.9, 0.19)
+
+    assert [x["label"] for x in m.landmarks("MultiMC")] == ["Launch", "Delete"]
+    m.close()

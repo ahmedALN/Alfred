@@ -27,7 +27,7 @@ _ACTIONS = (
     # control. One call is both faster (one model turn, not five) and
     # more accurate, because choosing the field is done here against the
     # real tree instead of guessed from a list.
-    "search", "open_item", "clear_popups",
+    "search", "open_item", "clear_popups", "learn_control", "unnamed",
 )
 
 # What an app's search box tends to be called.
@@ -123,7 +123,11 @@ class UIControlTool(AlfredTool):
         "windows sitting over the app, and report anything that "
         "needs the user instead of clicking past it - search and "
         "open_item do this for you when they cannot find their "
-        "target). "
+        "target); learn_control window= name= x= y= (remember an "
+        "unlabelled button by where it sits, so open_item can use it "
+        "by name from then on); unnamed window= (list the controls that "
+        "have no name, with their positions, so they can be probed "
+        "and learned). "
         "Prefer this over desktop_control - it is exact. Alfred refuses to "
         "type into password fields."
     )
@@ -184,6 +188,17 @@ class UIControlTool(AlfredTool):
                     "type": "integer",
                     "description": "How deep to walk, for 'tree'. Default 30.",
                 },
+                "x": {
+                    "type": "integer",
+                    "description": (
+                        "Screen x, for clicking or learning an "
+                        "unlabelled control by position."
+                    ),
+                },
+                "y": {
+                    "type": "integer",
+                    "description": "Screen y, paired with x.",
+                },
                 "submit": {
                     "type": "boolean",
                     "description": (
@@ -208,8 +223,12 @@ class UIControlTool(AlfredTool):
         session: UiaSession | None = None,
         router: Any = None,
         remote: Any = None,
+        memory: Any = None,
     ) -> None:
         self._uia = session or UiaSession()
+        # Where labels learned for unnamed controls are kept, so an app
+        # only has to be worked out once.
+        self._memory = memory
         # UI Automation is session-scoped, so the local backend can only
         # ever see the user's screen. When Alfred is working on its own
         # desktop the identical calls have to run inside that session,
@@ -279,6 +298,64 @@ class UIControlTool(AlfredTool):
             "Relay these names and ask which one they meant, or scroll "
             "and try again."
         )
+
+    # ------------------------------------------------ learned landmarks
+
+    @staticmethod
+    def _window_rect(ui: Any, window: str | None,
+                     pid: int | None) -> list[int] | None:
+        try:
+            listing = ui.windows()
+        except UiaError:
+            return None
+
+        best, best_score = None, 0
+        for entry in listing:
+            if pid is not None and entry.get("pid") != pid:
+                continue
+            score = (
+                _title_score(entry.get("title", ""), window) if window else 1
+            )
+            if score > best_score and entry.get("rect"):
+                best, best_score = entry, score
+
+        return best.get("rect") if best else None
+
+    def _click_landmark(self, ui: Any, window: str | None, pid: int | None,
+                        wanted: str) -> dict[str, Any] | None:
+        """Click a control this app taught us about, by where it sits.
+
+        Some controls have no name at any depth - MultiMC's Launch
+        button is one of fifteen unnamed Custom controls. Their position
+        within the window is stable even when their identity is not, so
+        a label learned once keeps working.
+        """
+        if self._memory is None or not window:
+            return None
+
+        found = self._memory.find_landmark(window, wanted)
+        if found is None:
+            return None
+
+        rect = self._window_rect(ui, window, pid)
+        if not rect:
+            return None
+
+        left, top, right, bottom = rect
+        x = int(left + (right - left) * float(found["rel_x"]))
+        y = int(top + (bottom - top) * float(found["rel_y"]))
+
+        try:
+            ui.click_point(x, y)
+        except UiaError:
+            return None
+
+        return {
+            "status": "success",
+            "opened": found["label"],
+            "via": "learned position",
+            "at": [x, y],
+        }
 
     # ------------------------------------------------- what is in the way
 
@@ -673,6 +750,14 @@ class UIControlTool(AlfredTool):
                 }
 
             if action in ("click", "double_click", "right_click"):
+                at_x = _as_int(arguments.get("x"))
+                at_y = _as_int(arguments.get("y"))
+                if at_x is not None and at_y is not None:
+                    ui.click_point(
+                        at_x, at_y, double=(action == "double_click")
+                    )
+                    return {"status": "success", "clicked_at": [at_x, at_y]}
+
                 out = ui.click(
                     ref, name,
                     double=(action == "double_click"),
@@ -770,6 +855,84 @@ class UIControlTool(AlfredTool):
                 if not isinstance(path, str) or not path:
                     return {"status": "error", "error": "'menu' needs 'path'."}
                 return {"status": "success", "menu": ui.menu_select(path)}
+
+            if action == "unnamed":
+                title, found = ui.unnamed(window, pid)
+                known = []
+                if self._memory is not None and window:
+                    known = [
+                        row["label"] for row in self._memory.landmarks(window)
+                    ]
+                return {
+                    "status": "success",
+                    "window": title,
+                    "count": len(found),
+                    "controls": found,
+                    "already_learned": known,
+                    "instruction": (
+                        "These have no name, only a position - the "
+                        "accessibility layer cannot say what they do. To "
+                        "find out: click one with click x= y=, see what "
+                        "changed (a new window, a folder opening), and "
+                        "record it with learn_control name= x= y=. If "
+                        "nothing observable happened, ASK THE USER what "
+                        "it did and record their answer. Never click one "
+                        "blind while doing a real task - one of them is "
+                        "usually Delete."
+                    ),
+                }
+
+            if action == "learn_control":
+                label = arguments.get("name") or arguments.get("item")
+                if not isinstance(label, str) or not label.strip():
+                    return {"status": "error",
+                            "error": "'learn_control' needs 'name'."}
+                if self._memory is None:
+                    return {"status": "error",
+                            "error": "no app memory to learn into"}
+
+                rect = self._window_rect(ui, window, pid)
+                if not rect:
+                    return {"status": "error",
+                            "error": f"could not find the window {window!r}"}
+
+                x = _as_int(arguments.get("x"))
+                y = _as_int(arguments.get("y"))
+
+                if x is None or y is None:
+                    point = _as_int(arguments.get("ref"))
+                    if point is None:
+                        return {
+                            "status": "error",
+                            "error": (
+                                "'learn_control' needs where it is: x and y "
+                                "on screen, or ref of a control in the tree."
+                            ),
+                        }
+                    info = ui.control_info(point, None)
+                    if info is None:
+                        return {"status": "error",
+                                "error": f"no control with ref {point}"}
+                    x, y = info.as_dict()["center"]
+
+                left, top, right, bottom = rect
+                width = max(1, right - left)
+                height = max(1, bottom - top)
+                self._memory.note_landmark(
+                    window or "", label.strip(),
+                    (x - left) / width, (y - top) / height,
+                    source=str(arguments.get("source") or "observed"),
+                )
+                return {
+                    "status": "success",
+                    "learned": label.strip(),
+                    "app": window,
+                    "at": [x, y],
+                    "note": (
+                        "Remembered as a position in the window, so it "
+                        "keeps working if the window moves or resizes."
+                    ),
+                }
 
             if action == "clear_popups":
                 cleared = self._clear_noise(ui, window, pid)
@@ -902,6 +1065,11 @@ class UIControlTool(AlfredTool):
                 if target is None:
                     _, controls = ui.tree(window, pid, limit=400)
                     target = self._pick_item(controls, wanted)
+
+                if target is None:
+                    learned = self._click_landmark(ui, window, pid, wanted)
+                    if learned is not None:
+                        return learned
 
                 if target is None:
                     cleared = self._clear_noise(ui, window, pid)

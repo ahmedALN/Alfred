@@ -44,6 +44,26 @@ CREATE TABLE IF NOT EXISTS app_notes (
     UNIQUE(app_key, note)
 );
 
+-- Controls the accessibility layer cannot name.
+--
+-- Qt apps and game launchers draw their buttons without labels: MultiMC's
+-- whole right-hand panel - Launch, Delete, Edit Instance - is unnamed
+-- Custom controls, plainly visible and impossible to find by name. What
+-- IS reliable is where they sit, so a label learned once is remembered
+-- as a position within the window and works at any window size.
+CREATE TABLE IF NOT EXISTS app_landmarks (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    app_key    TEXT NOT NULL,
+    label      TEXT NOT NULL,
+    rel_x      REAL NOT NULL,
+    rel_y      REAL NOT NULL,
+    source     TEXT NOT NULL DEFAULT 'observed',
+    uses       INTEGER NOT NULL DEFAULT 0,
+    learned_at TEXT NOT NULL,
+    UNIQUE(app_key, label)
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_landmarks_key ON app_landmarks(app_key);
 CREATE INDEX IF NOT EXISTS idx_app_controls_key ON app_controls(app_key);
 CREATE INDEX IF NOT EXISTS idx_app_notes_key ON app_notes(app_key);
 """
@@ -144,6 +164,79 @@ class AppMemory:
                 (key, name, action, control_type, automation_id, _now()),
             )
             self._conn.commit()
+
+    def note_landmark(self, app: str, label: str, rel_x: float,
+                      rel_y: float, source: str = "observed") -> None:
+        """Remember where an unlabelled control sits in an app's window.
+
+        Stored as a fraction of the window rather than a pixel, so it
+        survives the window being moved or resized.
+        """
+        key = app_key(app)
+        label = " ".join((label or "").split())[:80]
+
+        if not key or not label:
+            return
+        if not (0.0 <= rel_x <= 1.0 and 0.0 <= rel_y <= 1.0):
+            return
+
+        with self._lock:
+            self._ensure_app(key, app.strip())
+            self._conn.execute(
+                "INSERT INTO app_landmarks (app_key, label, rel_x, rel_y, "
+                "source, uses, learned_at) VALUES (?, ?, ?, ?, ?, 0, ?) "
+                "ON CONFLICT(app_key, label) DO UPDATE SET "
+                "rel_x = excluded.rel_x, rel_y = excluded.rel_y, "
+                "source = excluded.source, learned_at = excluded.learned_at",
+                (key, label, float(rel_x), float(rel_y), source, _now()),
+            )
+            self._conn.commit()
+
+    def landmarks(self, app: str) -> list[dict[str, Any]]:
+        key = app_key(app)
+        if not key:
+            return []
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT label, rel_x, rel_y, source, uses FROM app_landmarks "
+                "WHERE app_key = ? ORDER BY rel_y",
+                (key,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def find_landmark(self, app: str, wanted: str) -> dict[str, Any] | None:
+        """The learned control whose label best answers ``wanted``."""
+        want = " ".join((wanted or "").split()).strip().lower()
+        if not want:
+            return None
+
+        best = None
+        best_score = 0
+
+        for row in self.landmarks(app):
+            label = row["label"].strip().lower()
+            if label == want:
+                score = 100
+            elif label.startswith(want):
+                score = 60
+            elif want in label:
+                score = 30
+            else:
+                continue
+            score -= min(len(label) // 10, 5)
+            if score > best_score:
+                best, best_score = row, score
+
+        if best is not None:
+            with self._lock:
+                self._conn.execute(
+                    "UPDATE app_landmarks SET uses = uses + 1 "
+                    "WHERE app_key = ? AND label = ?",
+                    (app_key(app), best["label"]),
+                )
+                self._conn.commit()
+
+        return best
 
     def note(self, app: str, note: str, kind: str = "note") -> None:
         key = app_key(app)

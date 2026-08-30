@@ -111,6 +111,16 @@ class RemoteUia:
         self._last_scanned = scanned if isinstance(scanned, int) else 0
         return str(data.get("window") or ""), controls
 
+    def unnamed(self, title_re: str | None = None, pid: int | None = None,
+                limit: int = 40) -> tuple[str, list[dict[str, Any]]]:
+        data = self._call(
+            "unnamed",
+            window=clean_title(title_re) if title_re else None,
+            pid=pid, limit=limit,
+        )
+        found = data.get("controls")
+        return str(data.get("window") or ""), (found if isinstance(found, list) else [])
+
     def find(self, query: str, limit: int = 20) -> list[Control]:
         data = self._call("find", query=query, limit=limit)
         return [
@@ -143,6 +153,16 @@ class RemoteUia:
     def type_text(self, text: str, ref: int | None = None,
                   name: str | None = None) -> None:
         self._call("type", text=text, ref=ref, name=name)
+
+    def click_point(self, x: int, y: int, double: bool = False) -> None:
+        client = self._client_factory()
+        try:
+            client.mouse_move(int(x), int(y))
+            client.click("left")
+            if double:
+                client.click("left")
+        except ChildSessionError as exc:
+            raise UiaError(str(exc)) from exc
 
     def send_key(self, keys: Any) -> None:
         chords = key_tokens(keys)

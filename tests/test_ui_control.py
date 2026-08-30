@@ -828,3 +828,101 @@ def test_a_ref_is_never_re_read_because_that_would_renumber_it():
     t.execute({"action": "click", "window": "MultiMC", "ref": 1})
 
     assert not any(c[0] == "tree" for c in t._uia.calls)
+
+
+# ----------------------------------- controls the layer cannot name
+
+
+class _Memory:
+    def __init__(self, landmarks=None):
+        self._marks = landmarks or {}
+        self.learned = []
+
+    def find_landmark(self, app, wanted):
+        return self._marks.get(wanted.lower())
+
+    def landmarks(self, app):
+        return list(self._marks.values())
+
+    def note_landmark(self, app, label, rel_x, rel_y, source="observed"):
+        self.learned.append((app, label, rel_x, rel_y, source))
+
+
+class _Positioned(FakeUia):
+    """A window at a known place, with nothing findable by name."""
+
+    def __init__(self):
+        super().__init__(controls=[])
+        self.clicked_at = []
+
+    def windows(self, limit=40):
+        return [{"title": "MultiMC", "pid": 7, "class": "Qt",
+                 "rect": [600, 0, 1300, 1000]}]
+
+    def click_point(self, x, y, double=False):
+        self.clicked_at.append((x, y))
+
+    def control_info(self, ref=None, name=None):
+        return Control(0, "Custom", "", "", (1258, 190, 1260, 204), True)
+
+
+def test_a_button_with_no_name_is_clicked_by_what_was_learned():
+    """MultiMC's Launch has no name, no id, no legacy name - only a
+    place. Learned once, it works from then on."""
+    ui = _Positioned()
+    memory = _Memory({"launch": {"label": "Launch", "rel_x": 0.9,
+                                 "rel_y": 0.2}})
+    tool = UIControlTool(ui, memory=memory)
+
+    out = tool.execute({"action": "open_item", "window": "MultiMC",
+                        "name": "Launch"})
+
+    assert out["status"] == "success"
+    assert out["via"] == "learned position"
+    # 600 + 700*0.9, 0 + 1000*0.2
+    assert ui.clicked_at == [(1230, 200)]
+
+
+def test_a_landmark_is_stored_relative_so_it_survives_a_move():
+    ui = _Positioned()
+    memory = _Memory()
+    tool = UIControlTool(ui, memory=memory)
+
+    tool.execute({"action": "learn_control", "window": "MultiMC",
+                  "name": "Launch", "x": 1230, "y": 200})
+
+    app, label, rel_x, rel_y, _ = memory.learned[0]
+    assert label == "Launch"
+    assert abs(rel_x - 0.9) < 0.01 and abs(rel_y - 0.2) < 0.01
+
+
+def test_learning_needs_somewhere_to_put_it():
+    out = UIControlTool(_Positioned(), memory=None).execute(
+        {"action": "learn_control", "window": "MultiMC", "name": "Launch",
+         "x": 1230, "y": 200}
+    )
+    assert out["status"] == "error"
+
+
+def test_learning_needs_a_position():
+    out = UIControlTool(_Positioned(), memory=_Memory()).execute(
+        {"action": "learn_control", "window": "MultiMC", "name": "Launch"}
+    )
+    assert out["status"] == "error" and "x and y" in out["error"]
+
+
+def test_clicking_a_bare_position_is_allowed_for_probing():
+    ui = _Positioned()
+    out = UIControlTool(ui).execute(
+        {"action": "click", "window": "MultiMC", "x": 900, "y": 400}
+    )
+    assert out["clicked_at"] == [900, 400] and ui.clicked_at == [(900, 400)]
+
+
+def test_an_unknown_name_with_no_landmark_still_reports_not_found():
+    ui = _Positioned()
+    out = UIControlTool(ui, memory=_Memory()).execute(
+        {"action": "open_item", "window": "MultiMC", "name": "Launch"}
+    )
+    assert out["status"] in ("not_found", "needs_user")
+    assert ui.clicked_at == []

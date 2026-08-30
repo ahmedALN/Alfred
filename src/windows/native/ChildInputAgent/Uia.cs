@@ -192,6 +192,7 @@ internal sealed class UiaService
                 "wait_for" => OpWaitFor(root),
                 "wait_ready" => OpWaitReady(root),
                 "info" => OpInfo(root),
+                "unnamed" => OpUnnamed(root),
                 _ => Program.UiaFail(
                     "unknown_action",
                     $"Unknown uia action '{action}'."
@@ -488,11 +489,20 @@ internal sealed class UiaService
                     continue;
                 }
 
+                System.Windows.Rect box = el.Current.BoundingRectangle;
+
                 listed.Add(new
                 {
                     title = title.Length > 90 ? title[..90] : title,
                     pid = el.Current.ProcessId,
                     @class = el.Current.ClassName ?? string.Empty,
+                    // Needed to turn a learned landmark - a position
+                    // within the window - back into a screen point.
+                    rect = new[]
+                    {
+                        ToPixels(box.Left), ToPixels(box.Top),
+                        ToPixels(box.Right), ToPixels(box.Bottom),
+                    },
                 });
 
                 if (listed.Count >= limit)
@@ -846,6 +856,115 @@ internal sealed class UiaService
                 // Elements vanish mid-walk; skip and carry on.
             }
         }
+    }
+
+    /// <summary>
+    /// Controls that are visible but carry no name.
+    ///
+    /// Qt apps and game launchers draw their buttons without labels, so
+    /// a search by name finds nothing while the user is looking right
+    /// at them. These cannot be identified from the tree - only located
+    /// - which is enough to click one and ask what it did.
+    /// </summary>
+    private string OpUnnamed(JsonElement root)
+    {
+        string? title = ReadString(root, "window");
+        int? pid = ReadInt(root, "pid");
+        int limit = ReadInt(root, "limit") ?? 40;
+
+        AutomationElement window = ResolveWindow(title, pid);
+        _window = window;
+        _specTitle = title;
+        _specPid = pid;
+
+        System.Windows.Rect frame = window.Current.BoundingRectangle;
+        double width = Math.Max(1, frame.Width);
+        double height = Math.Max(1, frame.Height);
+
+        var found = new List<Dictionary<string, object?>>();
+
+        foreach (AutomationElement el in Descendants(window, DefaultMaxDepth, 4000))
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(el.Cached.Name))
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(el.Cached.AutomationId))
+                {
+                    continue;
+                }
+
+                string kind = TypeName(el, cached: true);
+
+                if (kind is "Pane" or "Group" or "Window" or "TitleBar"
+                    or "Thumb" or "")
+                {
+                    continue;
+                }
+
+                System.Windows.Rect box = el.Cached.BoundingRectangle;
+
+                if (box.Width < 16 || box.Height < 10)
+                {
+                    continue;
+                }
+
+                if (box.Width > width * 0.9 && box.Height > height * 0.9)
+                {
+                    continue;
+                }
+
+                int cx = ToPixels(box.Left + (box.Width / 2));
+                int cy = ToPixels(box.Top + (box.Height / 2));
+
+                found.Add(new Dictionary<string, object?>
+                {
+                    ["type"] = kind,
+                    ["center"] = new[] { cx, cy },
+                    ["rel"] = new[]
+                    {
+                        Math.Round((cx - frame.Left) / width, 4),
+                        Math.Round((cy - frame.Top) / height, 4),
+                    },
+                    ["size"] = new[]
+                    {
+                        ToPixels(box.Width), ToPixels(box.Height),
+                    },
+                });
+
+                if (found.Count >= limit)
+                {
+                    break;
+                }
+            }
+            catch
+            {
+                // Vanished mid-walk.
+            }
+        }
+
+        found.Sort((a, b) =>
+        {
+            int[] left = (int[])a["center"]!;
+            int[] right = (int[])b["center"]!;
+            int byRow = left[1].CompareTo(right[1]);
+            return byRow != 0 ? byRow : left[0].CompareTo(right[0]);
+        });
+
+        for (int i = 0; i < found.Count; i++)
+        {
+            found[i]["index"] = i;
+        }
+
+        return Program.UiaOk(new
+        {
+            window = SafeName(window),
+            count = found.Count,
+            controls = found,
+        });
     }
 
     private string OpFind(JsonElement root)

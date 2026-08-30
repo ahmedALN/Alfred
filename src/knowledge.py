@@ -132,6 +132,23 @@ WINDOWS_PLAYBOOK: list[tuple[str, str]] = [
      "reach for a keyboard route, the row itself, or the app's command "
      "line rather than hunting."),
 
+    ("system", "A control with no name can still be used, once. "
+     "ui_control 'unnamed window=' lists the unlabelled controls with "
+     "their positions; click one with 'click x= y=', watch what changed, "
+     "and record it with 'learn_control name= x= y='. From then on "
+     "open_item finds it by name. Positions are stored as a fraction of "
+     "the window, so they survive it being moved or resized."),
+    ("correction", "Never click an unnamed control at random during a "
+     "real task - in MultiMC one of them is Delete. Probe only when the "
+     "user has asked you to learn the app, and if nothing observable "
+     "happens after a click, ASK them what it did rather than guessing "
+     "a label."),
+    ("system", "MultiMC's right-hand panel, top to bottom: Change Group, "
+     "Launch, Launch Offline, Edit Instance, Edit Notes, View Mods, View "
+     "Worlds, Manage Screenshots, Minecraft Folder, Config Folder, "
+     "Instance Folder, Create Shortcut, Export Instance, Delete, Copy "
+     "Instance. None of them has an accessible name."),
+
     # --- the web ------------------------------------------------------
     ("correction", "To reach a specific web page, pass the URL straight to "
      "open_app: open_app app='https://www.youtube.com/@Deji/videos'. It "

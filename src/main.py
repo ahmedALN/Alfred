@@ -145,6 +145,10 @@ async def main() -> None:
     episode_store = EpisodeStore(settings.episode_db_path)
     # What Alfred has learned about working inside specific apps.
     app_memory = AppMemory(settings.app_db_path)
+    # What Alfred has learned about controls the accessibility layer
+    # cannot name - see ui_control's learn_control / unnamed.
+    ui_control_tool._memory = app_memory
+
     task_queue = TaskQueue(
         store=task_store, episodes=episode_store, app_memory=app_memory,
     )
