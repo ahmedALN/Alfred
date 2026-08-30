@@ -142,17 +142,65 @@ def test_turn_end_is_a_no_op_for_an_ordinary_turn():
 # ------------------------------------------------------- open_app
 
 
+class _Spec:
+    def __init__(self, kind, value, display):
+        self.kind, self.value, self.display = kind, value, display
+
+
+class _Resolver:
+    """The name-to-executable half of the normal launcher."""
+
+    def __init__(self, spec=None):
+        self._spec = spec
+
+    def resolve(self, name):
+        return self._spec
+
+
+NOTEPAD = "C:/Windows/System32/notepad.exe"
+STEAM_LNK = "C:/Users/me/Desktop/Steam.lnk"
+
+
 def test_open_app_opens_on_the_private_desktop_when_isolated():
     d, r = FakeDesktop(), FakeRouter(isolated=True)
-    tool = OpenAppTool(launcher=object(), router=r, isolated_desktop=d)
+    tool = OpenAppTool(
+        launcher=_Resolver(_Spec("exe", NOTEPAD, "Notepad")),
+        router=r, isolated_desktop=d,
+    )
 
     out = tool.execute({"app": "Notepad"})
 
     assert out["status"] == "success"
     assert out["session"] == 11
-    assert d.launched == ["Notepad"]
     # the claim Alfred repeats has to come from the tool, not the model
     assert "private desktop" in out["opened_in"]
+
+
+def test_a_name_is_resolved_before_the_private_desktop_launches_it():
+    """The agent in that session starts a path, not a name - "notepad"
+    only ever worked because it happens to be on PATH, while "steam" and
+    "multimc" did not."""
+    d, r = FakeDesktop(), FakeRouter(isolated=True)
+    tool = OpenAppTool(
+        launcher=_Resolver(_Spec("shortcut", STEAM_LNK, "Steam")),
+        router=r, isolated_desktop=d,
+    )
+
+    tool.execute({"app": "steam"})
+
+    assert d.launched == [STEAM_LNK]
+
+
+def test_an_unknown_app_is_reported_rather_than_launched_blindly():
+    d, r = FakeDesktop(), FakeRouter(isolated=True)
+    tool = OpenAppTool(
+        launcher=_Resolver(None), router=r, isolated_desktop=d,
+    )
+
+    out = tool.execute({"app": "nonsuch"})
+
+    assert out["status"] == "not_found"
+    assert d.launched == []
 
 
 def test_open_app_uses_the_normal_launcher_otherwise():

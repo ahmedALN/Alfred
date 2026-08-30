@@ -84,6 +84,28 @@ def clean_title(title: str) -> str:
     return text
 
 
+def _title_score(title: str, wanted: str) -> int:
+    """How well a window title answers what was asked for."""
+    haystack = title.strip().lower()
+    want = wanted.strip().lower()
+
+    if not want or not haystack:
+        return 0
+
+    if haystack == want:
+        score = 1000
+    elif haystack.startswith(want):
+        score = 500
+    elif want in haystack:
+        # A whole word beats a fragment buried in a path.
+        score = 300 if re.search(rf"{re.escape(want)}", haystack) else 100
+    else:
+        return 0
+
+    # Among equals the tighter title is the better answer.
+    return score - min(len(title) // 4, 40)
+
+
 def title_pattern(title: str) -> str:
     """A plain string becomes a case-insensitive substring match."""
     title = clean_title(title)
@@ -151,6 +173,16 @@ class UiaSession:
         try:
             if pid:
                 win = dt.window(process=int(pid))
+            elif title_re and not _REGEX_META.search(clean_title(title_re)):
+                # Plain words get scored across every open window. Taking
+                # the first or shortest match picked the wrong one as soon
+                # as titles moved: searching in Explorer renamed it
+                # "notepad - Search Results in Windows - File Explorer",
+                # and a terminal called "C:\WINDOWS\system32\cmd.exe"
+                # became the better match for "Windows".
+                win = self._best_window(dt, clean_title(title_re))
+                if win is None:
+                    win = dt.window(title_re=title_pattern(title_re))
             elif title_re:
                 win = dt.window(title_re=title_pattern(title_re))
             else:
@@ -162,6 +194,47 @@ class UiaSession:
             return win
         except Exception as exc:  # noqa: BLE001
             raise UiaError(f"window not found: {exc}") from exc
+
+    def _same_as_last(self, candidate) -> bool:
+        """Is this the window the previous action worked in?"""
+        if self._last_window is None:
+            return False
+        try:
+            return candidate.handle == self._last_window.handle
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _best_window(self, dt, wanted: str):
+        """The open window that best answers ``wanted``."""
+        best = None
+        best_score = 0
+
+        for candidate in dt.windows():
+            try:
+                title = (candidate.window_text() or "").strip()
+            except Exception:  # noqa: BLE001
+                continue
+
+            if not title:
+                continue
+
+            score = _title_score(title, wanted)
+            if score <= 0:
+                continue
+
+            # Staying in the window we were just working in is almost
+            # always right: "search here, then open the result" is one
+            # job, and the second half should not wander elsewhere.
+            # Matched on identity, not on the title - searching in
+            # Explorer renames it, and that is exactly the moment the
+            # continuity matters most.
+            if self._same_as_last(candidate):
+                score += 250
+
+            if score > best_score:
+                best, best_score = candidate, score
+
+        return best
 
     def focus(self, win) -> None:
         for _ in range(2):

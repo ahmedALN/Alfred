@@ -573,3 +573,185 @@ def test_waiting_still_defaults_to_just_being_open():
     t.execute({"action": "wait_ready", "window": "Notepad"})
 
     assert t._uia.calls[0][3] == 3
+
+
+# ------------------------------------------- whole jobs, not gestures
+
+
+def _app(controls):
+    """A tool wired to a fake app with a given control tree."""
+    return UIControlTool(FakeUia(controls))
+
+
+def _c(ref, ctype, name, aid="", enabled=True, password=False):
+    return Control(ref, ctype, name, aid, (0, 0, 10, 10), enabled,
+                   is_password=password)
+
+
+STEAM = [
+    _c(0, "Button", "Store"),
+    _c(1, "Button", "Library"),
+    _c(2, "Edit", "Search games", "searchbox"),
+    _c(3, "ListItem", "Hades"),
+    _c(4, "ListItem", "Hades II"),
+    _c(5, "Button", "Play"),
+]
+
+
+def test_search_finds_the_apps_own_search_box():
+    """Five calls collapse into one, and the field is chosen against the
+    real tree instead of guessed from a printed list."""
+    t = _app(STEAM)
+    out = t.execute({"action": "search", "window": "Steam", "text": "Hades"})
+
+    assert out["status"] == "success"
+    assert out["field"] == "Search games"
+    assert out["guessed_field"] is False
+    kinds = [c[0] for c in t._uia.calls]
+    assert kinds == ["tree", "click", "key", "type", "key"]
+
+
+def test_search_presses_enter_by_default_and_can_be_told_not_to():
+    t = _app(STEAM)
+    assert t.execute(
+        {"action": "search", "window": "Steam", "text": "Hades"}
+    )["submitted"] is True
+
+    t2 = _app(STEAM)
+    out = t2.execute({
+        "action": "search", "window": "Steam", "text": "Hades",
+        "submit": False,
+    })
+    assert "submitted" not in out
+    assert [c[0] for c in t2._uia.calls].count("key") == 1  # only the ctrl+a
+
+
+def test_search_says_so_when_it_had_to_guess_the_field():
+    """An unnamed text box is better than nothing, but the caller should
+    know it was a guess rather than a labelled search box."""
+    t = _app([_c(0, "Edit", ""), _c(1, "Button", "Go")])
+    out = t.execute({"action": "search", "window": "App", "text": "x"})
+
+    assert out["status"] == "success" and out["guessed_field"] is True
+
+
+def test_search_refuses_a_password_box_rather_than_typing_into_it():
+    t = _app([_c(0, "Edit", "Password", "pwd", password=True)])
+    out = t.execute({"action": "search", "window": "App", "text": "hunter2"})
+
+    assert out["status"] == "refused"
+
+
+def test_search_reports_honestly_when_there_is_no_box():
+    t = _app([_c(0, "Button", "OK")])
+    out = t.execute({"action": "search", "window": "App", "text": "x"})
+
+    assert out["status"] == "error" and "no search box" in out["error"]
+
+
+def test_open_item_opens_a_library_row_by_double_click():
+    t = _app(STEAM)
+    out = t.execute({"action": "open_item", "window": "Steam", "name": "Hades"})
+
+    assert out["opened"] == "Hades"
+    assert out["via"] == "double click"
+
+
+def test_an_exact_name_beats_a_longer_one_containing_it():
+    """'Hades' must not open 'Hades II'; '1.21.11' must not open
+    '1.21.11 (needs update)'."""
+    t = _app(STEAM)
+    assert t.execute(
+        {"action": "open_item", "window": "Steam", "name": "Hades"}
+    )["opened"] == "Hades"
+
+    instances = [
+        _c(0, "ListItem", "1.21.11 (needs update, last played Tuesday)"),
+        _c(1, "ListItem", "1.21.11"),
+        _c(2, "ListItem", "1.20.4"),
+    ]
+    assert _app(instances).execute(
+        {"action": "open_item", "window": "MultiMC", "name": "1.21.11"}
+    )["opened"] == "1.21.11"
+
+
+def test_a_button_is_clicked_once_not_twice():
+    t = _app(STEAM)
+    out = t.execute({"action": "open_item", "window": "Steam", "name": "Play"})
+
+    assert out["via"] == "click"
+
+
+def test_a_disabled_match_loses_to_an_enabled_one():
+    controls = [
+        _c(0, "ListItem", "Latest save", enabled=False),
+        _c(1, "Button", "Latest save"),
+    ]
+    out = _app(controls).execute(
+        {"action": "open_item", "window": "Game", "name": "Latest save"}
+    )
+    assert out["via"] == "click"      # the enabled Button, not the dead row
+
+
+def test_open_item_offers_nearby_names_when_nothing_matches():
+    """A wrong guess is worse than a question - the model gets real
+    names to put back to the user."""
+    t = _app(STEAM)
+    out = t.execute({
+        "action": "open_item", "window": "Steam", "name": "Celeste",
+    })
+
+    assert out["status"] == "not_found"
+    assert "Hades" in out["nearby"]
+
+
+# --------------------------------------------- picking the right window
+
+
+def test_a_whole_word_title_beats_a_fragment_in_a_path():
+    """Searching in Explorer renames it to "notepad - Search Results in
+    Windows - File Explorer", at which point a terminal called
+    "C:\WINDOWS\system32\cmd.exe" was the shorter match for "Windows"
+    and the next action went there instead."""
+    from src.windows.uia import _title_score
+
+    assert _title_score("Windows", "Windows") > _title_score(
+        "Windows PowerShell", "Windows")
+    assert _title_score("Windows PowerShell", "Windows") > _title_score(
+        "C:\WINDOWS\system32\cmd.exe", "Windows")
+
+
+def test_a_title_that_does_not_contain_it_scores_nothing():
+    from src.windows.uia import _title_score
+
+    assert _title_score("Spotify Premium", "Steam") == 0
+    assert _title_score("", "Steam") == 0
+    assert _title_score("Steam", "") == 0
+
+
+def test_an_exact_title_wins_outright():
+    from src.windows.uia import _title_score
+
+    assert _title_score("Steam", "steam") > _title_score(
+        "Steam - Big Picture Mode", "steam")
+
+
+def test_a_failed_wait_says_what_is_actually_on_screen():
+    """Steam sitting on "Sign in to Steam" is a different problem from
+    Steam not starting, and a bare timeout makes them look identical."""
+
+    class NeverReady(FakeUia):
+        def wait_ready(self, title_re=None, pid=None, timeout=25.0,
+                       min_controls=3):
+            return False
+
+        def windows(self, limit=40):
+            return [{"title": "Sign in to Steam", "pid": 1, "class": "X"}]
+
+    out = UIControlTool(NeverReady()).execute(
+        {"action": "wait_ready", "window": "Steam", "timeout": 1}
+    )
+
+    assert out["status"] == "error"
+    assert out["windows_open"] == ["Sign in to Steam"]
+    assert "credentials" in out["instruction"]

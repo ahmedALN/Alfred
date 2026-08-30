@@ -227,13 +227,24 @@ class AppLauncher:
             / "Microsoft" / "Windows" / "Start Menu" / "Programs",
             Path(os.environ.get("APPDATA", "")) / "Microsoft"
             / "Windows" / "Start Menu" / "Programs",
+            # Games and launchers overwhelmingly live on the desktop and
+            # nowhere else - Steam has no App Paths entry and no Start
+            # menu entry on this machine, so without these roots "open
+            # Steam" simply could not be answered.
+            Path(os.environ.get("USERPROFILE", "")) / "Desktop",
+            Path(os.environ.get("PUBLIC", r"C:\Users\Public")) / "Desktop",
         ]
         best: tuple[int, Path] | None = None
         for root in roots:
             if not root.exists():
                 continue
-            for lnk in root.rglob("*.lnk"):
-                stem = lnk.stem.lower()
+            # .url too: Epic, Rust and other store games put a web
+            # shortcut on the desktop rather than a .lnk, and those are
+            # launched exactly the same way.
+            for lnk in sorted(
+                list(root.rglob("*.lnk")) + list(root.rglob("*.url"))
+            ):
+                stem = _shortcut_name(lnk.stem)
                 if stem == q:
                     return lnk
                 if len(q) >= 3 and q in stem:
@@ -529,6 +540,22 @@ _SYSTEM_EXES = {
 }
 
 
+def _shortcut_name(stem: str) -> str:
+    """The app's name as a person would say it.
+
+    Desktop shortcuts are routinely called "Among Us.exe - Shortcut" or
+    "NMS.exe - Shortcut"; nobody asks for those by that name.
+    """
+    name = stem.strip().lower()
+    for suffix in (".exe - shortcut", " - shortcut"):
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    if name.endswith(".exe"):
+        name = name[:-4]
+    return name.strip()
+
+
 def _app_paths_lookup(exe: str) -> str | None:
     """Resolve an exe via the App Paths registry key (how Start/Run finds apps)."""
 
@@ -540,14 +567,23 @@ def _app_paths_lookup(exe: str) -> str | None:
     sub = (
         r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\\" + exe
     )
+    # 32-bit apps register under WOW6432Node, and a 64-bit process does
+    # not see that view by default - which is why Steam, a 32-bit app,
+    # resolved to a bare "steam.exe" that then failed to start.
+    views = (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY)
+
     for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
-        try:
-            with winreg.OpenKey(root, sub) as key:
-                value, _ = winreg.QueryValueEx(key, None)
-                if value and Path(value).exists():
-                    return value
-        except OSError:
-            continue
+        for view in views:
+            try:
+                with winreg.OpenKey(
+                    root, sub, 0, winreg.KEY_READ | view
+                ) as key:
+                    value, _ = winreg.QueryValueEx(key, None)
+                    value = (value or "").strip('"')
+                    if value and Path(value).exists():
+                        return value
+            except OSError:
+                continue
     return None
 
 

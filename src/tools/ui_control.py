@@ -10,7 +10,25 @@ _ACTIONS = (
     "windows", "focus", "tree", "find", "click", "double_click",
     "right_click", "invoke", "type", "key", "get", "select", "expand",
     "scroll", "menu", "wait_for", "wait_ready", "exists",
+    # Whole jobs rather than single gestures. "Search this app for X"
+    # was five calls - read the tree, pick the box, click it, type,
+    # press Enter - and every one of them a chance to act on the wrong
+    # control. One call is both faster (one model turn, not five) and
+    # more accurate, because choosing the field is done here against the
+    # real tree instead of guessed from a list.
+    "search", "open_item",
 )
+
+# What an app's search box tends to be called.
+_SEARCH_HINT = re.compile(
+    r"search|find|query|filter|look\s?up|what do you want|type here|"
+    r"address and search|omnibox|enter a name",
+    re.I,
+)
+
+# Things you open by name: a library row, a tree node, a tile, a link.
+_ROW_TYPES = {"ListItem", "TreeItem", "DataItem"}
+_CLICKABLE_TYPES = {"Button", "Hyperlink", "MenuItem", "TabItem", "Text"}
 
 # Field names that mean "secret" - Alfred never types into these.
 _SECRET_NAME = re.compile(
@@ -53,9 +71,13 @@ class UIControlTool(AlfredTool):
 
     description = (
         "Drive a Windows app precisely via its accessibility tree - the "
-        "main way to do work INSIDE an app. Typical flow: 'wait_ready' "
-        "after launching, 'tree' to see the controls, then click / type / "
-        "select by ref or name, then 'get' to read the result back. "
+        "main way to do work INSIDE an app. For the common jobs reach for "
+        "the whole-job actions first: after open_app, wait_ready then "
+        "search (types into the app's own search box and presses Enter) "
+        "then open_item (opens a result, library row, tile or save by "
+        "name). 'open Steam, search Hades, open it' is three calls, not a "
+        "dozen. Drop to tree/click/type only when those cannot express "
+        "what you need. "
         "Actions: windows (list open windows); focus (bring a window "
         "forward); tree window= [contains=] (list controls, each with a "
         "ref); find query= (search the current window's controls); click / "
@@ -69,7 +91,14 @@ class UIControlTool(AlfredTool):
         "scroll direction= [amount=] ; menu path='File->Save As'; "
         "wait_ready window= [timeout=] [min_controls=] (wait for a "
         "just-launched app or a loading web page to become usable - on a "
-        "website pass min_controls=40 or you will read it half-built); wait_for name= [timeout=]; exists name=. "
+        "website pass min_controls=40 or you will read it half-built); wait_for name= [timeout=]; exists name=; "
+        "search window= text= [submit=false] (find this app's search "
+        "box, replace what is in it, type, press Enter - use this "
+        "instead of hunting for the field yourself); open_item "
+        "window= name= (find a list row, tile, tree node, link or "
+        "button by name and open it - double-clicks rows, clicks "
+        "buttons; returns 'not_found' with nearby names if there is "
+        "no match). "
         "Prefer this over desktop_control - it is exact. Alfred refuses to "
         "type into password fields."
     )
@@ -94,7 +123,7 @@ class UIControlTool(AlfredTool):
                 },
                 "item": {
                     "type": "string",
-                    "description": "Item to pick, for 'select'.",
+                    "description": "Item to pick, for 'select' / 'open_item'.",
                 },
                 "query": {
                     "type": "string",
@@ -129,6 +158,13 @@ class UIControlTool(AlfredTool):
                 "max_depth": {
                     "type": "integer",
                     "description": "How deep to walk, for 'tree'. Default 30.",
+                },
+                "submit": {
+                    "type": "boolean",
+                    "description": (
+                        "For 'search': press Enter afterwards. Default "
+                        "true. Set false for a box that filters as you type."
+                    ),
                 },
                 "min_controls": {
                     "type": "integer",
@@ -192,6 +228,81 @@ class UIControlTool(AlfredTool):
             }
 
         return None
+
+    # ---------------------------------------------------- picking a target
+
+    @staticmethod
+    def _pick_search_field(controls: list[Any]) -> Any:
+        """The control most likely to be this app's search box.
+
+        A named "Search" field beats an unnamed text box, and an unnamed
+        text box beats nothing - but the caller is told which it got, so
+        a guess is visible rather than silent.
+        """
+        best = None
+        best_score = 0
+
+        for control in controls:
+            if control.control_type not in ("Edit", "ComboBox", "Document"):
+                continue
+            if control.is_password or not control.enabled:
+                continue
+
+            score = 1
+            haystack = f"{control.name} {control.automation_id}"
+            if _SEARCH_HINT.search(haystack):
+                score += 10
+            if control.control_type == "Edit":
+                score += 2
+            if control.name:
+                score += 1
+
+            if score > best_score:
+                best, best_score = control, score
+
+        return best
+
+    @staticmethod
+    def _pick_item(controls: list[Any], wanted: str) -> Any:
+        """The control that best answers "open <wanted>"."""
+        want = wanted.strip().lower()
+        if not want:
+            return None
+
+        best = None
+        best_score = -1000
+
+        for control in controls:
+            name = control.name.strip().lower()
+            identifier = (control.automation_id or "").strip().lower()
+
+            if name == want or identifier == want:
+                score = 100
+            elif name.startswith(want):
+                score = 60
+            elif want in name:
+                score = 30
+            elif identifier and want in identifier:
+                score = 20
+            else:
+                continue
+
+            if control.control_type in _ROW_TYPES:
+                score += 8
+            elif control.control_type in _CLICKABLE_TYPES:
+                score += 5
+
+            if not control.enabled:
+                score -= 40
+
+            # A tight match is usually the shorter one: "1.21.11" should
+            # beat "1.21.11 (needs update, last played...)".
+            score -= min(len(name) // 20, 5)
+
+            if score > best_score:
+                best, best_score = control, score
+
+        return best
 
     def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
         action = arguments.get("action")
@@ -349,6 +460,112 @@ class UIControlTool(AlfredTool):
                     return {"status": "error", "error": "'menu' needs 'path'."}
                 return {"status": "success", "menu": ui.menu_select(path)}
 
+            if action == "search":
+                text = arguments.get("text") or arguments.get("query")
+                if not isinstance(text, str) or not text.strip():
+                    return {
+                        "status": "error",
+                        "error": "'search' needs 'text' - what to search for.",
+                    }
+
+                _, controls = ui.tree(window, pid, limit=300)
+                field = self._pick_search_field(controls)
+
+                if field is None:
+                    # The picker skips masked fields, so a sign-in form
+                    # looks like "no search box". Say what is actually
+                    # being asked for instead.
+                    if any(getattr(c, "is_password", False) for c in controls):
+                        return {
+                            "status": "refused",
+                            "error": "that window is asking for a password",
+                            "instruction": _SECRET_REFUSAL,
+                        }
+
+                    return {
+                        "status": "error",
+                        "error": "no search box found in that window",
+                        "instruction": (
+                            "Read the tree and look for the field yourself, "
+                            "then use type into=<ref>."
+                        ),
+                    }
+
+                refused = self._secret_guard(ui, field.ref, field.name, text)
+                if refused is not None:
+                    return refused
+
+                # Click rather than SetValue: many search boxes only run
+                # their handler on real keystrokes.
+                ui.click(ref=field.ref)
+                ui.send_key("^a")
+                ui.type_text(text)
+
+                out: dict[str, Any] = {
+                    "status": "success",
+                    "searched_for": text,
+                    "field": field.name or field.automation_id or "the text box",
+                    "guessed_field": not bool(
+                        _SEARCH_HINT.search(f"{field.name} {field.automation_id}")
+                    ),
+                }
+
+                if arguments.get("submit", True):
+                    ui.send_key("{ENTER}")
+                    out["submitted"] = True
+
+                return out
+
+            if action == "open_item":
+                wanted = (
+                    arguments.get("name")
+                    or arguments.get("item")
+                    or arguments.get("text")
+                )
+                if not isinstance(wanted, str) or not wanted.strip():
+                    return {
+                        "status": "error",
+                        "error": "'open_item' needs 'name' - what to open.",
+                    }
+
+                # A filtered read is much smaller and much faster; fall
+                # back to the whole tree when the name is worded loosely.
+                _, controls = ui.tree(window, pid, limit=300, contains=wanted)
+                target = self._pick_item(controls, wanted)
+
+                if target is None:
+                    _, controls = ui.tree(window, pid, limit=400)
+                    target = self._pick_item(controls, wanted)
+
+                if target is None:
+                    nearby = [
+                        c.name for c in controls
+                        if c.name and c.control_type in (
+                            _ROW_TYPES | _CLICKABLE_TYPES
+                        )
+                    ][:12]
+                    return {
+                        "status": "not_found",
+                        "error": f"nothing named like {wanted!r} in that window",
+                        "nearby": nearby,
+                        "instruction": (
+                            "Relay these names and ask which one they meant, "
+                            "or scroll and try again."
+                        ),
+                    }
+
+                # A library row opens on double click; a button or link
+                # opens on one.
+                double = target.control_type in _ROW_TYPES
+                ui.click(ref=target.ref, double=double)
+
+                return {
+                    "status": "success",
+                    "opened": target.name or wanted,
+                    "control": target.control_type,
+                    "via": "double click" if double else "click",
+                }
+
             if action == "exists":
                 if not isinstance(name, str):
                     return {"status": "error", "error": "'exists' needs 'name'."}
@@ -373,13 +590,31 @@ class UIControlTool(AlfredTool):
                 ready = ui.wait_ready(
                     window, pid, timeout or 25.0, min_controls=minimum,
                 )
+                if ready:
+                    return {"status": "success", "ready": True}
+
+                # Say what IS on screen. Steam waiting on "Sign in to
+                # Steam" is a different problem from Steam not starting,
+                # and timing out silently makes them look identical.
+                try:
+                    open_now = [w["title"] for w in ui.windows()][:10]
+                except UiaError:
+                    open_now = []
+
                 return {
-                    "status": "success" if ready else "error",
-                    "ready": ready,
-                    **({} if ready else {
-                        "error": f"{window or 'the window'} did not become "
-                                 "usable in time",
-                    }),
+                    "status": "error",
+                    "ready": False,
+                    "error": (
+                        f"{window or 'the window'} did not become usable "
+                        "in time"
+                    ),
+                    "windows_open": open_now,
+                    "instruction": (
+                        "Look at windows_open. If one is a sign-in or "
+                        "update prompt, tell the user and ask them to "
+                        "deal with it - do not type credentials. If the "
+                        "app simply needs longer, wait_ready again."
+                    ),
                 }
 
             return {"status": "error", "error": "unhandled action"}

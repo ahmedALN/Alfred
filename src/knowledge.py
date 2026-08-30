@@ -80,6 +80,20 @@ WINDOWS_PLAYBOOK: list[tuple[str, str]] = [
     ("system", "Launchers (Steam, Epic, Battle.net, Xbox) are ordinary "
      "apps with real accessibility trees even when the games they launch "
      "are not - do the launcher part with ui_control."),
+    ("correction", "Reach for the whole-job ui_control actions before "
+     "the single gestures: after open_app and wait_ready, 'search "
+     "window= text=' types into the app's own search box and submits, "
+     "and 'open_item window= name=' opens a result, library row, tile, "
+     "save or instance by name. 'Open Steam, search Hades, open it' is "
+     "three calls. tree/click/type is the fallback, not the default."),
+    ("correction", "If wait_ready fails, read windows_open in the result "
+     "before retrying. A 'Sign in to ...' or update window means the app "
+     "needs the USER, not more waiting - say so and hand it to them. "
+     "Never type credentials."),
+    ("system", "Games and launchers usually have no Start-menu entry - "
+     "open_app finds them by their desktop shortcut instead, so 'steam', "
+     "'multimc', 'brawlhalla' and 'fortnite' all resolve by name."),
+
     # --- the web ------------------------------------------------------
     ("correction", "To reach a specific web page, pass the URL straight to "
      "open_app: open_app app='https://www.youtube.com/@Deji/videos'. It "

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from src.tools.base import AlfredTool
@@ -101,10 +102,36 @@ class OpenAppTool(AlfredTool):
             and getattr(self._router, "isolated", False)
         ):
             try:
-                out = self._isolated.launch(app)
+                # Resolve the name the same way as on the user's desktop
+                # first. The agent in that session starts a path, not a
+                # name - so "notepad" worked only because it happens to
+                # be on PATH, while "steam" or "multimc" did not.
+                spec = self.launcher.resolve(app)
+
+                if spec is None:
+                    return {
+                        "status": "not_found",
+                        "error": f"could not find an app called {app!r}",
+                        "instruction": (
+                            "Tell the user you could not find it and ask "
+                            "what it is called."
+                        ),
+                    }
+
+                path, args = spec.value, None
+
+                if spec.kind == "appsfolder":
+                    # Get-StartApps hands back a real path for some
+                    # classic desktop apps rather than an AppID; putting
+                    # that behind shell:AppsFolder\ opens nothing.
+                    if not os.path.exists(spec.value):
+                        path = "explorer.exe"
+                        args = f"shell:AppsFolder\{spec.value}"
+
+                out = self._isolated.launch(path, args)
                 return {
                     "status": "success",
-                    "app": app,
+                    "app": spec.display or app,
                     "opened_in": "alfred's private desktop",
                     "session": out.get("session"),
                     "pid": out.get("pid"),

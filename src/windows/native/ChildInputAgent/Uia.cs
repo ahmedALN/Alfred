@@ -390,13 +390,86 @@ internal sealed class UiaService
             );
         }
 
-        // The tightest title match is nearly always the one meant - a
-        // loose substring otherwise picks up whichever window happened
-        // to be enumerated first.
+        if (candidates.Count == 1)
+        {
+            return candidates[0].El;
+        }
+
+        // Shortest-title-wins used to decide this, and it picked the
+        // wrong window as soon as titles moved: searching in Explorer
+        // renamed it "notepad - Search Results in Windows - File
+        // Explorer", at which point a terminal called
+        // "C:\WINDOWS\system32\cmd.exe" was the shorter match for
+        // "Windows" and the next action went there instead.
         return candidates
-            .OrderBy(c => c.Title.Length)
+            .Select(c => new
+            {
+                c.El,
+                Score = ScoreTitle(c.Title, title ?? string.Empty)
+                        + (SameAsLastWindow(c.El) ? 250 : 0),
+            })
+            .OrderByDescending(c => c.Score)
             .First()
             .El;
+    }
+
+    private static int ScoreTitle(string title, string wanted)
+    {
+        if (string.IsNullOrWhiteSpace(wanted))
+        {
+            return 0;
+        }
+
+        string haystack = title.ToLowerInvariant();
+        string want = wanted.Trim().ToLowerInvariant();
+
+        int score;
+
+        if (haystack == want)
+        {
+            score = 1000;
+        }
+        else if (haystack.StartsWith(want, StringComparison.Ordinal))
+        {
+            score = 500;
+        }
+        else if (haystack.Contains(want, StringComparison.Ordinal))
+        {
+            // A whole word beats a fragment inside a path.
+            score = Regex.IsMatch(haystack, $@"{Regex.Escape(want)}")
+                ? 300
+                : 100;
+        }
+        else
+        {
+            score = 50;   // matched by regex rather than plain text
+        }
+
+        // Among equals the tighter title is the better answer.
+        return score - Math.Min(title.Length / 4, 40);
+    }
+
+    /// <summary>
+    /// Staying on the window we were just working in is almost always
+    /// right: "search Explorer, then open the result" is one job, and
+    /// the second half should not wander to a different window whose
+    /// title happens to match too.
+    /// </summary>
+    private bool SameAsLastWindow(AutomationElement candidate)
+    {
+        if (_window is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return Automation.Compare(_window, candidate);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private string OpWindows(JsonElement root)
