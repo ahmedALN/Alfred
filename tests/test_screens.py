@@ -143,3 +143,36 @@ def test_an_ordinary_app_window_is_neither():
     normal = [_c("Button", "Store"), _c("ListItem", "Hades")]
 
     assert not is_noise("Steam", normal) and assess("Steam", normal) is None
+
+
+def test_a_sign_in_button_on_a_busy_page_is_not_a_demand_to_sign_in():
+    """Half the web has "Sign in" in its corner. Treating YouTube's as a
+    prompt would stop Alfred on ordinary pages all day."""
+    page = [_c("Button", "Sign in")] + [
+        _c("Hyperlink", f"Some video number {i} 12 minutes") for i in range(40)
+    ]
+
+    assert assess("YouTube - Google Chrome", page) is None
+
+
+def test_a_real_sign_in_screen_is_still_caught():
+    """A dialog is small and says what it wants."""
+    need = assess("Epic Games", [
+        _c("Text", "Sign in to continue"), _c("Button", "Continue"),
+        _c("Button", "Cancel"),
+    ])
+    assert need.kind == "sign_in"
+
+
+def test_a_sign_in_titled_window_is_caught_however_big():
+    need = assess("Sign in to Steam", [
+        _c("Text", "Sign in")] + [_c("Button", f"thing {i}") for i in range(40)]
+    )
+    assert need.kind == "sign_in"
+
+
+def test_terms_buried_in_a_footer_are_not_a_consent_prompt():
+    page = [_c("Hyperlink", "Terms of Service")] + [
+        _c("Hyperlink", f"Article number {i} about something") for i in range(40)
+    ]
+    assert assess("News - Google Chrome", page) is None

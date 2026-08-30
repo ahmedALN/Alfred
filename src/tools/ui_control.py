@@ -28,6 +28,7 @@ _ACTIONS = (
     # more accurate, because choosing the field is done here against the
     # real tree instead of guessed from a list.
     "search", "open_item", "clear_popups", "learn_control", "unnamed",
+    "links",
 )
 
 # What an app's search box tends to be called.
@@ -44,6 +45,17 @@ _CLICKABLE_TYPES = {"Button", "Hyperlink", "MenuItem", "TabItem"}
 # often works, because the label sits on top of the link - but when both
 # are on offer the link is the safer target.
 _LABEL_TYPES = {"Text"}
+
+# A page's own furniture, as opposed to the things ON it. Picking the
+# "first link" off a YouTube channel otherwise lands on Home or Shorts.
+_NAVIGATION = re.compile(
+    r"^(home|shorts|subscriptions?|you|library|history|explore|trending|"
+    r"search|sign in|log ?in|settings|about|contact|terms|privacy|help|"
+    r"send feedback|skip to|go to channel|see all|more|next|previous|"
+    r"back|forward|menu|filter|sort|share|save|report|download|"
+    r"notifications?|create|upload)",
+    re.I,
+)
 
 # Actions that act on one control and so need the right window read.
 _NEEDS_WINDOW = {
@@ -123,7 +135,7 @@ class UIControlTool(AlfredTool):
         "windows sitting over the app, and report anything that "
         "needs the user instead of clicking past it - search and "
         "open_item do this for you when they cannot find their "
-        "target); learn_control window= name= x= y= (remember an "
+        "target); links window= (the things ON a page - articles, videos, results - in order, with the site's navigation stripped out; the first is the newest, open it with click ref=); learn_control window= name= x= y= (remember an "
         "unlabelled button by where it sits, so open_item can use it "
         "by name from then on); unnamed window= (list the controls that "
         "have no name, with their positions, so they can be probed "
@@ -965,6 +977,32 @@ class UIControlTool(AlfredTool):
                     "note": (
                         "Remembered as a position in the window, so it "
                         "keeps working if the window moves or resizes."
+                    ),
+                }
+
+            if action == "links":
+                limit = _as_int(arguments.get("limit")) or 20
+                _, controls = ui.tree(window, pid, limit=400)
+
+                content = []
+                for c in controls:
+                    if c.control_type not in ("Hyperlink", "ListItem"):
+                        continue
+                    name = c.name.strip()
+                    # Real content is titled; furniture is labelled.
+                    if len(name) < 18 or _NAVIGATION.match(name):
+                        continue
+                    content.append(c)
+
+                return {
+                    "status": "success",
+                    "count": len(content),
+                    "links": [c.as_dict() for c in content[:limit]],
+                    "instruction": (
+                        "The things ON the page, in the order they appear, "
+                        "with the site's own navigation removed. The first "
+                        "is the newest or top-ranked one. Open it with "
+                        "click ref=<ref>."
                     ),
                 }
 

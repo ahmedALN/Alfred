@@ -202,13 +202,20 @@ def assess(title: str, controls: list[Any]) -> ScreenNeed | None:
             _options(controls),
         )
 
-    if _SIGN_IN.search(haystack):
+    # Wording alone is not enough. Half the web has a "Sign in" button in
+    # its corner, and treating YouTube's as a demand to sign in would
+    # stop Alfred on ordinary pages all day. A screen that is really
+    # ASKING is a small one - a dialog, a login form - or says so in its
+    # title. A page with hundreds of controls is a page, not a prompt.
+    focused = len(controls) < 25 or _SIGN_IN.search(title or "")
+
+    if focused and _SIGN_IN.search(haystack):
         return ScreenNeed(
             "sign_in",
             f"{title or 'This app'} is asking you to sign in.",
         )
 
-    if _CONSENT.search(haystack):
+    if (len(controls) < 25 or _CONSENT.search(title or "")) and             _CONSENT.search(haystack):
         return ScreenNeed(
             "consent",
             f"{title or 'This app'} is asking you to accept its terms.",

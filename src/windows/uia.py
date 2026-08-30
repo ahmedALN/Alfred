@@ -327,7 +327,7 @@ class UiaSession:
         # is the ask a screen reader sends; the app then needs a beat to
         # build the tree, so this waits rather than deciding after one
         # try that the window is empty.
-        for pause in (0.3, 1.2):
+        for pause in (0.4, 1.5, 3.0):
             if len(descendants) >= 4:
                 break
             self._wake_accessibility(win)

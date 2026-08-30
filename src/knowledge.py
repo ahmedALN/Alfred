@@ -258,9 +258,13 @@ WINDOWS_PLAYBOOK: list[tuple[str, str]] = [
     # --- the web ------------------------------------------------------
     ("correction", "To reach a specific web page, pass the URL straight to "
      "open_app: open_app app='https://www.youtube.com/@Deji/videos'. It "
-     "opens in the default browser, already on that page. Do NOT open a "
-     "browser and then try to drive its address bar - that is several "
+     "opens on that page in a browser whose content can be read. Do NOT "
+     "open a browser and then drive its address bar - that is several "
      "fragile steps to arrive where one reliable step lands you."),
+    ("correction", "A URL is not a window title. After opening a page, "
+     "address the window by the SITE's name - 'YouTube', 'Steam' - not "
+     "by the address you opened. Passing the URL as the window makes "
+     "every following step fail to find anything."),
     ("correction", "Never type into a browser without naming the field. "
      "ui_control type with only a window types into whatever has focus, "
      "which in a browser is the page, not the search box. Read the tree, "
@@ -276,12 +280,16 @@ WINDOWS_PLAYBOOK: list[tuple[str, str]] = [
     ("correction", "On a website, ui_control tree with the default "
      "limit=80 stops before the content: a site's first 80 controls are "
      "its navigation. Pass limit=300 (or contains=) when reading a page."),
+    ("correction", "To open something ON a page - the newest video, the "
+     "top result, the first article - use ui_control 'links', which "
+     "returns what is actually on the page in order with the site's own "
+     "navigation stripped out, then click ref= the first one. Reading "
+     "the whole tree and trying to pick a video out of 300 controls "
+     "lands on 'Home' or 'Shorts' instead."),
     ("system", "A YouTube channel's uploads live at "
-     "https://www.youtube.com/@<handle>/videos, newest first. To play the "
-     "latest: open_app that URL, wait_ready min_controls=40, tree "
-     "limit=300, then click the FIRST Hyperlink whose name is long (a "
-     "video title, usually ending '<n> minutes') - skip 'Go to channel "
-     "...', 'Home', 'Shorts' and other navigation."),
+     "https://www.youtube.com/@<handle>/videos, newest first. To open "
+     "the latest: open_app that URL, wait_ready min_controls=40, then "
+     "links, then click the first one."),
     ("system", "A YouTube video page exposes real player controls: "
      "'Play', 'Pause (k)', 'Mute (m)', 'Full screen (f)', a 'Volume' "
      "slider. After opening a video, confirm it is playing by finding "

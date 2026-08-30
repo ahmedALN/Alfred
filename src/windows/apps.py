@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import shlex
 import subprocess
 import time
 from dataclasses import asdict, dataclass
@@ -308,7 +309,8 @@ class AppLauncher:
     # Launch
     # ================================================================
 
-    def _launch(self, spec: LaunchSpec) -> int | None:
+    def _launch(self, spec: LaunchSpec,
+                arguments: str | None = None) -> int | None:
         if spec.kind in ("uri", "shortcut"):
             os.startfile(spec.value)  # noqa: S606
             return None
@@ -322,8 +324,15 @@ class AppLauncher:
 
         # exe
         try:
+            command = [spec.value]
+            if arguments:
+                # Opening a page IN a named browser, rather than letting
+                # the OS pick one. Split, because "--new-window <url>" is
+                # two arguments and passing it as one leaves the browser
+                # treating the whole thing as a search term.
+                command.extend(shlex.split(arguments, posix=False))
             proc = subprocess.Popen(
-                [spec.value],
+                command,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
             return proc.pid
@@ -440,6 +449,7 @@ class AppLauncher:
         self,
         app_name: str,
         target: DesktopTarget = "alfred",
+        arguments: str | None = None,
     ) -> AppLaunchResult:
         if target not in ("alfred", "user", "current"):
             raise ValueError("target must be 'alfred', 'user', or 'current'.")
@@ -471,8 +481,13 @@ class AppLauncher:
         target_desktop = self._resolve_target(target)
         known = {w.hwnd for w in self._list_visible_windows()}
 
-        # Already open? Just retarget it.
-        existing = self._existing_window(spec.display)
+        # Already open? Just retarget it - unless there are arguments to
+        # deliver. "Open Chrome" is satisfied by the Chrome already
+        # running; "open this page in Chrome" is not, and reusing the
+        # window silently dropped the URL on the floor.
+        existing = (
+            None if arguments else self._existing_window(spec.display)
+        )
         if existing is not None:
             moved, actual = (
                 (False, None) if target == "current"
@@ -486,7 +501,7 @@ class AppLauncher:
             )
 
         try:
-            pid = self._launch(spec)
+            pid = self._launch(spec, arguments)
         except Exception as exc:  # noqa: BLE001
             return AppLaunchResult(
                 app=requested, executable=spec.value, target=target,
