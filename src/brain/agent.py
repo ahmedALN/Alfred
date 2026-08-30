@@ -679,6 +679,13 @@ class TaskAgent:
             return ""
         try:
             facts = self._learner.recall(goal, top_k=k)
+            if not facts:
+                # Nothing cleared the confidence bar. For a planning hint
+                # a near miss still beats silence - "what have you been
+                # doing today" scored 0.535 against a 0.55 threshold and
+                # came back with nothing at all. The planner can ignore a
+                # hint; it cannot use one it never saw.
+                facts = self._learner.recall(goal, top_k=2, threshold=0.42)
         except Exception:  # noqa: BLE001
             return ""
         lines = []

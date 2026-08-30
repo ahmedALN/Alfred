@@ -257,7 +257,8 @@ class MemoryLearner:
             print(f"[Memory] embedding failed: {exc}")
             return None
 
-    def recall(self, query: str, top_k: int = 5) -> list[Fact]:
+    def recall(self, query: str, top_k: int = 5,
+               threshold: float | None = None) -> list[Fact]:
         facts = self._store.all_facts()
 
         if not facts:
@@ -276,7 +277,7 @@ class MemoryLearner:
 
             score = cosine_similarity(query_embedding, fact.embedding)
 
-            if score >= RECALL_THRESHOLD:
+            if score >= (RECALL_THRESHOLD if threshold is None else threshold):
                 scored.append((score, fact))
 
         scored.sort(key=lambda pair: pair[0], reverse=True)

@@ -26,6 +26,58 @@ _SOURCE = "playbook"
 # Each entry: (category, content). category is one of the memory
 # categories; "correction" is used for "do it this way, not that way".
 WINDOWS_PLAYBOOK: list[tuple[str, str]] = [
+    # --- what Alfred itself can do -----------------------------------
+    ("system", "Alfred's own abilities, in the order worth reaching for "
+     "them: ui_control to work inside an app; open_app to start one or "
+     "open a URL; powershell for files, processes, services and anything "
+     "without a dedicated tool; system_info and network_info for "
+     "structured machine state; desktop_control only when an app exposes "
+     "no accessibility tree; remember/recall/forget for facts that "
+     "outlive the conversation; run_task to hand a long job to the "
+     "background agent; task_status and episodes to answer 'how is that "
+     "going' and 'what did you do'; resource_mode for game mode; "
+     "what_can_you_do when asked what Alfred is."),
+
+    ("correction", "Delegate to run_task when a job needs several apps or "
+     "several minutes - it runs in the background and reports back, so "
+     "the conversation is not blocked. Do the job inline when it is one "
+     "or two tool calls. Never call run_task for something already "
+     "finished, and never wait on it: say it has started and move on."),
+
+    ("system", "'Without disturbing me', 'in the background', 'on your "
+     "own desktop' switch the work to Alfred's private Windows session "
+     "automatically - nothing needs to be done to arrange it, and it "
+     "carries through run_task. Only claim the work happened privately "
+     "if a tool result actually says so. Sound played there cannot be "
+     "heard, so never take a music or video request into it."),
+
+    ("system", "When the user asks what you have been doing, what you "
+     "did today, whether you finished something, or what happened while "
+     "they were away, call the episodes tool. It is the record of what "
+     "Alfred actually did - tasks finished, routines replayed, "
+     "background events, with timestamps. Do not answer from the "
+     "conversation or from memory: recall holds facts, episodes holds "
+     "actions."),
+
+    ("system", "A task that succeeds is distilled into a reusable skill, "
+     "and a later request that matches one replays it instead of "
+     "planning from scratch - which is why phrasing a repeat request the "
+     "same way makes it far faster. What was learned about an app is "
+     "kept too: the controls seen, notes about how it behaves, and any "
+     "buttons mapped by position. Check that before working an app out "
+     "again."),
+
+    ("system", "Game mode (resource_mode) unloads the local models to "
+     "free GPU memory and pauses background work. It switches on by "
+     "itself when a real game goes fullscreen - browsers, VLC, Spotify "
+     "and OBS do not count - and the user can ask for it directly. In "
+     "game mode, prefer powershell and ui_control over anything that "
+     "needs vision."),
+
+    ("correction", "Answer questions about Alfred from what_can_you_do "
+     "rather than from memory or guesswork - it is generated from the "
+     "tools actually loaded, so it stays true as things change."),
+
     # --- tool choice -------------------------------------------------
     ("correction", "To drive a normal Windows app (Spotify, a browser, "
      "Explorer, Settings, Office) use the ui_control tool - call "
@@ -429,8 +481,23 @@ def cmd_seed(_args: list[str]) -> int:
         )
         added += 1
 
+    # Anything sourced from the playbook that is no longer IN the
+    # playbook is stale - a line that was reworded or corrected would
+    # otherwise sit in memory contradicting its replacement for ever.
+    current = {content.strip().lower() for _, content in WINDOWS_PLAYBOOK}
+    removed = 0
+    for fact in store.all_facts():
+        if fact.source != _SOURCE:
+            continue
+        if fact.content.strip().lower() not in current:
+            store.delete_fact(fact.id)
+            removed += 1
+
     store.close()
-    print(f"playbook: {added} new, {len(WINDOWS_PLAYBOOK)} total.")
+    print(
+        f"playbook: {added} new, {removed} stale removed, "
+        f"{len(WINDOWS_PLAYBOOK)} total."
+    )
     return 0
 
 
