@@ -60,6 +60,12 @@ def current_session_id() -> int | None:
     return None
 
 
+def _payload(response: dict[str, Any]) -> dict[str, Any]:
+    """The agent answers {"ok": true, "data": {...}} - unwrap it."""
+    data = response.get("data")
+    return data if isinstance(data, dict) else {}
+
+
 class ChildSessionClient:
     """
     Client for the persistent Alfred ChildInputAgent.
@@ -513,6 +519,39 @@ class ChildSessionClient:
                 "text": text,
             }
         )
+
+    # ---------------------------------------------------------------
+    # App lifecycle in the agent's session
+    #
+    # Alfred's own process lives in the user's session, so anything it
+    # starts lands there. These ask the agent to do it instead, so apps
+    # open where Alfred is working.
+    # ---------------------------------------------------------------
+
+    def launch(self, path: str, args: str | None = None) -> dict[str, Any]:
+        """Start an app in the agent's session. Returns its pid when the
+        shell gives us one (Store apps and URLs often don't)."""
+        request: dict[str, Any] = {"op": "launch", "path": path}
+        if args:
+            request["args"] = args
+        return _payload(self._request(request))
+
+    def close_apps(
+        self, pids: "int | list[int]", force: bool = False,
+    ) -> dict[str, Any]:
+        """Close apps by pid. Tries a graceful window close first so apps
+        can save; falls back to terminating. The agent refuses any pid
+        outside its own session, so a stale pid can never reach the
+        user's desktop."""
+        ids = [int(pids)] if isinstance(pids, int) else [int(p) for p in pids]
+        return _payload(
+            self._request({"op": "close", "pids": ids, "force": bool(force)})
+        )
+
+    def list_apps(self) -> list[dict[str, Any]]:
+        """Visible windowed apps in the agent's session."""
+        apps = _payload(self._request({"op": "list_apps"})).get("apps")
+        return apps if isinstance(apps, list) else []
 
     def capture_window(self, hwnd: int) -> dict[str, Any]:
         """

@@ -91,16 +91,54 @@ namespace Alfred.ChildSessionProbe
             private bool _connected;
             private bool _loginComplete;
 
+            // Never steal the user's focus when this window appears.
+            protected override bool ShowWithoutActivation
+            {
+                get { return true; }
+            }
+
+            // ShowWithoutActivation only covers the initial Show; the RDP
+            // control calls SetFocus while connecting. WS_EX_NOACTIVATE
+            // makes the window refuse activation outright, and
+            // WS_EX_TOOLWINDOW keeps it out of Alt+Tab.
+            protected override CreateParams CreateParams
+            {
+                get
+                {
+                    const int WsExNoActivate = 0x08000000;
+                    const int WsExToolWindow = 0x00000080;
+
+                    CreateParams cp = base.CreateParams;
+                    cp.ExStyle |= WsExNoActivate;
+                    cp.ExStyle |= WsExToolWindow;
+                    return cp;
+                }
+            }
+
             public ProbeForm()
             {
                 Text =
                     "Alfred Child Session Probe";
 
-                Width = 1280;
-                Height = 800;
+                // The RDP control has to be hosted in a real, sized
+                // window or the session stops rendering - but the user
+                // must never see or be interrupted by it. So: position
+                // it off-screen rather than minimising (a minimised RDP
+                // client suspends its output), keep it off the taskbar
+                // and out of Alt+Tab, and never let it take focus.
+                Width = ChildDesktopWidth;
+                Height = ChildDesktopHeight;
 
                 StartPosition =
-                    FormStartPosition.CenterScreen;
+                    FormStartPosition.Manual;
+
+                Location =
+                    new System.Drawing.Point(-32000, -32000);
+
+                ShowInTaskbar = false;
+
+                FormBorderStyle =
+                    FormBorderStyle.None;
 
                 BackColor =
                     System.Drawing.Color.Black;

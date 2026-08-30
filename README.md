@@ -66,6 +66,8 @@ python -m src.knowledge seed         # load the built-in Windows playbook into m
 python -m src.skills list            # learned routines  (show / forget / disable / enable)
 python -m src.episodes recent        # what it actually did lately  (search / prune)
 python -m src.apps list              # how to work inside each app  (show / note / forget)
+python -m src.childsession probe     # can this PC give Alfred its own desktop?
+python -m src.startup sessions       # what each Windows session costs in RAM  (list / trim)
 python -m src.autostart install      # start at login via the watchdog (uninstall / status)
 python -m src.watchdog               # run Alfred with crash-restart supervision
 python -m src.voice.setup_wakeword   # download the model for a custom wake phrase
@@ -76,6 +78,15 @@ model set in `.env` — `ALFRED_AI_PLAN_MODEL` (default
 `nvidia/nemotron-3-super-120b-a12b`, free at build.nvidia.com). If that key is
 missing or down it falls back through Gemini to the local model automatically.
 Execution of each step uses the fast local model.
+
+**Its own desktop:** say *"without disturbing me, do X"* and Alfred opens a
+second, invisible Windows session (a [child
+session](https://learn.microsoft.com/en-us/windows/win32/termserv/child-sessions))
+and works there — it can open apps, click and type without touching your screen,
+focus or clipboard, and it survives you locking the PC. When the task finishes it
+closes whatever it opened. Setup is three one-off elevated commands in
+`scripts/`; run `python -m src.childsession probe` first to check your machine.
+Games are deliberately *not* isolated — run those normally.
 
 **Working inside apps:** "open Spotify and play something by X", "open Steam and
 launch Y" — Alfred drives an app's real controls through the accessibility tree

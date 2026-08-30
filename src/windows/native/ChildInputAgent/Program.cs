@@ -457,6 +457,19 @@ private static string HandleRequest(
             case "capture_stop":
                 return HandleCaptureStop();
 
+            case "launch":
+                return HandleLaunch(
+                    root
+                );
+
+            case "close":
+                return HandleClose(
+                    root
+                );
+
+            case "list_apps":
+                return HandleListApps();
+
             case "shutdown":
                 return Success(
                     new
@@ -1079,6 +1092,214 @@ private static readonly Dictionary<string, ushort> VkMap =
     ["f5"] = 0x74, ["f6"] = 0x75, ["f7"] = 0x76, ["f8"] = 0x77,
     ["f9"] = 0x78, ["f10"] = 0x79, ["f11"] = 0x7A, ["f12"] = 0x7B,
 };
+
+// ================================================================
+// App lifecycle inside THIS session
+//
+// Alfred's process lives in the user's session, so anything it
+// launches would land there. These run in the child session, so
+// apps open where Alfred is working - not on the user's screen.
+// ================================================================
+
+private static string HandleLaunch(JsonElement root)
+{
+    if (!root.TryGetProperty("path", out JsonElement pathElement))
+    {
+        return Error("missing_path", "Request must contain 'path'.");
+    }
+
+    string? path = pathElement.GetString();
+
+    if (string.IsNullOrWhiteSpace(path))
+    {
+        return Error("missing_path", "'path' must be a non-empty string.");
+    }
+
+    string? arguments = null;
+
+    if (root.TryGetProperty("args", out JsonElement argsElement))
+    {
+        arguments = argsElement.GetString();
+    }
+
+    try
+    {
+        var info = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = path,
+            UseShellExecute = true
+        };
+
+        if (!string.IsNullOrWhiteSpace(arguments))
+        {
+            info.Arguments = arguments;
+        }
+
+        System.Diagnostics.Process? started =
+            System.Diagnostics.Process.Start(info);
+
+        if (started == null)
+        {
+            // Shell verbs (Store apps, URLs) return no Process object.
+            return Success(
+                new
+                {
+                    launched = true,
+                    pid = (int?)null,
+                    session = GetCurrentSessionId(),
+                    note = "started via the shell; no pid available"
+                }
+            );
+        }
+
+        return Success(
+            new
+            {
+                launched = true,
+                pid = started.Id,
+                session = GetCurrentSessionId()
+            }
+        );
+    }
+    catch (Exception ex)
+    {
+        return Error("launch_failed", ex.Message);
+    }
+}
+
+private static string HandleClose(JsonElement root)
+{
+    var pids = new List<int>();
+
+    if (root.TryGetProperty("pids", out JsonElement pidsElement) &&
+        pidsElement.ValueKind == JsonValueKind.Array)
+    {
+        foreach (JsonElement item in pidsElement.EnumerateArray())
+        {
+            if (item.TryGetInt32(out int pid))
+            {
+                pids.Add(pid);
+            }
+        }
+    }
+
+    if (root.TryGetProperty("pid", out JsonElement single) &&
+        single.TryGetInt32(out int onePid))
+    {
+        pids.Add(onePid);
+    }
+
+    if (pids.Count == 0)
+    {
+        return Error("missing_pids", "Request must contain 'pid' or 'pids'.");
+    }
+
+    bool force = false;
+
+    if (root.TryGetProperty("force", out JsonElement forceElement) &&
+        forceElement.ValueKind == JsonValueKind.True)
+    {
+        force = true;
+    }
+
+    var closed = new List<int>();
+    var failed = new List<int>();
+    int mySession = GetCurrentSessionId();
+
+    foreach (int pid in pids)
+    {
+        try
+        {
+            var proc = System.Diagnostics.Process.GetProcessById(pid);
+
+            // Never touch anything outside this session - a stale pid
+            // must not become a kill on the user's own desktop.
+            if (proc.SessionId != mySession)
+            {
+                failed.Add(pid);
+                continue;
+            }
+
+            // Ask nicely first; a graceful close lets apps save state.
+            bool done = false;
+
+            if (!force && proc.MainWindowHandle != IntPtr.Zero)
+            {
+                done = proc.CloseMainWindow();
+
+                if (done)
+                {
+                    done = proc.WaitForExit(3000);
+                }
+            }
+
+            if (!done)
+            {
+                proc.Kill(entireProcessTree: true);
+                proc.WaitForExit(3000);
+            }
+
+            closed.Add(pid);
+        }
+        catch (Exception)
+        {
+            // Already gone counts as closed; anything else is a failure.
+            failed.Add(pid);
+        }
+    }
+
+    return Success(
+        new
+        {
+            closed,
+            failed,
+            session = mySession
+        }
+    );
+}
+
+private static string HandleListApps()
+{
+    int mySession = GetCurrentSessionId();
+    var apps = new List<object>();
+
+    foreach (var proc in System.Diagnostics.Process.GetProcesses())
+    {
+        try
+        {
+            if (proc.SessionId != mySession)
+            {
+                continue;
+            }
+
+            if (proc.MainWindowHandle == IntPtr.Zero)
+            {
+                continue;
+            }
+
+            apps.Add(
+                new
+                {
+                    pid = proc.Id,
+                    name = proc.ProcessName,
+                    title = proc.MainWindowTitle
+                }
+            );
+        }
+        catch (Exception)
+        {
+            // Processes come and go while enumerating; skip.
+        }
+    }
+
+    return Success(
+        new
+        {
+            session = mySession,
+            apps
+        }
+    );
+}
 
 private static bool TryResolveKey(string token, out ushort vk)
 {

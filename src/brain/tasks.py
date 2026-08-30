@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from src.brain.agent import TaskAgent, TaskResult
+from src.brain.isolation import strip_isolation_phrase, wants_isolation
 from src.brain.skills import SkillLibrary
 
 SpeakFn = Callable[[str], Awaitable[None]]
@@ -21,6 +22,7 @@ class TaskRecord:
     # | exhausted | cancelled | error
     summary: str = ""
     source: str = "voice"  # "voice" (user asked) | "brain" (proactive)
+    isolated: bool = False  # run on Alfred's own desktop, not the user's
     skipped_confirmations: list[str] = field(default_factory=list)
 
 
@@ -49,6 +51,7 @@ class TaskQueue:
         self._skills: SkillLibrary | None = skills
         self._episodes = episodes
         self._app_memory = app_memory
+        self._isolated_desktop: Any = None
         self._gate = asyncio.Event()
         self._gate.set()  # not paused
         self._cancel = threading.Event()
@@ -68,6 +71,9 @@ class TaskQueue:
 
     def attach_app_memory(self, app_memory: Any) -> None:
         self._app_memory = app_memory
+
+    def attach_isolated_desktop(self, desktop: Any) -> None:
+        self._isolated_desktop = desktop
 
     def _record_episode(self, record: TaskRecord, result: TaskResult) -> None:
         if self._episodes is None:
@@ -149,12 +155,21 @@ class TaskQueue:
     # ----------------------------------------------------------------
 
     def submit(
-        self, goal: str, task_id: str | None = None, source: str = "voice"
+        self, goal: str, task_id: str | None = None, source: str = "voice",
+        isolated: bool | None = None,
     ) -> str:
         goal = goal.strip()
         task_id = task_id or uuid.uuid4().hex[:8]
 
-        self._records[task_id] = TaskRecord(id=task_id, goal=goal, source=source)
+        # "without disturbing me, do X" -> run it on Alfred's own desktop.
+        if isolated is None:
+            isolated = wants_isolation(goal)
+        if isolated:
+            goal = strip_isolation_phrase(goal)
+
+        self._records[task_id] = TaskRecord(
+            id=task_id, goal=goal, source=source, isolated=isolated,
+        )
         self._order.append(task_id)
         self._trim()
 
@@ -225,6 +240,25 @@ class TaskQueue:
             self._cancel.clear()
             self._persist(task_id, "running")
 
+            # "without disturbing me" - bring up Alfred's own desktop and
+            # work there. If it cannot be brought up we say so and carry
+            # on here, which is worse but not a failure.
+            isolated_ready = False
+            if record.isolated and self._isolated_desktop is not None:
+                sid = await asyncio.to_thread(self._isolated_desktop.ensure)
+                isolated_ready = sid is not None
+                if isolated_ready:
+                    _progress(
+                        f"Working on my own desktop (session {sid}) so this "
+                        "stays out of your way."
+                    )
+                else:
+                    await _safe_speak(
+                        speak,
+                        "(System: proactive) I couldn't open my own desktop, "
+                        "so this will happen on your screen.",
+                    )
+
             def _plan_run(r=record):
                 return agent.run(
                     r.goal, get_session_id(),
@@ -283,6 +317,19 @@ class TaskQueue:
             self._persist(task_id, result.status, result.summary)
             self._record_episode(record, result)
             self._learn_app_knowledge(result)
+
+            # Alfred tidies up after itself: close what it opened in the
+            # isolated session so the next task starts from a clean desk.
+            if isolated_ready and self._isolated_desktop is not None:
+                try:
+                    tidy = await asyncio.to_thread(
+                        self._isolated_desktop.cleanup
+                    )
+                    closed = len(tidy.get("closed", []))
+                    if closed:
+                        print(f"[Tasks] cleaned up {closed} app(s).")
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[Tasks] isolated cleanup failed: {exc}")
 
             await _safe_speak(speak, _announce(result))
 
