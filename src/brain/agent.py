@@ -204,8 +204,12 @@ class TaskAgent:
         learner: Any = None,
         app_memory: Any = None,
         audit: Any = None,
+        limitations: Any = None,
     ) -> None:
         self._chat = chat
+        # Walls hit before, and what got past them.
+        self._limitations = limitations
+        self._last_wall: str = ""
         self._plan_chat = plan_chat or chat
         # Verification defaults to the FAST model: the deterministic
         # fast-paths + strict per-substep scoping carry most of the load,
@@ -468,6 +472,7 @@ class TaskAgent:
                 len(result.steps) + 1, decision, history, result, session_id
             )
             result.steps.append(step)
+            self._note_wall(step)
 
         progressed = any(s.ok for s in result.steps)
 
@@ -612,6 +617,87 @@ class TaskAgent:
                 )
                 return False
         return True
+
+    def _note_wall(self, step: "Step") -> None:
+        """Count what Alfred ran into, and what got past it.
+
+        A failure followed by a different tool succeeding is the only
+        evidence of a workaround worth having - it is a route that
+        actually worked, rather than a plausible-sounding guess about
+        one.
+        """
+        if self._limitations is None:
+            return
+
+        args = step.args or {}
+        app = str(
+            args.get("window") or args.get("app") or args.get("name") or ""
+        )[:40]
+
+        try:
+            if not step.ok:
+                error = ""
+                if isinstance(step.result, dict):
+                    error = str(step.result.get("error") or step.verdict)
+                self._last_wall = self._limitations.hit(
+                    step.tool, error or "failed", app
+                )
+                return
+
+            if self._last_wall:
+                action = str(args.get("action") or "")
+                how = f"{step.tool} {action}".strip()
+                self._limitations.got_past(self._last_wall, how)
+                self._last_wall = ""
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Task] could not record the wall: {exc}")
+
+    def learn_workarounds(self) -> list[str]:
+        """Turn walls hit more than once into lasting knowledge.
+
+        Only where both halves are present: it happened again, and
+        something was seen to get past it. One failed run is bad luck,
+        and a lesson written from bad luck is a fact that is not true.
+        """
+        if self._limitations is None or self._learner is None:
+            return []
+
+        learned: list[str] = []
+
+        try:
+            ready = self._limitations.ready_to_teach()
+        except Exception:  # noqa: BLE001
+            return []
+
+        for wall in ready:
+            detail = (wall.get("detail") or "").strip()
+            where = f" in {wall['app']}" if wall.get("app") else ""
+            lesson = (
+                f"When {wall['tool']}{where} fails with "
+                f"\"{detail[:90]}\", it is not a one-off - it has happened "
+                f"{wall['hits']} times. What worked instead: "
+                f"{wall['workaround']}."
+            )
+
+            try:
+                self._learner.remember(
+                    content=lesson,
+                    category="correction",
+                    source="learned_workaround",
+                )
+                if self._app_memory is not None and wall.get("app"):
+                    self._app_memory.note(
+                        wall["app"],
+                        f"When {wall['tool']} fails here, "
+                        f"{wall['workaround']} works.",
+                        kind="workaround",
+                    )
+                self._limitations.mark_taught(wall["signature"])
+                learned.append(lesson)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[Task] could not store a workaround: {exc}")
+
+        return learned
 
     def reflect(self, result: "TaskResult") -> str:
         """One cheap post-mortem call. Turns a concrete failure reason into
@@ -806,6 +892,7 @@ class TaskAgent:
                 len(result.steps) + 1, decision, history, result, session_id
             )
             result.steps.append(step)
+            self._note_wall(step)
             calls += 1
 
             if step.ok:

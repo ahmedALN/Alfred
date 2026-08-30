@@ -26,6 +26,19 @@ _SOURCE = "playbook"
 # Each entry: (category, content). category is one of the memory
 # categories; "correction" is used for "do it this way, not that way".
 WINDOWS_PLAYBOOK: list[tuple[str, str]] = [
+    ("system", "Alfred counts what it runs into. A tool failing once is "
+     "bad luck; the same failure a second time, with something that was "
+     "seen to get past it, becomes a standing lesson written into memory "
+     "automatically - so the same wall is not hit a third time. "
+     "'python -m src.limitations' lists them, and 'unsolved' lists the "
+     "recurring ones nothing has got past, which is the honest list of "
+     "what Alfred currently cannot do."),
+    ("correction", "When a step fails, try a different ROUTE rather than "
+     "the same one again - a different tool, a different action, the web "
+     "instead of a window. Whatever works gets recorded against that "
+     "failure, and is what Alfred is told to reach for next time it "
+     "happens. Repeating the failed call teaches nothing."),
+
     # --- what Alfred itself can do -----------------------------------
     ("system", "Alfred's own abilities, in the order worth reaching for "
      "them: ui_control to work inside an app; open_app to start one or "

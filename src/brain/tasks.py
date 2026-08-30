@@ -354,6 +354,18 @@ class TaskQueue:
                 except Exception as exc:  # noqa: BLE001
                     print(f"[Task] reflection error: {exc}")
 
+            # And separately: anything Alfred has now run into more than
+            # once AND been seen to get past becomes a standing lesson,
+            # so the same wall is not hit a third time.
+            if hasattr(agent, "learn_workarounds"):
+                try:
+                    for lesson in await asyncio.to_thread(
+                        agent.learn_workarounds
+                    ):
+                        print(f"[Task] learned a way round: {lesson[:150]}")
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[Task] could not learn a workaround: {exc}")
+
     def _learn_app_knowledge(self, result: TaskResult) -> None:
         """Record the window titles and control names that actually worked,
         so the next task in the same app skips the exploration.

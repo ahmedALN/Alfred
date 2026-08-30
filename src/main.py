@@ -26,6 +26,7 @@ from src.brain.perception import Perception
 from src.brain.policy import Policy
 from src.brain.reasoner import LLMReasoner
 from src.brain.app_memory import AppMemory
+from src.brain.limitations import LimitationStore
 from src.brain.skill_store import SkillStore
 from src.brain.skills import SkillLibrary
 from src.brain.tasks import TaskQueue
@@ -312,6 +313,9 @@ async def main() -> None:
         activation.on_state_change = _on_listen_change
 
     _agent_tools = set(registry.names()) - {"run_task", "task_status"}
+    # Walls Alfred has run into before, and what got past them.
+    limitations = LimitationStore(_ROOT / "alfred_limitations.sqlite3")
+
     task_agent = TaskAgent(
         # Executing is where the tool calls are emitted, and that is a
         # function-calling job: the local 4B model plans a sensible step
@@ -337,6 +341,7 @@ async def main() -> None:
         situation=_situation,
         learner=learner,  # for post-task reflection lessons
         app_memory=app_memory,  # per-app control knowledge
+        limitations=limitations,  # what it keeps running into
         audit=None,  # set below once the audit log exists
     )
 
