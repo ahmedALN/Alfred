@@ -149,3 +149,46 @@ def test_unreachable_agent(monkeypatch):
                            desktop_manager=FakeDesktops(), alfred_desktop=2)
     out = t.execute({"action": "look"})
     assert out["status"] == "error" and "not reachable" in out["error"]
+
+
+# ------------------------------------------------- isolated session
+
+
+class _Router:
+    def __init__(self, isolated):
+        self.isolated = isolated
+
+
+def test_actions_are_never_deferred_on_alfreds_own_desktop(monkeypatch):
+    """Alfred's session has its own input queue - typing there cannot
+    touch the user's screen, so 'the user is active' must not block it.
+    Deferring would defeat the entire point of the isolated desktop."""
+    import src.tools.desktop_control as dc
+
+    monkeypatch.setattr(dc, "idle_seconds", lambda: 0.0)  # user is busy
+
+    client = FakeClient()
+    tool = dc.DesktopControlTool(
+        client, FakeVision(), desktop_manager=FakeDesktops(current=1),
+        alfred_desktop=2, router=_Router(isolated=True),
+    )
+
+    out = tool.execute({"action": "type", "text": "hello"})
+
+    assert out["status"] == "success"
+    assert ("type", "hello") in client.calls
+
+
+def test_actions_are_still_deferred_on_the_users_own_desktop(monkeypatch):
+    import src.tools.desktop_control as dc
+
+    monkeypatch.setattr(dc, "idle_seconds", lambda: 0.0)
+
+    tool = dc.DesktopControlTool(
+        FakeClient(), FakeVision(), desktop_manager=FakeDesktops(current=1),
+        alfred_desktop=2, router=_Router(isolated=False),
+    )
+
+    out = tool.execute({"action": "type", "text": "hello"})
+
+    assert out["status"] == "deferred"

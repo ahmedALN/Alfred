@@ -58,7 +58,7 @@ class DesktopControlTool(AlfredTool):
         "(x,y,dy - negative dy scrolls down); drag (x1,y1,x2,y2); activate "
         "(hwnd); wait (seconds); wait_for (text,timeout). Do a full "
         "sequence of actions in ONE turn - the screen only flickers once. "
-        "If an action is deferred because the user is busy, try again."
+        "If an action is deferred because the user is busy, try again - unless you are working on Alfred's private desktop, where actions are never deferred."
     )
 
     @property
@@ -111,9 +111,27 @@ class DesktopControlTool(AlfredTool):
 
     # ----------------------------------------------------------------
 
+    def _isolated(self) -> bool:
+        """True when input is going to Alfred's own Windows session."""
+        return bool(
+            self._router is not None
+            and getattr(self._router, "isolated", False)
+        )
+
     @contextmanager
     def _focus_borrow(self, force: bool = False):
-        """Switch to Alfred's desktop for the duration, then switch back."""
+        """Switch to Alfred's desktop for the duration, then switch back.
+
+        Skipped entirely when acting on Alfred's own Windows session: that
+        session has its own input queue and its own foreground window, so
+        input there cannot touch the user's screen. Deferring because "the
+        user is active" would be exactly backwards - not disturbing them
+        is the whole reason that session exists.
+        """
+
+        if self._isolated():
+            yield
+            return
 
         if not force and idle_seconds() < _USER_ACTIVE_SECONDS:
             raise _UserBusy()
