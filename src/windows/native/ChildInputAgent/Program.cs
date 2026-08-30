@@ -23,8 +23,16 @@ using WinRT;
 
 internal static class Program
 {
-private const string PipeName =
+// The agent runs in BOTH the user's own session and Alfred's isolated
+// child session (it is delivered there by the startup-app mechanism).
+// A single fixed pipe name meant whichever instance started first won
+// it, and Alfred had no way to say which desktop it wanted to act on.
+// Suffixing with the session id lets both coexist and lets Alfred pick.
+private const string PipeBaseName =
 "Alfred.ChildInput.v1";
+
+private static string PipeName =>
+$"{PipeBaseName}.s{GetCurrentSessionId()}";
 
 
 // ================================================================

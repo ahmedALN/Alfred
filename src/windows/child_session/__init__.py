@@ -25,25 +25,83 @@ class Screenshot:
         return "image/png"
 
 
+def child_session_id() -> int | None:
+    """The id of Alfred's isolated child session, if one is running.
+
+    Read-only; returns None when there is no child session (which is the
+    normal state until the child-session host connects one).
+    """
+    import ctypes
+
+    try:
+        wtsapi32 = ctypes.WinDLL("wtsapi32.dll")
+        fn = wtsapi32.WTSGetChildSessionId
+        fn.argtypes = [ctypes.POINTER(ctypes.c_ulong)]
+        fn.restype = ctypes.c_bool
+        sid = ctypes.c_ulong(0)
+        if fn(ctypes.byref(sid)) and sid.value not in (0, 0xFFFFFFFF):
+            return int(sid.value)
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def current_session_id() -> int | None:
+    """The session this Python process is running in."""
+    import ctypes
+
+    try:
+        pid = ctypes.windll.kernel32.GetCurrentProcessId()
+        sid = ctypes.c_ulong(0)
+        if ctypes.windll.kernel32.ProcessIdToSessionId(pid, ctypes.byref(sid)):
+            return int(sid.value)
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 class ChildSessionClient:
     """
     Client for the persistent Alfred ChildInputAgent.
 
-    The native C# agent runs inside Session 2 and listens on:
+    An agent instance runs in each Windows session that has one, and
+    each listens on a session-scoped pipe:
 
-        \\\\.\\pipe\\Alfred.ChildInput.v1
+        \\\\.\\pipe\\Alfred.ChildInput.v1.s<sessionId>
 
-    This Python client runs in the normal Alfred session.
+    ``target`` decides which desktop Alfred acts on:
+      "child"   - Alfred's isolated session (does not disturb the user);
+                  falls back to the current session if none is running
+      "current" - this session, i.e. the user's own desktop
+      an int    - that specific session id
     """
 
-    PIPE_NAME = r"\\.\pipe\Alfred.ChildInput.v1"
+    PIPE_BASE = r"\\.\pipe\Alfred.ChildInput.v1"
 
-    def __init__(self) -> None:
+    def __init__(self, target: str | int = "current") -> None:
         self._pipe: Any = None
         self._reader: Any = None
         self._writer: Any = None
+        self._target = target
 
         self._lock = threading.RLock()
+
+    @property
+    def PIPE_NAME(self) -> str:  # noqa: N802 - kept for callers/tests
+        return self._resolve_pipe()
+
+    def _resolve_pipe(self) -> str:
+        target = self._target
+        if isinstance(target, int):
+            session = target
+        elif target == "child":
+            session = child_session_id() or current_session_id()
+        else:
+            session = current_session_id()
+        if session is None:
+            # Last resort: the legacy un-suffixed name.
+            return self.PIPE_BASE
+        return f"{self.PIPE_BASE}.s{session}"
 
     # ================================================================
     # Connection

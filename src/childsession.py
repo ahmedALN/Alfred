@@ -6,8 +6,11 @@ Read-only. Changes nothing, needs no admin. Checks every prerequisite for
 Windows Child Sessions - the mechanism behind Power Automate's and
 UiPath's "picture-in-picture" - and says go or no-go with reasons.
 
-    probe        run all checks and print a verdict
-    explain      what a child session is and what enabling it would cost
+    probe            run all checks and print a verdict
+    explain          what a child session is, and how to undo enabling it
+    agents           which sessions have a reachable input agent
+    install-agent    let Alfred's agent start inside the child session
+    uninstall-agent  remove that startup entry
 """
 
 from __future__ import annotations
@@ -435,12 +438,120 @@ def main(argv: list[str]) -> int:
     if not argv:
         print(__doc__)
         return 0
-    handler = {"probe": cmd_probe, "explain": cmd_explain}.get(argv[0])
+    handler = {
+        "probe": cmd_probe,
+        "explain": cmd_explain,
+        "agents": cmd_agents,
+        "install-agent": cmd_install_agent,
+        "uninstall-agent": cmd_uninstall_agent,
+    }.get(argv[0])
     if handler is None:
         print(__doc__)
         return 2
     return handler(argv[1:])
 
+
+
+# ====================================================================
+# agent delivery
+#
+# Windows launches the user's startup apps inside a child session when
+# it is created. That is the documented (and only non-elevated) way to
+# get Alfred's input agent into its own session, so we use it
+# deliberately: one HKCU Run entry, which Windows then honours in both
+# the user's session and Alfred's.
+# ====================================================================
+
+_RUN_KEY = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run"
+_RUN_VALUE = "AlfredChildInputAgent"
+
+
+def _agent_exe() -> str | None:
+    from pathlib import Path
+
+    base = (Path(__file__).resolve().parent / "windows" / "native"
+            / "ChildInputAgent" / "bin" / "Release")
+    if not base.exists():
+        return None
+    for candidate in base.rglob("ChildInputAgent.exe"):
+        return str(candidate)
+    return None
+
+
+def cmd_install_agent(_args: list[str]) -> int:
+    exe = _agent_exe()
+    if exe is None:
+        print("ChildInputAgent.exe is not built. Run:")
+        print("  dotnet build src/windows/native/ChildInputAgent -c Release")
+        return 1
+
+    print("This adds ONE startup entry, for the current user only:")
+    print(f"  {_RUN_KEY}")
+    print(f"    {_RUN_VALUE} = {exe}")
+    print()
+    print("Windows then starts it inside Alfred's child session whenever")
+    print("that session is created - which is the whole point. It also")
+    print("starts in your own session, where Alfred already uses it.")
+    print()
+    print("Undo any time:  python -m src.childsession uninstall-agent")
+    print()
+
+    out = _ps(
+        f"Set-ItemProperty -Path 'Registry::{_RUN_KEY}' "
+        f"-Name '{_RUN_VALUE}' -Value '\"{exe}\"' -Type String; "
+        f"(Get-ItemProperty -Path 'Registry::{_RUN_KEY}' "
+        f"-Name '{_RUN_VALUE}').'{_RUN_VALUE}'"
+    )
+    if exe.lower() in out.lower():
+        print(f"Registered. -> {out}")
+        return 0
+    print(f"Could not confirm the entry. PowerShell said: {out!r}")
+    return 1
+
+
+def cmd_uninstall_agent(_args: list[str]) -> int:
+    _ps(
+        f"Remove-ItemProperty -Path 'Registry::{_RUN_KEY}' "
+        f"-Name '{_RUN_VALUE}' -ErrorAction SilentlyContinue"
+    )
+    left = _ps(
+        f"(Get-ItemProperty -Path 'Registry::{_RUN_KEY}' "
+        f"-Name '{_RUN_VALUE}' -ErrorAction SilentlyContinue)."
+        f"'{_RUN_VALUE}'"
+    )
+    if left:
+        print(f"Still present: {left}")
+        return 1
+    print("Startup entry removed.")
+    return 0
+
+
+def cmd_agents(_args: list[str]) -> int:
+    """Which sessions currently have a reachable agent."""
+    from src.windows.child_session import (
+        ChildSessionClient, ChildSessionError,
+        child_session_id, current_session_id,
+    )
+
+    here = current_session_id()
+    child = child_session_id()
+    print(f"this session: {here}")
+    print(f"child session: {child if child is not None else '(none running)'}")
+    print()
+    for label, target in (("current", "current"), ("child", "child")):
+        if target == "child" and child is None:
+            print(f"  {label:<8} -> no child session")
+            continue
+        client = ChildSessionClient(target)
+        try:
+            client.connect()
+            session = client.session()
+            client.close()
+            print(f"  {label:<8} -> agent alive in session {session}")
+        except ChildSessionError as exc:
+            client.close()
+            print(f"  {label:<8} -> not reachable ({str(exc)[:60]})")
+    return 0
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
