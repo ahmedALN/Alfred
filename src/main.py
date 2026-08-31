@@ -59,6 +59,82 @@ from src.windows.session_router import ROUTER as session_router
 from src.windows.child_session.bootstrap import ensure_agent_running
 
 
+def _build_phone_channel(settings, task_queue, status_tool):
+    """Bring up the WhatsApp channel, if it has been set up.
+
+    Returns the router, or None. Everything about this is optional: an
+    unconfigured Alfred behaves exactly as before.
+    """
+    if not (settings.whatsapp_token and settings.whatsapp_phone_id):
+        return None
+
+    from src.messaging.router import MessageRouter
+    from src.messaging.server import WebhookServer
+    from src.messaging.whatsapp import WhatsAppChannel
+
+    if not settings.whatsapp_allowed:
+        print(
+            "[Message] WhatsApp is configured but ALFRED_WHATSAPP_ALLOWED "
+            "is empty, so every message would be refused. Set it to your "
+            "own number."
+        )
+        return None
+
+    if not settings.whatsapp_app_secret:
+        print(
+            "[Message] WhatsApp needs ALFRED_WHATSAPP_APP_SECRET - without "
+            "it there is no way to tell a real message from a forged one, "
+            "and this channel can run anything on this machine."
+        )
+        return None
+
+    channel = WhatsAppChannel(
+        settings.whatsapp_token,
+        settings.whatsapp_phone_id,
+        app_secret=settings.whatsapp_app_secret,
+        verify_token=settings.whatsapp_verify_token,
+    )
+
+    def status() -> str:
+        try:
+            report = status_tool.execute({})
+            running = report.get("running") or []
+            recent = report.get("recent") or []
+            if running:
+                return "Working on: " + "; ".join(
+                    str(t.get("goal", ""))[:80] for t in running[:2]
+                )
+            if recent:
+                last = recent[0]
+                return (
+                    f"Nothing running. Last: {str(last.get('goal',''))[:70]} "
+                    f"({last.get('status','')})"
+                )
+        except Exception:  # noqa: BLE001
+            pass
+        return "Nothing running."
+
+    router = MessageRouter(
+        channel,
+        list(settings.whatsapp_allowed),
+        lambda text: task_queue.submit(text, source="voice"),
+        status=status,
+    )
+    channel.start(router.handle)
+
+    server = WebhookServer(
+        channel, port=settings.webhook_port, path=settings.webhook_path
+    )
+    if not server.start():
+        return None
+
+    print(
+        f"[Message] WhatsApp ready for {len(settings.whatsapp_allowed)} "
+        "number(s). Point the Meta webhook at your tunnel."
+    )
+    return router
+
+
 async def main() -> None:
     settings = load_settings()
 
@@ -202,6 +278,9 @@ async def main() -> None:
 
     session._situation_fn = _situation
 
+    # Shared with the phone channel, which reports status.
+    task_status_tool = TaskStatusTool(task_queue)
+
     for tool in (
         powershell_tool,
         open_app_tool,
@@ -215,7 +294,7 @@ async def main() -> None:
         recall_tool,
         forget_tool,
         RunTaskTool(task_queue),
-        TaskStatusTool(task_queue),
+        task_status_tool,
         EpisodesTool(episode_store),
         ResourceModeTool(resource_mode),
         WhatCanYouDoTool(
@@ -345,10 +424,22 @@ async def main() -> None:
         audit=None,  # set below once the audit log exists
     )
 
+    # --------------------------------------------------------------
+    # Messaging Alfred from a phone. Optional; off unless configured.
+    # --------------------------------------------------------------
+    phone = _build_phone_channel(settings, task_queue, task_status_tool)
+
+    async def announce(text: str) -> None:
+        """Say it in the room, and send it to the phone."""
+        if phone is not None:
+            # The spoken form carries a marker for the voice model.
+            phone.notify(text.replace("(System: proactive)", "").strip())
+        await session.inject_system_prompt(text)
+
     session.add_background_task(
         lambda: task_queue.run(
             task_agent,
-            session.inject_system_prompt,
+            announce,
             lambda: session.session_key,
         )
     )

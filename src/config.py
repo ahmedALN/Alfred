@@ -62,6 +62,15 @@ class Settings:
     voice_passphrase: str
     voice_passphrase_window: float
 
+    # --- Messaging Alfred from a phone ---
+    whatsapp_token: str
+    whatsapp_phone_id: str
+    whatsapp_app_secret: str
+    whatsapp_verify_token: str
+    whatsapp_allowed: tuple[str, ...]
+    webhook_port: int
+    webhook_path: str
+
     # --- Game / low-resource mode ---
     game_autodetect: bool
     game_detect_seconds: float
@@ -182,6 +191,23 @@ def load_settings() -> Settings:
         voice_passphrase_window=_get_float(
             "ALFRED_VOICE_PASSPHRASE_WINDOW", 300.0
         ),
+        whatsapp_token=os.getenv("ALFRED_WHATSAPP_TOKEN", "").strip(),
+        whatsapp_phone_id=os.getenv(
+            "ALFRED_WHATSAPP_PHONE_ID", ""
+        ).strip(),
+        whatsapp_app_secret=os.getenv(
+            "ALFRED_WHATSAPP_APP_SECRET", ""
+        ).strip(),
+        whatsapp_verify_token=os.getenv(
+            "ALFRED_WHATSAPP_VERIFY_TOKEN", ""
+        ).strip(),
+        whatsapp_allowed=tuple(
+            part.strip()
+            for part in os.getenv("ALFRED_WHATSAPP_ALLOWED", "").split(",")
+            if part.strip()
+        ),
+        webhook_port=_get_int("ALFRED_WEBHOOK_PORT", 8770),
+        webhook_path=os.getenv("ALFRED_WEBHOOK_PATH", "/webhook").strip(),
         game_autodetect=_get_bool("ALFRED_GAME_AUTODETECT", True),
         game_detect_seconds=_get_float("ALFRED_GAME_DETECT_SECONDS", 30.0),
         desktop_grid=_get_bool("ALFRED_DESKTOP_GRID", True),
