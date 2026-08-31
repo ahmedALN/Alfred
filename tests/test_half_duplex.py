@@ -9,7 +9,12 @@ from src.voice.activation import ActivationController  # noqa: E402
 
 
 def _session(**kw):
-    return AlfredLiveSession(ToolRegistry(), **kw)
+    session = AlfredLiveSession(ToolRegistry(), **kw)
+    # Night mode is read from the environment, and these tests are
+    # about the speaker: they must not quietly pass or fail depending
+    # on whether the machine they run on happens to be muted.
+    session._muted = False
+    return session
 
 
 def test_speaking_flag_tracks_queue_and_tail(monkeypatch):

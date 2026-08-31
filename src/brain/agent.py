@@ -1137,8 +1137,9 @@ class TaskAgent:
             f"REQUEST: {result.goal}\n\nWHAT CAME BACK:\n{trace}\n\n"
             "Answer the request in one short sentence, as if replying to "
             "a text message. Lead with the answer itself - yes, no, the "
-            "number, the name. If what came back does not answer it, "
-            "reply with exactly: NOTHING"
+            "number, the name. If what came back does not answer it, say "
+            "NOTHING." + "\n\n"
+            "Put your sentence on its own line after the word ANSWER:"
         )
         try:
             line = self._plan_chat.generate(
@@ -1148,7 +1149,7 @@ class TaskAgent:
         except Exception:  # noqa: BLE001
             return ""
 
-        line = line.splitlines()[0].strip() if line else ""
+        line = _answer_line(line)
         return "" if line.upper().startswith("NOTHING") else line[:300]
 
     # ----------------------------------------------------------------
@@ -1310,6 +1311,34 @@ def _parse(raw: str) -> dict[str, Any] | None:
         return None
 
     return parsed if isinstance(parsed, dict) else None
+
+
+def _answer_line(raw: str) -> str:
+    """The answer, not the working out.
+
+    "detailed thinking off" is a request, not a guarantee - the bench
+    got back "We need to answer: \"What version of Windows is this?\"
+    The output shows" as Alfred's reply to the user. So the sentence is
+    asked for behind a marker and taken from there; failing that, from
+    the end, because when a model does think out loud the conclusion is
+    the last thing it says, never the first.
+    """
+    lines = [l.strip() for l in (raw or "").splitlines() if l.strip()]
+    if not lines:
+        return ""
+
+    # Anchored to the start of a line, because "We need to answer:" is
+    # not the answer - it is a model narrating its way towards one, and
+    # a loose search finds that first. Scanned from the end, because
+    # that is where a conclusion lives.
+    for line in reversed(lines):
+        bare = line.lstrip("*#->` ").strip()
+        if bare.upper().startswith("ANSWER:"):
+            said = bare[len("ANSWER:"):].strip()
+            if said:
+                return said
+
+    return lines[-1]
 
 
 def _why_it_failed(step: "Step") -> str:

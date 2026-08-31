@@ -450,3 +450,41 @@ def test_a_failure_with_nothing_to_say_still_records_something():
 
     assert _why_it_failed(_step("open_app", {"status": "not_found"}, ok=False)) \
         == "not_found"
+
+
+# ---------------------------------------- the answer, not the working out
+
+
+def test_the_answer_is_taken_from_behind_the_marker():
+    """"detailed thinking off" is a request, not a guarantee. The bench
+    got back "We need to answer: ..." as Alfred's reply to the user."""
+    from src.brain.agent import _answer_line
+
+    raw = ('We need to answer: "What version of Windows is this?"\n'
+           "The output shows Build 26200.\n"
+           "ANSWER: You're on Windows 11 Pro, build 26200.")
+
+    assert _answer_line(raw) == "You're on Windows 11 Pro, build 26200."
+
+
+def test_thinking_out_loud_falls_back_to_the_conclusion_not_the_preamble():
+    """When a model does think aloud, the conclusion is the last thing
+    it says and never the first."""
+    from src.brain.agent import _answer_line
+
+    raw = "We need to work out the version.\nSo: Windows 11 Pro."
+
+    assert _answer_line(raw) == "So: Windows 11 Pro."
+
+
+def test_a_straight_answer_is_left_alone():
+    from src.brain.agent import _answer_line
+
+    assert _answer_line("Yes, Steam is running.") == "Yes, Steam is running."
+
+
+def test_nothing_said_is_nothing_returned():
+    from src.brain.agent import _answer_line
+
+    assert _answer_line("") == ""
+    assert _answer_line("   \n  \n") == ""
