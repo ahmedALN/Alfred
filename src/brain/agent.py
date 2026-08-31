@@ -350,6 +350,15 @@ class TaskAgent:
         self._run_apps = self._app_profiles(goal)
 
         # 1. PLAN
+        #
+        # Tried skipping this for obviously-single-action goals - "open
+        # Notepad" costing a model call to be told it is one step looked
+        # like pure waste. Measured, it was worse: 4 model calls instead
+        # of 3. The planner is not just producing a step, it is producing
+        # a CHECKABLE done_when, and without one the verifier cannot
+        # settle the step deterministically and has to ask a model, while
+        # the executor takes more turns for want of a precise target.
+        # The call pays for itself twice over. Left alone deliberately.
         plan = self._make_plan(goal)
         result.plan = [p["step"] for p in plan]
         self._first_plan_len = len(plan)
