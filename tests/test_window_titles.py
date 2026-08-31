@@ -119,3 +119,45 @@ def test_a_window_that_appears_late_is_still_caught():
     session = _Session(["gone", 9])
 
     assert session.wait_ready("Notepad", timeout=25, min_controls=3) is True
+
+
+# --------------------------- when two parts of Windows disagree
+
+
+from src.windows.uia import _title_score
+
+
+def test_a_title_longer_than_the_window_reports_still_finds_it():
+    """Windows does not agree with itself about what a window is
+    called. One enumeration says "Console window for 1.21.11" and
+    another "Console window for 1.21.11 - MultiMC 5" - and anything
+    working from the second could not address the window at all."""
+    short = "Console window for 1.21.11"
+    long = "Console window for 1.21.11 - MultiMC 5"
+
+    assert _title_score(short, long) > 0
+
+
+def test_the_real_containment_still_wins():
+    """Asking for less than the title is a stronger match than asking
+    for more."""
+    contains = _title_score("Untitled - Notepad", "Notepad")
+    contained = _title_score("Notepad", "Untitled - Notepad")
+
+    assert contains > contained > 0
+
+
+def test_a_tiny_title_does_not_match_everything():
+    """A window called "a" is inside almost any request, and matching
+    it would be worse than matching nothing."""
+    assert _title_score("a", "open the calculator") == 0
+
+
+def test_a_whole_word_beats_a_fragment_in_a_path():
+    """This rule was written with word boundaries that had been
+    corrupted into literal backspace characters, so it had never once
+    fired - a fragment buried in a path scored the same as a name."""
+    word = _title_score("Steam", "steam")
+    fragment = _title_score("C:/upsteamed/thing.txt", "steam")
+
+    assert word > fragment > 0

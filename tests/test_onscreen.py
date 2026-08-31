@@ -116,3 +116,50 @@ def test_the_planner_and_the_executor_are_both_told():
     assert "ON SCREEN NOW" in _EXEC_SYSTEM
     assert "do NOT open it" in _EXEC_SYSTEM
     assert "there is no \"open" in _PLAN_SYSTEM
+
+
+# ------------------------------- a window in the taskbar is still open
+
+
+def test_a_minimised_window_is_still_on_the_list(monkeypatch):
+    """Discord and Spotify both vanished from the snapshot while
+    sitting in the taskbar - open, openable, addressable, and invisible
+    to the thing whose job is saying what is open. A minimised window
+    reports a rectangle off in the negative thousands, which the size
+    test read as "not really there"."""
+    import types
+
+    seen = []
+
+    fake_gui = types.SimpleNamespace(
+        IsWindowVisible=lambda h: True,
+        GetWindowText=lambda h: {1: "Discord", 2: "tooltip"}[h],
+        IsIconic=lambda h: h == 1,                    # Discord minimised
+        GetWindowRect=lambda h: (-32000, -32000, -31900, -31900)
+        if h == 1 else (0, 0, 50, 50),                # the tooltip is tiny
+        GetForegroundWindow=lambda: 0,
+        EnumWindows=lambda fn, extra: [fn(1, extra), fn(2, extra)],
+    )
+    fake_proc = types.SimpleNamespace(
+        GetWindowThreadProcessId=lambda h: (0, 100 + h)
+    )
+
+    class _P:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def name(self):
+            return f"app{self.pid}.exe"
+
+    monkeypatch.setitem(__import__("sys").modules, "win32gui", fake_gui)
+    monkeypatch.setitem(__import__("sys").modules, "win32process", fake_proc)
+    monkeypatch.setitem(
+        __import__("sys").modules, "psutil",
+        types.SimpleNamespace(Process=_P),
+    )
+
+    screen = onscreen._read()
+    titles = [t for _, t in screen.windows]
+
+    assert "Discord" in titles          # minimised, and kept
+    assert "tooltip" not in titles      # genuinely too small to be a window

@@ -98,7 +98,15 @@ def _title_score(title: str, wanted: str) -> int:
         score = 500
     elif want in haystack:
         # A whole word beats a fragment buried in a path.
-        score = 300 if re.search(rf"{re.escape(want)}", haystack) else 100
+        score = 300 if re.search(rf"\b{re.escape(want)}\b", haystack) else 100
+    elif len(haystack) >= 6 and haystack in want:
+        # The other way round: asked for a title LONGER than the one this
+        # window reports. Different parts of Windows disagree about what
+        # a window is called - one says "Console window for 1.21.11" and
+        # another "Console window for 1.21.11 - MultiMC 5" - so a caller
+        # working from the second could not address it at all. Scored
+        # below a real containment, because it is the weaker match.
+        score = 200
     else:
         return 0
 

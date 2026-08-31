@@ -3,7 +3,7 @@
     "goal": "Open Notepad.",
     "ok": true,
     "status": "done",
-    "secs": 30.5,
+    "secs": 18.5,
     "steps": 1,
     "failed_steps": 0,
     "detail": "*the quick brown fox jumps over the - Notepad",
@@ -16,8 +16,8 @@
     "goal": "Type the words quick brown fox into Notepad.",
     "ok": true,
     "status": "done",
-    "secs": 7.3,
-    "steps": 2,
+    "secs": 11.6,
+    "steps": 5,
     "failed_steps": 1,
     "detail": "the quick brown fox jumps over the lazy dog 0123456789helloh",
     "tags": [
@@ -43,7 +43,7 @@
     "secs": 4.4,
     "steps": 1,
     "failed_steps": 0,
-    "detail": "Yep, Steam is running.",
+    "detail": "Yes, Steam is running.",
     "tags": [
       "query"
     ],
@@ -53,10 +53,10 @@
     "goal": "What version of Windows is this?",
     "ok": true,
     "status": "done",
-    "secs": 17.3,
+    "secs": 12.6,
     "steps": 1,
     "failed_steps": 0,
-    "detail": "Windows 11 Pro.",
+    "detail": "It's Windows 11 Pro.",
     "tags": [
       "query"
     ],
@@ -66,7 +66,7 @@
     "goal": "How much free space is on the C drive?",
     "ok": true,
     "status": "done",
-    "secs": 17.2,
+    "secs": 17.9,
     "steps": 1,
     "failed_steps": 0,
     "detail": "You have 143.2 GB of free space on the C drive.",
@@ -79,23 +79,31 @@
     "goal": "Open Steam and search the store for Hades.",
     "ok": true,
     "status": "done",
-    "secs": 36.1,
-    "steps": 4,
-    "failed_steps": 0,
+    "secs": 81.6,
+    "steps": 8,
+    "failed_steps": 1,
     "detail": "Steam",
     "tags": [
       "in-app",
       "slow"
     ],
-    "failures": []
+    "failures": [
+      {
+        "tool": "open_app",
+        "args": {
+          "target": "user"
+        },
+        "error": "'app' must be a non-empty string - the name of the program to open, e.g. {\"app\": \"Notepad\"}. 'target' only says which desktop to o"
+      }
+    ]
   },
   {
     "goal": "In MultiMC, select the 1.21.11 instance.",
     "ok": false,
     "status": "partial",
-    "secs": 151.8,
-    "steps": 12,
-    "failed_steps": 7,
+    "secs": 86.3,
+    "steps": 7,
+    "failed_steps": 5,
     "detail": "no MultiMC window",
     "tags": [
       "in-app",
@@ -106,64 +114,60 @@
         "tool": "ui_control",
         "args": {
           "window": "MultiMC",
-          "action": "focus"
-        },
-        "error": "window not found: timed out"
-      },
-      {
-        "tool": "ui_control",
-        "args": {
-          "window": "MultiMC",
-          "action": "tree"
+          "action": "focus",
+          "name": "Console window for 1.21.11"
         },
         "error": "window not found: timed out"
       },
       {
         "tool": "powershell",
         "args": {
-          "command": "Get-ChildItem \"C:\\Users\\ahmed\\.multiMC\\instances\" | Select-O"
+          "command": "cd C:\\Users\\ahmed\\MultiMC\\instances\\1.21.11"
         },
-        "error": "Get-ChildItem : Cannot find path 'C:\\Users\\ahmed\\.multiMC\\instances' because it does not exist.\nAt line:1 char:1\n+ Get-ChildItem \""
-      },
-      {
-        "tool": "powershell",
-        "args": {},
-        "error": "{'refused': 'empty command'}"
+        "error": "cd : Cannot find path 'C:\\Users\\ahmed\\MultiMC\\instances\\1.21.11' because it does not exist.\nAt line:1 char:1\n+ cd C:\\Users\\ahmed\\M"
       },
       {
         "tool": "powershell",
         "args": {
-          "command": "Get-ChildItem \"C:\\Users\\ahmed\\.multiMC\\instances\" | Select-O"
+          "command": "Get-ChildItem -Path 'C:\\Users\\ahmed\\MultiMC\\instances' -Filt"
         },
-        "error": "Get-ChildItem : Cannot find path 'C:\\Users\\ahmed\\.multiMC\\instances' because it does not exist.\nAt line:1 char:1\n+ Get-ChildItem \""
+        "error": "Get-ChildItem : Cannot find path 'C:\\Users\\ahmed\\MultiMC\\instances' because it does not exist.\nAt line:1 char:1\n+ Get-ChildItem -P"
       },
       {
         "tool": "powershell",
         "args": {
-          "command": "Get-ChildItem \"C:\\Users\\ahmed\\.multiMC\\instances\" -Directory"
+          "command": "Get-ChildItem -Path 'C:\\Users\\ahmed\\MultiMC\\instances' -Filt"
         },
-        "error": "Get-ChildItem : Cannot find path 'C:\\Users\\ahmed\\.multiMC\\instances' because it does not exist.\nAt line:1 char:1\n+ Get-ChildItem \""
+        "error": "Get-ChildItem : Cannot find path 'C:\\Users\\ahmed\\MultiMC\\instances' because it does not exist.\nAt line:1 char:1\n+ Get-ChildItem -P"
       },
       {
         "tool": "powershell",
         "args": {
-          "command": "Get-ChildItem \"C:\\Users\\ahmed\\.multiMC\" -Directory | Select-"
+          "command": "Get-ChildItem -Path 'C:\\Users\\ahmed\\MultiMC\\instances'"
         },
-        "error": "Get-ChildItem : Cannot find path 'C:\\Users\\ahmed\\.multiMC' because it does not exist.\nAt line:1 char:1\n+ Get-ChildItem \"C:\\Users\\a"
+        "error": "Get-ChildItem : Cannot find path 'C:\\Users\\ahmed\\MultiMC\\instances' because it does not exist.\nAt line:1 char:1\n+ Get-ChildItem -P"
       }
     ]
   },
   {
     "goal": "Close Notepad without saving.",
-    "ok": false,
+    "ok": true,
     "status": "done",
-    "secs": 17.3,
-    "steps": 1,
-    "failed_steps": 0,
-    "detail": "still open: *the quick brown fox jumps over the - No",
+    "secs": 55.6,
+    "steps": 2,
+    "failed_steps": 1,
+    "detail": "gone",
     "tags": [
       "cleanup"
     ],
-    "failures": []
+    "failures": [
+      {
+        "tool": "powershell",
+        "args": {
+          "command": "[Console]::Exit(0)"
+        },
+        "error": "Method invocation failed because [System.Console] does not contain a method named 'Exit'.\nAt line:1 char:1\n+ [Console]::Exit(0)\n+ "
+      }
+    ]
   }
 ]

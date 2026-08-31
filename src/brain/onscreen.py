@@ -108,10 +108,17 @@ def _read() -> Screen:
             title = (win32gui.GetWindowText(hwnd) or "").strip()
             if not title or title in _FURNITURE:
                 return True
-            # A window with no size is not on screen in any sense that
-            # matters - tooltips, hidden hosts, message-only windows.
-            left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-            if (right - left) < 200 or (bottom - top) < 120:
+            # A minimised window reports a rectangle off in the
+            # negative thousands, which the size test below reads as
+            # "not really there". It is there - Discord and Spotify
+            # both vanished from the snapshot while sitting in the
+            # taskbar, perfectly openable and perfectly addressable.
+            small = False
+            if not win32gui.IsIconic(hwnd):
+                left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+                # Tooltips, hidden hosts, message-only windows.
+                small = (right - left) < 200 or (bottom - top) < 120
+            if small:
                 return True
 
             _, pid = win32process.GetWindowThreadProcessId(hwnd)
