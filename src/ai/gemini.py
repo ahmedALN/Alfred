@@ -25,6 +25,20 @@ _CONNECTION_ERROR_HINTS = (
 )
 
 
+# How long this model lets a live session run. Measured, not guessed:
+# a bare idle session with none of Alfred's code in it ends at 150
+# seconds every time, and Alfred's own sessions ended at 150, 152, 151.
+_SESSION_LIMIT = 150.0
+
+
+def _is_session_limit(lived: float, exc: BaseException) -> bool:
+    """Is this the session reaching its age, rather than breaking?"""
+    return (
+        lived >= _SESSION_LIMIT * 0.8
+        and "1008" in str(exc)
+    )
+
+
 def _is_muted() -> bool:
     return os.getenv("ALFRED_QUIET", "").strip().lower() in ("1", "true", "yes", "on")
 
@@ -1466,18 +1480,27 @@ class AlfredLiveSession:
                     )
                     raise exc
 
-                # How long the session lasted is the whole diagnosis and
-                # it was not being recorded. Twice I read this log and
-                # twice I guessed wrong about the cause, because "it
-                # dropped" and "it dropped after eleven seconds" are
-                # different facts and only one of them was written down.
                 lived = time.monotonic() - session_started
-                print(
-                    f"[Alfred] voice connection dropped after {lived:.0f}s "
-                    f"({type(exc).__name__}: {exc}); "
-                    f"reconnecting in {backoff:.0f}s",
-                    flush=True,
-                )
+                if _is_session_limit(lived, exc):
+                    # Not a fault. Measured on a bare, idle session with
+                    # none of Alfred's code in it: this model ends every
+                    # session at 150 seconds, on the nose, with a 1008.
+                    # Logging it as a dropped connection filled the log
+                    # with alarm about the one thing that was working
+                    # exactly as the API intends, and buried the real
+                    # faults among it.
+                    print(
+                        f"[Alfred] renewing the voice session "
+                        f"(the model ends them at ~{_SESSION_LIMIT:.0f}s).",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"[Alfred] voice connection dropped after "
+                        f"{lived:.0f}s ({type(exc).__name__}: {exc}); "
+                        f"reconnecting in {backoff:.0f}s",
+                        flush=True,
+                    )
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60.0)
 
