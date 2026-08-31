@@ -3,29 +3,20 @@
     "goal": "Open Notepad.",
     "ok": true,
     "status": "done",
-    "secs": 7.5,
-    "steps": 2,
-    "failed_steps": 1,
-    "detail": "*HelloHellounsaved dddds - Notepad",
+    "secs": 16.7,
+    "steps": 1,
+    "failed_steps": 0,
+    "detail": "*HelloHellounsaved ddddsthe iiick oo - Notepad",
     "tags": [
       "launch"
     ],
-    "failures": [
-      {
-        "tool": "open_app",
-        "args": {
-          "target": "current",
-          "query": "Notepad"
-        },
-        "error": "'app' must be a non-empty string."
-      }
-    ]
+    "failures": []
   },
   {
     "goal": "Type the words quick brown fox into Notepad.",
     "ok": false,
     "status": "done",
-    "secs": 20.0,
+    "secs": 19.0,
     "steps": 7,
     "failed_steps": 2,
     "detail": "",
@@ -38,16 +29,15 @@
         "args": {
           "target": "current"
         },
-        "error": "'app' must be a non-empty string."
+        "error": "'app' must be a non-empty string - the name of the program to open, e.g. {\"app\": \"Notepad\"}. 'target' only says which desktop to o"
       },
       {
         "tool": "ui_control",
         "args": {
           "action": "get",
-          "window": "Notepad",
-          "name": "Text Editor"
+          "window": "Notepad"
         },
-        "error": "no control matches ref=None name='Text Editor' - run 'tree' first, or the control may not be on screen yet"
+        "error": "no control matches ref=None name=None - run 'tree' first, or the control may not be on screen yet"
       }
     ]
   },
@@ -55,7 +45,7 @@
     "goal": "Check whether Steam is running.",
     "ok": true,
     "status": "done",
-    "secs": 4.0,
+    "secs": 4.9,
     "steps": 1,
     "failed_steps": 0,
     "detail": "Yes, Steam is currently running.",
@@ -66,12 +56,12 @@
   },
   {
     "goal": "What version of Windows is this?",
-    "ok": false,
+    "ok": true,
     "status": "done",
-    "secs": 15.7,
+    "secs": 5.8,
     "steps": 1,
     "failed_steps": 0,
-    "detail": "Windows 10 (version 26200).",
+    "detail": "It's Windows 11 Pro.",
     "tags": [
       "query"
     ],
@@ -81,10 +71,10 @@
     "goal": "How much free space is on the C drive?",
     "ok": true,
     "status": "done",
-    "secs": 16.3,
+    "secs": 4.4,
     "steps": 1,
     "failed_steps": 0,
-    "detail": "You have 144.4 GB of free space on the C drive.",
+    "detail": "There are 144.4 GB of free space on the C drive.",
     "tags": [
       "query"
     ],
@@ -94,7 +84,7 @@
     "goal": "Open Steam and search the store for Hades.",
     "ok": true,
     "status": "done",
-    "secs": 62.1,
+    "secs": 66.0,
     "steps": 5,
     "failed_steps": 1,
     "detail": "Steam",
@@ -104,13 +94,11 @@
     ],
     "failures": [
       {
-        "tool": "ui_control",
+        "tool": "open_app",
         "args": {
-          "action": "find",
-          "window": "Steam",
-          "contains": "Search the store"
+          "target": "user"
         },
-        "error": "'find' needs 'query'."
+        "error": "'app' must be a non-empty string - the name of the program to open, e.g. {\"app\": \"Notepad\"}. 'target' only says which desktop to o"
       }
     ]
   },
@@ -118,97 +106,27 @@
     "goal": "In MultiMC, select the 1.21.11 instance.",
     "ok": true,
     "status": "done",
-    "secs": 61.1,
-    "steps": 8,
-    "failed_steps": 2,
+    "secs": 55.4,
+    "steps": 6,
+    "failed_steps": 0,
     "detail": "MultiMC",
     "tags": [
       "in-app",
       "unnamed-controls"
     ],
-    "failures": [
-      {
-        "tool": "ui_control",
-        "args": {
-          "action": "find",
-          "window": "MultiMC",
-          "contains": "1.21.11"
-        },
-        "error": "'find' needs 'query'."
-      },
-      {
-        "tool": "ui_control",
-        "args": {
-          "action": "get",
-          "window": "MultiMC",
-          "name": "1.21.11 selected"
-        },
-        "error": "no control matches ref=None name='1.21.11 selected' - run 'tree' first, or the control may not be on screen yet"
-      }
-    ]
+    "failures": []
   },
   {
     "goal": "Close Notepad without saving.",
     "ok": false,
-    "status": "done",
-    "secs": 116.6,
-    "steps": 16,
-    "failed_steps": 6,
-    "detail": "still open: *HelloHellounsaved dddds - Notepad",
+    "status": "failed",
+    "secs": 97.7,
+    "steps": 10,
+    "failed_steps": 0,
+    "detail": "still open: *unsaved wordswords to losequick rro - N",
     "tags": [
       "cleanup"
     ],
-    "failures": [
-      {
-        "tool": "ui_control",
-        "args": {
-          "action": "get",
-          "window": "Notepad",
-          "name": "*HelloHello - Notepad"
-        },
-        "error": "no control matches ref=None name='*HelloHello - Notepad' - run 'tree' first, or the control may not be on screen yet"
-      },
-      {
-        "tool": "ui_control",
-        "args": {
-          "action": "get",
-          "window": "Notepad",
-          "name": "Untitled"
-        },
-        "error": "no control matches ref=None name='Untitled' - run 'tree' first, or the control may not be on screen yet"
-      },
-      {
-        "tool": "ui_control",
-        "args": {
-          "action": "get",
-          "window": "Notepad",
-          "name": "*unsaved wordswords to losequick rro - Notepad"
-        },
-        "error": "no control matches ref=None name='*unsaved wordswords to losequick rro - Notepad' - run 'tree' first, or the control may not be on"
-      },
-      {
-        "tool": "ui_control",
-        "args": {
-          "action": "get",
-          "window": "Notepad",
-          "name": "unsaved wordswords to losequick rro - Notepad"
-        },
-        "error": "no control matches ref=None name='unsaved wordswords to losequick rro - Notepad' - run 'tree' first, or the control may not be on "
-      },
-      {
-        "tool": "open_app",
-        "args": {
-          "target": "current"
-        },
-        "error": "'app' must be a non-empty string."
-      },
-      {
-        "tool": "open_app",
-        "args": {
-          "target": "user"
-        },
-        "error": "'app' must be a non-empty string."
-      }
-    ]
+    "failures": []
   }
 ]

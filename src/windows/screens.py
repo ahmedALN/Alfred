@@ -45,6 +45,17 @@ _UPDATE = re.compile(
     re.I,
 )
 
+# The one prompt that stands between an app and being closed, and the
+# only one where getting it wrong destroys something. Matched on the
+# question, not on the word "save": half of every settings page has a
+# Save button and none of those is asking this.
+_SAVE_PROMPT = re.compile(
+    r"\b(do you want to save|would you like to save|save changes to|"
+    r"save your changes|unsaved changes|changes you made.{0,20}not been "
+    r"saved|discard your changes)\b",
+    re.I,
+)
+
 # Windows an app throws up that nobody asked for and nothing depends on.
 _NOISE = re.compile(
     r"\b(special offer|offers|what'?s new|news|announcement|promo|"
@@ -124,8 +135,14 @@ def _texts(controls: list[Any]) -> str:
     return " \n".join((getattr(c, "name", "") or "") for c in controls)
 
 
-def _options(controls: list[Any]) -> list[str]:
-    """The choosable, distinct, plausible options on screen."""
+def _options(controls: list[Any], drop_chrome: bool = True) -> list[str]:
+    """The choosable, distinct, plausible options on screen.
+
+    "Cancel" and "Close" are window furniture when the question is which
+    account to use, and real answers when the question is whether to
+    save - there, cancelling means "do not close at all", which is a
+    perfectly good thing to want.
+    """
     seen: set[str] = set()
     out: list[str] = []
 
@@ -138,7 +155,7 @@ def _options(controls: list[Any]) -> list[str]:
             continue
 
         key = name.lower()
-        if key in seen or _NOT_A_PROFILE.match(name):
+        if key in seen or (drop_chrome and _NOT_A_PROFILE.match(name)):
             continue
 
         seen.add(key)
@@ -194,6 +211,18 @@ def assess(title: str, controls: list[Any]) -> ScreenNeed | None:
                 f"{title or 'This app'} is asking which account to use.",
                 options,
             )
+
+    # Before anything else that looks at wording: this one is a fork in
+    # the road where one branch destroys work. Alfred spent ninety-seven
+    # seconds failing to close a Notepad because it could see the
+    # buttons and had no idea the screen was asking it something.
+    if _SAVE_PROMPT.search(haystack):
+        return ScreenNeed(
+            "save_changes",
+            f"{title or 'This app'} is asking whether to save changes "
+            "before closing.",
+            _options(controls, drop_chrome=False),
+        )
 
     if _UPDATE.search(haystack):
         return ScreenNeed(
