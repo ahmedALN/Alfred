@@ -292,7 +292,11 @@ def test_the_caption_is_the_question():
 
     talk.handle("is this safe to click?", media=b"JPEGDATA", kind="image")
 
-    assert eyes.asked[0][1] == "is this safe to click?"
+    asked = eyes.asked[0][1]
+    assert asked.startswith("is this safe to click?")
+    # ...and the answer is going to a phone, so it is asked for short
+    # and in plain text rather than six headings about a photo.
+    assert "no markdown" in asked
 
 
 def test_a_video_is_declined_in_a_useful_way():
