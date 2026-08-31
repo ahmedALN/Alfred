@@ -44,13 +44,20 @@ class ProviderBundle:
     embedder: EmbeddingProvider
     vision: VisionProvider
     plan_chat: ChatProvider
+    # Small, well-specified jobs: reading an answer out of tool output,
+    # writing a one-line lesson. They do not need the planner, and going
+    # through it made a learned routine - one tool call, no thinking -
+    # take eleven seconds, ten of them waiting for a 120B model to
+    # summarise a line of PowerShell output.
+    fast_chat: ChatProvider
 
     def describe(self) -> str:
         return (
             f"chat={self.chat.name}:{self.chat.model or '?'} "
             f"embed={self.embedder.name}:{self.embedder.model or '?'} "
             f"vision={self.vision.name}:{self.vision.model or '?'} "
-            f"plan={self.plan_chat.name}"
+            f"plan={self.plan_chat.name} "
+            f"fast={self.fast_chat.name}"
         )
 
 
@@ -131,7 +138,37 @@ def build_providers(settings: Any, gemini_client: Any) -> ProviderBundle:
     return ProviderBundle(
         chat=chat, embedder=embedder, vision=vision,
         plan_chat=build_plan_chat(settings, gemini_client, chat),
+        fast_chat=build_fast_chat(settings, gemini_client, chat),
     )
+
+
+def build_fast_chat(
+    settings: Any, gemini_client: Any, local_chat: ChatProvider
+) -> ChatProvider:
+    """The quick lane: small prompts, short answers, no judgement needed.
+
+    Measured on this machine: flash-lite answers a planner-sized prompt
+    in 0.6-0.9 seconds where the big planner takes 1.9-14.4, and for
+    "turn this PowerShell output into a sentence" the difference is the
+    whole cost of the job.
+
+    Falls back to the local model, which is slower than flash-lite but
+    cannot run out of quota or go down.
+    """
+    from src.ai.providers.fallback import FallbackChatProvider
+
+    chain: list[ChatProvider] = []
+    try:
+        chain.append(
+            GeminiChatProvider(gemini_client, "gemini-flash-lite-latest")
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    chain.append(local_chat)
+
+    if len(chain) == 1:
+        return chain[0]
+    return FallbackChatProvider(chain, patience=8.0)
 
 
 def build_plan_chat(

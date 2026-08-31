@@ -297,7 +297,7 @@ def _finding_for(goal, steps, answer="Yes, Steam is running."):
 
     chat = _Chat()
     agent = TaskAgent.__new__(TaskAgent)
-    agent._plan_chat = chat
+    agent._fast_chat = chat
     result = TaskResult(goal=goal, status="done", summary="", steps=steps)
     return agent._finding(result), chat
 
@@ -354,7 +354,7 @@ def test_a_model_that_falls_over_costs_only_the_finding():
             raise RuntimeError("no route to host")
 
     agent = TaskAgent.__new__(TaskAgent)
-    agent._plan_chat = _Broken()
+    agent._fast_chat = _Broken()
     result = TaskResult(
         goal="Check Steam.", status="done", summary="",
         steps=[_step("powershell", "running")],

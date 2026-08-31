@@ -170,6 +170,7 @@ def build():
         Policy("full", known, surface="brain"),
         policy_voice=Policy("full", known, surface="voice"),
         plan_chat=providers.plan_chat,
+        fast_chat=providers.fast_chat,
         app_memory=app_memory,
         limitations=LimitationStore(_ROOT / "alfred_limitations.sqlite3"),
     )

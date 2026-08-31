@@ -461,6 +461,7 @@ async def main() -> None:
         # are. It gets the same strong chain as planning.
         chat=providers.plan_chat,
         plan_chat=providers.plan_chat,
+        fast_chat=providers.fast_chat,
         # Verifying is a yes/no judgement over one substep, so it stays
         # on the fast local model - the reason it was split out.
         verify_chat=providers.chat,

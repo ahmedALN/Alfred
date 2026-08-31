@@ -81,3 +81,45 @@ def test_everything_being_slow_still_produces_an_answer():
     also_slow = _Provider("also", "eventually", delay=0.3)
 
     assert _chain(slow, also_slow).generate("hi") == "eventually"
+
+
+# ------------------------------------------------------- the fast lane
+
+
+def test_small_jobs_get_their_own_model():
+    """Reading an answer out of one line of PowerShell output does not
+    need the planner, and going through it made a learned routine - one
+    tool call, no thinking - take eleven seconds."""
+    from src.brain.agent import TaskAgent
+    from src.brain.policy import Policy
+
+    planner = _Provider("planner")
+    fast = _Provider("fast")
+
+    agent = TaskAgent(
+        planner, _Registry(), Policy("full", {"x"}, surface="brain"),
+        fast_chat=fast,
+    )
+
+    assert agent._fast_chat is fast
+    assert agent._plan_chat is planner
+
+
+def test_without_one_it_carries_on_as_before():
+    from src.brain.agent import TaskAgent
+    from src.brain.policy import Policy
+
+    planner = _Provider("planner")
+    agent = TaskAgent(
+        planner, _Registry(), Policy("full", {"x"}, surface="brain")
+    )
+
+    assert agent._fast_chat is planner
+
+
+class _Registry:
+    def gemini_declarations(self):
+        return [{"name": "x", "description": "d"}]
+
+    def execute(self, name, args):
+        return {"status": "success"}

@@ -1,0 +1,90 @@
+[
+  {
+    "goal": "How much memory is in use right now?",
+    "ok": false,
+    "learned": false,
+    "secs": 26.0,
+    "steps": 1,
+    "why": "did not work: 22.2 GB of memory is currently in use out of 31.9 GB total."
+  },
+  {
+    "goal": "What is my computer's name?",
+    "ok": true,
+    "learned": true,
+    "secs": 4.4,
+    "steps": 1,
+    "why": "What is my computer's name?",
+    "name": "what-is-computer's-name"
+  },
+  {
+    "goal": "How long has this PC been up?",
+    "ok": true,
+    "learned": true,
+    "secs": 5.8,
+    "steps": 1,
+    "why": "How long has this PC been up?",
+    "name": "how-long-has-pc"
+  },
+  {
+    "goal": "What windows are open right now?",
+    "ok": true,
+    "learned": true,
+    "secs": 39.8,
+    "steps": 1,
+    "why": "What windows are open right now?",
+    "name": "what-windows-are-open"
+  },
+  {
+    "goal": "Is Steam running?",
+    "ok": true,
+    "learned": true,
+    "secs": 19.8,
+    "steps": 1,
+    "why": "Is Steam running?",
+    "name": "is-steam-running"
+  },
+  {
+    "goal": "Which processes are using the most memory?",
+    "ok": true,
+    "learned": true,
+    "secs": 17.6,
+    "steps": 1,
+    "why": "Which processes are using the most memory?",
+    "name": "which-processes-are-using"
+  },
+  {
+    "goal": "Open the Downloads folder.",
+    "ok": true,
+    "learned": false,
+    "secs": 104.1,
+    "steps": 6,
+    "why": "worked, but not cleanly - not worth keeping"
+  },
+  {
+    "goal": "Open Steam and search the store for Hollow Knight.",
+    "ok": true,
+    "learned": true,
+    "secs": 75.8,
+    "steps": 5,
+    "why": "Open Steam and {p0} for {p1}.",
+    "name": "open-steam-search-store"
+  },
+  {
+    "goal": "In MultiMC, select the 1.21.11 instance.",
+    "ok": true,
+    "learned": true,
+    "secs": 54.2,
+    "steps": 6,
+    "why": "In MultiMC, select the 1.21.11 instance.",
+    "name": "multimc-select-1.21.11-instance"
+  },
+  {
+    "goal": "Search the web for the height of Ben Nevis.",
+    "ok": true,
+    "learned": true,
+    "secs": 23.7,
+    "steps": 1,
+    "why": "Search the web for the height of Ben Nevis.",
+    "name": "search-web-height-ben"
+  }
+]

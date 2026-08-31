@@ -134,8 +134,8 @@ def test_reflection_stores_a_lesson_fact():
         chat, FakeRegistry(), Policy("full", KNOWN, surface="brain"),
         learner=learner,
     )
-    # make the planner model return the lesson line
-    agent._plan_chat = type("C", (), {
+    # reflection runs on the fast lane, not the planner
+    agent._fast_chat = type("C", (), {
         "generate": lambda self, p, **k:
             "LESSON: Spotify search is opened with Ctrl+L, not a toolbar icon."
     })()
@@ -154,7 +154,7 @@ def test_reflection_none_stores_nothing():
         DispatchChat(), FakeRegistry(), Policy("full", KNOWN, surface="brain"),
         learner=learner,
     )
-    agent._plan_chat = type("C", (), {
+    agent._fast_chat = type("C", (), {
         "generate": lambda self, p, **k: "none"
     })()
 

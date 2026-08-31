@@ -204,6 +204,7 @@ class TaskAgent:
         *,
         policy_voice: Policy | None = None,
         plan_chat: ChatProvider | None = None,
+        fast_chat: ChatProvider | None = None,
         verify_chat: ChatProvider | None = None,
         max_steps: int = 16,
         max_seconds: float = 240.0,
@@ -220,6 +221,11 @@ class TaskAgent:
         self._last_wall: str = ""
         self._wall_tool: str = ""
         self._plan_chat = plan_chat or chat
+        # Reading an answer out of tool output and writing a one-line
+        # lesson are small, well-specified jobs. Sending them to the
+        # planner made a learned routine take eleven seconds, ten of
+        # them summarising one line of PowerShell output.
+        self._fast_chat = fast_chat or self._plan_chat
         # Verification defaults to the FAST model: the deterministic
         # fast-paths + strict per-substep scoping carry most of the load,
         # and a strong-model verify on every step of a multi-step task
@@ -741,7 +747,7 @@ class TaskAgent:
             f"STEPS:\n{trace}\n\nYour one line:"
         )
         try:
-            line = self._plan_chat.generate(
+            line = self._fast_chat.generate(
                 prompt, system=_THINKING_OFF, temperature=0.2, max_tokens=500
             ).strip()
         except Exception as exc:  # noqa: BLE001
@@ -1142,7 +1148,7 @@ class TaskAgent:
             "Put your sentence on its own line after the word ANSWER:"
         )
         try:
-            line = self._plan_chat.generate(
+            line = self._fast_chat.generate(
                 prompt, system=_THINKING_OFF, temperature=0.2,
                 max_tokens=200,
             ).strip()
