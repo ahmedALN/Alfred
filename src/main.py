@@ -28,6 +28,8 @@ from src.brain.policy import Policy
 from src.brain.reasoner import LLMReasoner
 from src.brain.app_memory import AppMemory
 from src.brain.limitations import LimitationStore
+from src.brain.activity import ActivityCollector, ActivityLog, watching
+from src.brain.signals import default_collectors
 from src.brain.schedule import ScheduleStore
 from src.mail import Gmail
 from src.brain.skill_store import SkillStore
@@ -286,6 +288,7 @@ async def main() -> None:
     # job survives an Alfred restart).
     # What Alfred owes, and when.
     schedule = ScheduleStore(_ROOT / "alfred_schedule.sqlite3")
+    activity = ActivityLog(_ROOT / "alfred_activity.sqlite3")
 
     # The inbox. Read, sort and draft only - the permission Alfred
     # holds does not include sending, so it could not if it tried.
@@ -560,7 +563,15 @@ async def main() -> None:
         audit = AuditLog(settings.brain_audit_path)
         task_agent._audit = audit
 
-        perception = Perception()
+        # What the machine is doing, and - if you allow it - what you
+        # are. Every collector before this one watched the plumbing,
+        # which left the proactive loop nothing personal to be
+        # proactive about.
+        watchers = default_collectors()
+        if watching():
+            watchers.append(ActivityCollector(activity))
+            print("[Brain] watching apps and window titles (ALFRED_WATCH_ME=false to stop).")
+        perception = Perception(watchers)
 
         reasoner = LLMReasoner(providers.chat)
 
@@ -585,7 +596,12 @@ async def main() -> None:
             registry=registry,
             audit=audit,
             learner=learner,
-            speak=session.inject_system_prompt,
+            # announce, not inject: the brain said everything into the
+            # room and nowhere else, so a reminder set for six in the
+            # evening reached you only if you happened to be sitting
+            # here at six. Which is the one case where you did not need
+            # reminding.
+            speak=announce,
             get_session_id=lambda: session.session_key,
             tick_seconds=settings.brain_tick_seconds,
             min_speak_gap_seconds=settings.brain_min_speak_gap_seconds,
