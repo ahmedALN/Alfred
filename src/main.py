@@ -29,6 +29,7 @@ from src.brain.reasoner import LLMReasoner
 from src.brain.app_memory import AppMemory
 from src.brain.limitations import LimitationStore
 from src.brain.schedule import ScheduleStore
+from src.mail import Gmail
 from src.brain.skill_store import SkillStore
 from src.brain.skills import SkillLibrary
 from src.brain.tasks import TaskQueue
@@ -53,6 +54,7 @@ from src.tools.registry import ToolRegistry
 from src.tools.system_info import SystemInfoTool
 from src.tools.web import WebTool
 from src.singleton import AlreadyRunning, SingleInstance
+from src.tools.mail_tool import MailTool
 from src.tools.schedule_tool import ScheduleTool
 from src.tools.task_tool import RunTaskTool, TaskStatusTool
 from src.windows.child_session import ChildSessionClient
@@ -285,6 +287,13 @@ async def main() -> None:
     # What Alfred owes, and when.
     schedule = ScheduleStore(_ROOT / "alfred_schedule.sqlite3")
 
+    # The inbox. Read, sort and draft only - the permission Alfred
+    # holds does not include sending, so it could not if it tried.
+    mail = Gmail(
+        secrets=_ROOT / os.getenv("ALFRED_GMAIL_SECRETS", "gmail_client.json"),
+        token=_ROOT / os.getenv("ALFRED_GMAIL_TOKEN", "gmail_token.json"),
+    )
+
     task_store = TaskStore(_ROOT / "alfred_tasks.sqlite3")
 
     skill_store = SkillStore(settings.skill_db_path)
@@ -359,6 +368,7 @@ async def main() -> None:
         forget_tool,
         RunTaskTool(task_queue),
         ScheduleTool(schedule),
+        MailTool(mail),
         task_status_tool,
         EpisodesTool(episode_store),
         ResourceModeTool(resource_mode),
