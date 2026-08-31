@@ -113,6 +113,9 @@ class AlfredLiveSession:
         self._situation_fn = situation_fn
         self._last_audio_queued_at = 0.0
         self._reconnect_backoff_base = 2.0
+        # What the server last offered as a way back into this same
+        # conversation. Empty until it offers one.
+        self._resume_handle: str = ""
 
         self._passphrase = settings.voice_passphrase
         self._passphrase_window = settings.voice_passphrase_window
@@ -512,6 +515,24 @@ class AlfredLiveSession:
                 thinking_level="minimal"
             ),
 
+            # A Live session ends when its context window fills, and an
+            # always-on assistant fills one fast: the microphone streams
+            # whether or not anybody is talking, and every second of it
+            # is transcribed into the same window. That is what the
+            # 1008 aborts were - not a network fault, the session
+            # reaching its end. A sliding window lets it run for as long
+            # as Alfred is switched on.
+            context_window_compression=types.ContextWindowCompressionConfig(
+                sliding_window=types.SlidingWindow(),
+            ),
+
+            # And when a connection does go, come back to the same
+            # conversation instead of a blank one. Without this every
+            # drop quietly cost Alfred everything that had been said.
+            session_resumption=types.SessionResumptionConfig(
+                handle=self._resume_handle or None,
+            ),
+
             system_instruction=self._system_instruction(),
         )
 
@@ -865,6 +886,12 @@ class AlfredLiveSession:
 
         while True:
             async for response in self.session.receive():
+
+                update = getattr(response, "session_resumption_update", None)
+                if update is not None and getattr(update, "resumable", False):
+                    handle = getattr(update, "new_handle", "") or ""
+                    if handle:
+                        self._resume_handle = handle
 
                 if getattr(response, "usage_metadata", None) is not None:
                     try:
