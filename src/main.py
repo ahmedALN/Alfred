@@ -33,6 +33,9 @@ from src.brain.signals import default_collectors
 from src.brain.mailwatch import MailCollector
 from src.brain.schedule import ScheduleStore
 from src.mail import Gmail
+from src.workspace import GoogleAccount
+from src.workspace.calendar import Calendar
+from src.workspace.classroom import Classroom
 from src.brain.skill_store import SkillStore
 from src.brain.skills import SkillLibrary
 from src.brain.tasks import TaskQueue
@@ -57,6 +60,8 @@ from src.tools.registry import ToolRegistry
 from src.tools.system_info import SystemInfoTool
 from src.tools.web import WebTool
 from src.singleton import AlreadyRunning, SingleInstance
+from src.tools.calendar_tool import CalendarTool
+from src.tools.classroom_tool import ClassroomTool
 from src.tools.mail_tool import MailTool
 from src.tools.schedule_tool import ScheduleTool
 from src.tools.task_tool import RunTaskTool, TaskStatusTool
@@ -291,12 +296,16 @@ async def main() -> None:
     schedule = ScheduleStore(_ROOT / "alfred_schedule.sqlite3")
     activity = ActivityLog(_ROOT / "alfred_activity.sqlite3")
 
-    # The inbox. Read, sort and draft only - the permission Alfred
-    # holds does not include sending, so it could not if it tried.
-    mail = Gmail(
+    # One Google sign-in, three services. Read and add; never send,
+    # never delete. See src/workspace/account.py for which half of that
+    # Google enforces and which half Alfred does.
+    google = GoogleAccount(
         secrets=_ROOT / os.getenv("ALFRED_GMAIL_SECRETS", "gmail_client.json"),
         token=_ROOT / os.getenv("ALFRED_GMAIL_TOKEN", "gmail_token.json"),
     )
+    mail = Gmail(google)
+    diary = Calendar(google)
+    classroom = Classroom(google)
 
     task_store = TaskStore(_ROOT / "alfred_tasks.sqlite3")
 
@@ -373,6 +382,8 @@ async def main() -> None:
         RunTaskTool(task_queue),
         ScheduleTool(schedule),
         MailTool(mail),
+        CalendarTool(diary),
+        ClassroomTool(classroom),
         task_status_tool,
         EpisodesTool(episode_store),
         ResourceModeTool(resource_mode),

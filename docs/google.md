@@ -1,20 +1,35 @@
-# Letting Alfred handle your inbox
+# Letting Alfred handle your Google account
+
+One sign-in covers Gmail, Calendar and Classroom.
 
 ## What it can and cannot do
 
-| | |
-| --- | --- |
-| Read your mail, search it | yes |
-| Mark read, archive | yes |
-| Write drafts | yes |
-| **Send** | **no** |
-| **Delete** | **no** |
+| | Gmail | Calendar | Classroom |
+| --- | --- | --- | --- |
+| Read | yes | yes | yes |
+| Add | drafts | events | — |
+| Change what exists | archive, mark read | **no** | **no** |
+| Delete | **no** | **no** | **no** |
+| Send / submit | **no** | — | **no** |
 
-The last two are worth being precise about, because "the assistant is
-programmed not to send" is not much of a promise.
+**Two different strengths of promise, and it matters which is which.**
 
-Alfred asks Google for one permission: `gmail.modify`. That covers
-reading, labelling, archiving and creating drafts. It does **not**
+Gmail's "never send" and Classroom's "read only" are kept by *Google*:
+Alfred asks for permissions that do not contain those powers, so the
+endpoints refuse it. A bug in Alfred cannot get past that.
+
+Calendar's "never delete" is kept by *Alfred's own code*, because Google
+has no permission that grants adding an event without also granting
+removing one. That is a weaker promise. It is the only one of the three
+that depends on the code being right.
+
+### Why that is worth spelling out
+
+"The assistant is programmed not to send" is not much of a promise, so
+here is the mechanism.
+
+For mail, Alfred asks Google for one permission: `gmail.modify`. That
+covers reading, labelling, archiving and creating drafts. It does **not**
 include sending — that is a separate permission (`gmail.send`) which
 Alfred never requests. So if Alfred is ever asked to send an email, by
 you, by a bug, or by something clever hidden in an email it is reading,
@@ -64,7 +79,7 @@ do this part for you and shouldn't be able to.
   after seven days, so Alfred will lose the mailbox about weekly and
   say so. Two ways out, neither free:
 
-  - re-run `python -m src.mail link` when it tells you to — ten seconds,
+  - re-run `python -m src.workspace link` when it tells you to — ten seconds,
     once a week
   - or **Audience → Publish app**. No weekly expiry - but read the next
     section before you try, because publishing asks for more than it
@@ -125,7 +140,7 @@ do this part for you and shouldn't be able to.
 **4. Link it**
 
 ```bash
-python -m src.mail link
+python -m src.workspace link
 ```
 
 A browser opens on Google's own consent page, showing exactly what is
@@ -133,8 +148,8 @@ being asked for. Approve it once. You'll see Google warn that the app
 isn't verified — that is what an unreviewed personal project looks like,
 and the app in question is the one sitting in this folder.
 
-- `python -m src.mail status` — which mailbox, and what Alfred may do
-- `python -m src.mail unlink` — forget it here (then revoke it properly
+- `python -m src.workspace status` — which mailbox, and what Alfred may do
+- `python -m src.workspace unlink` — forget it here (then revoke it properly
   at the link above)
 
 ---

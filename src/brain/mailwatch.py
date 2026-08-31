@@ -55,9 +55,10 @@ class MailCollector(SignalCollector):
             key="mail.linked",
             value=working,
             summary=(
-                f"Your mailbox is connected ({why})." if working
-                else "Alfred has lost access to your inbox - the weekly "
-                     "Google expiry. Run: python -m src.mail link"
+                f"Your Google account is connected ({why})." if working
+                else "Alfred has lost access to your Google account - the "
+                     "weekly expiry Google applies to apps in "
+                     "testing. Run: python -m src.workspace link"
             ),
         )
         return [self._last]

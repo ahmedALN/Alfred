@@ -42,7 +42,7 @@ def test_a_lapsed_link_says_what_to_run():
     seen = MailCollector(_Mail(broken=True), clock=_Clock()).collect()
 
     assert seen[0].value is False
-    assert "python -m src.mail link" in seen[0].summary
+    assert "python -m src.workspace link" in seen[0].summary
 
 
 def test_a_mailbox_that_was_never_set_up_is_not_nagged_about():

@@ -9,110 +9,44 @@ from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
 
+from src.workspace.account import GMAIL as SCOPES
+from src.workspace.account import GoogleError
+
 # Read, label, archive, draft. Not send. Not delete.
 #
 # No scope grants drafts without also granting send - gmail.compose does
 # both - so drafts are made through modify, which does not carry send at
 # all. If Alfred is ever asked to send, Google refuses before Alfred has
-# to decide not to.
-SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
+# to decide not to. The scope itself lives in workspace.account, with
+# the others, because one sign-in covers all of them.
 
 _QUOTE = re.compile(r"^\s*(>|On .{0,80} wrote:)", re.M)
 
-
-class MailError(RuntimeError):
-    pass
+# Kept as a name of its own so callers catching MailError still do; it
+# is the same failure.
+MailError = GoogleError
 
 
 class Gmail:
-    def __init__(
-        self,
-        secrets: Path | str,
-        token: Path | str,
-        address: str = "",
-    ) -> None:
-        self._secrets = Path(secrets)
-        self._token = Path(token)
-        self._address = address
-        self._service: Any = None
+    """The inbox, on the shared Google sign-in.
 
-    # ------------------------------------------------------------ access
+    This used to hold its own OAuth flow and its own token file. Adding
+    the calendar that way would have meant a second browser consent for
+    the same account, and Classroom a third.
+    """
+
+    def __init__(self, account: Any) -> None:
+        self._account = account
 
     @property
     def linked(self) -> bool:
-        return self._token.exists()
-
-    def link(self) -> str:
-        """Open a browser once so the account's owner can say yes.
-
-        The consent happens on Google's own page. Nothing here ever sees
-        a password, and the permission can be taken back from the
-        account's security settings without touching this machine.
-        """
-        from google_auth_oauthlib.flow import InstalledAppFlow
-
-        if not self._secrets.exists():
-            raise MailError(
-                self._secrets.name + " is missing - see docs/mail.md for "
-                "the few minutes of Google setup it needs."
-            )
-
-        flow = InstalledAppFlow.from_client_secrets_file(
-            str(self._secrets), SCOPES
-        )
-        creds = flow.run_local_server(port=0, prompt="consent")
-        self._token.write_text(creds.to_json(), encoding="utf-8")
-
-        try:
-            self._token.chmod(0o600)
-        except OSError:
-            pass
-
-        self._service = None
-        return self.address(refresh=True)
-
-    def unlink(self) -> bool:
-        if not self._token.exists():
-            return False
-        self._token.unlink()
-        self._service = None
-        return True
-
-    def _api(self):
-        if self._service is not None:
-            return self._service
-
-        from google.auth.transport.requests import Request
-        from google.oauth2.credentials import Credentials
-        from googleapiclient.discovery import build
-
-        if not self._token.exists():
-            raise MailError(
-                "not linked to a mailbox yet - run: python -m src.mail link"
-            )
-
-        creds = Credentials.from_authorized_user_file(str(self._token), SCOPES)
-        if not creds.valid:
-            if creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-                self._token.write_text(creds.to_json(), encoding="utf-8")
-            else:
-                raise MailError(
-                    "the mailbox link has expired - run: "
-                    "python -m src.mail link"
-                )
-
-        self._service = build(
-            "gmail", "v1", credentials=creds, cache_discovery=False
-        )
-        return self._service
+        return bool(getattr(self._account, "linked", False))
 
     def address(self, refresh: bool = False) -> str:
-        if self._address and not refresh:
-            return self._address
-        profile = self._api().users().getProfile(userId="me").execute()
-        self._address = profile.get("emailAddress", "")
-        return self._address
+        return self._account.address(refresh=refresh)
+
+    def _api(self):
+        return self._account.service("gmail", "v1")
 
     # ------------------------------------------------------------ reading
 
@@ -191,8 +125,9 @@ class Gmail:
         message["To"] = to
         message["Subject"] = subject
         message.set_content(body)
-        if self._address:
-            message["From"] = self._address
+        mine = self.address()
+        if mine:
+            message["From"] = mine
 
         payload: dict[str, Any] = {
             "message": {
