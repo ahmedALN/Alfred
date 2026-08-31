@@ -61,6 +61,7 @@ from src.tools.system_info import SystemInfoTool
 from src.tools.web import WebTool
 from src.singleton import AlreadyRunning, SingleInstance
 from src.tools.calendar_tool import CalendarTool
+from src.tools.diary_tool import DiaryTool
 from src.tools.classroom_tool import ClassroomTool
 from src.tools.mail_tool import MailTool
 from src.tools.schedule_tool import ScheduleTool
@@ -390,6 +391,7 @@ async def main() -> None:
         forget_tool,
         RunTaskTool(task_queue),
         SteerTaskTool(task_queue),
+        DiaryTool(providers.fast_chat, _ROOT),
         ScheduleTool(schedule),
         MailTool(mail),
         CalendarTool(diary),
