@@ -69,3 +69,4 @@ alfred_schedule.sqlite3
 gmail_token.json
 gmail_client.json
 alfred_activity.sqlite3
+alfred_world.sqlite3

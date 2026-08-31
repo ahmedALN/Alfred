@@ -25,6 +25,7 @@ def build_situation(
     resource_mode: Any = None,
     learner: Any = None,
     episodes: Any = None,
+    world: Any = None,
     foreground: Callable[[], str | None] = _fg,
     idle: Callable[[], float] = _idle,
     max_len: int = 900,
@@ -39,6 +40,17 @@ def build_situation(
     """
 
     lines: list[str] = []
+
+    # What is going on in their life, before what is going on in the
+    # machine. This is the half Alfred did not have: it knew about disk
+    # space and nothing about deadlines.
+    if world is not None:
+        try:
+            brief = (world.brief() or "").strip()
+        except Exception:  # noqa: BLE001
+            brief = ""
+        if brief:
+            lines.append(brief)
 
     # --- right now ------------------------------------------------
     now_bits: list[str] = []

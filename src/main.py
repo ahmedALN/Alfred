@@ -32,6 +32,8 @@ from src.brain.activity import ActivityCollector, ActivityLog, watching
 from src.brain.signals import default_collectors
 from src.brain.mailwatch import MailCollector
 from src.brain.schedule import ScheduleStore
+from src.brain.world import World, refresh as refresh_world
+from src.brain.worldwatch import WorldCollector
 from src.mail import Gmail
 from src.workspace import GoogleAccount
 from src.workspace.calendar import Calendar
@@ -62,6 +64,7 @@ from src.tools.web import WebTool
 from src.singleton import AlreadyRunning, SingleInstance
 from src.tools.calendar_tool import CalendarTool
 from src.tools.diary_tool import DiaryTool
+from src.tools.world_tool import WorldTool
 from src.tools.classroom_tool import ClassroomTool
 from src.tools.mail_tool import MailTool
 from src.tools.schedule_tool import ScheduleTool
@@ -308,6 +311,10 @@ async def main() -> None:
     # What Alfred owes, and when.
     schedule = ScheduleStore(_ROOT / "alfred_schedule.sqlite3")
     activity = ActivityLog(_ROOT / "alfred_activity.sqlite3")
+    # People, deadlines, and what you are actually working on -
+    # assembled from the mail, calendar and coursework Alfred can
+    # already read, so the proactive loop has something about YOU.
+    world = World(_ROOT / "alfred_world.sqlite3")
 
     # One Google sign-in, three services. Read and add; never send,
     # never delete. See src/workspace/account.py for which half of that
@@ -373,6 +380,7 @@ async def main() -> None:
             resource_mode=resource_mode,
             learner=learner,
             episodes=episode_store,
+            world=world,
         )
 
     session._situation_fn = _situation
@@ -395,6 +403,7 @@ async def main() -> None:
         RunTaskTool(task_queue),
         SteerTaskTool(task_queue),
         DiaryTool(providers.fast_chat, _ROOT),
+        WorldTool(world),
         ScheduleTool(schedule),
         MailTool(mail),
         CalendarTool(diary),
@@ -600,6 +609,13 @@ async def main() -> None:
         # A lapsed mailbox link is silent otherwise: the inbox stops
         # being mentioned and nothing says why.
         watchers.append(MailCollector(mail))
+        watchers.append(WorldCollector(
+            world,
+            refresh=lambda: refresh_world(
+                world, classroom=classroom, calendar=diary,
+                mail=mail, activity=activity,
+            ),
+        ))
         if watching():
             watchers.append(ActivityCollector(activity))
             print("[Brain] watching apps and window titles (ALFRED_WATCH_ME=false to stop).")
