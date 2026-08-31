@@ -114,7 +114,9 @@ class PersonalWhatsApp(Channel):
 
     def _deliver(self, event: Any) -> None:
         text = _text_of(event)
-        if not text:
+        # A photo sent with no caption is not an empty message. It is
+        # the commonest way anybody shows anybody anything.
+        if not text and not _kind_of(event):
             return
 
         info = getattr(event, "Info", None)
@@ -142,6 +144,9 @@ class PersonalWhatsApp(Channel):
         if self._on_message is None:
             return
 
+        kind = _kind_of(event)
+        media = self._fetch(event) if kind else None
+
         # Report it as the owner's number rather than whatever WhatsApp
         # addressed it with. It is not a guess: reaching this line means
         # the message came from the very account this device is linked
@@ -150,7 +155,8 @@ class PersonalWhatsApp(Channel):
         # allowlist, the replies - is written in terms of.
         self._on_message(
             Inbound(
-                sender=self._owner, text=text, channel=self.name, raw=event
+                sender=self._owner, text=text, channel=self.name, raw=event,
+                media=media, media_kind=kind,
             )
         )
 
@@ -277,6 +283,21 @@ class PersonalWhatsApp(Channel):
                     self._echoes.remove(text[:4000].strip())
             return False
 
+    def _fetch(self, event: Any) -> bytes | None:
+        """The picture itself, off WhatsApp's servers.
+
+        Encrypted in transit and fetched by the same linked device that
+        was allowed to see it in the first place, so nothing new is
+        being reached into.
+        """
+        try:
+            client = self._build()
+            data = client.download_any(event.Message)
+            return bytes(data) if data else None
+        except Exception as exc:  # noqa: BLE001
+            print(f"[WhatsApp] could not fetch what you sent: {exc}")
+            return None
+
     def send_file(
         self, data: bytes | str, kind: str = "image",
         caption: str = "", to: str | None = None,
@@ -349,7 +370,12 @@ def _still_waking(exc: Exception) -> bool:
 
 
 def _text_of(event: Any) -> str:
-    """The words out of whichever kind of message this is."""
+    """The words out of whichever kind of message this is.
+
+    A photo's words are its caption, and often there are none - "what
+    is this?" is a perfectly good message when the picture says the
+    rest.
+    """
     message = getattr(event, "Message", None)
     if message is None:
         return ""
@@ -359,4 +385,33 @@ def _text_of(event: Any) -> str:
         return plain
 
     extended = getattr(message, "extendedTextMessage", None)
-    return (getattr(extended, "text", "") or "") if extended else ""
+    if extended is not None:
+        text = getattr(extended, "text", "") or ""
+        if text:
+            return text
+
+    for field in ("imageMessage", "videoMessage", "documentMessage"):
+        part = getattr(message, field, None)
+        if part is not None and getattr(part, "url", ""):
+            return (getattr(part, "caption", "") or "").strip()
+
+    return ""
+
+
+def _kind_of(event: Any) -> str:
+    """Whether something was attached, and what sort of thing."""
+    message = getattr(event, "Message", None)
+    if message is None:
+        return ""
+
+    for field, kind in (
+        ("imageMessage", "image"),
+        ("videoMessage", "video"),
+        ("documentMessage", "document"),
+    ):
+        part = getattr(message, field, None)
+        # url is what separates a real attachment from an empty
+        # sub-message the protobuf always carries.
+        if part is not None and getattr(part, "url", ""):
+            return kind
+    return ""

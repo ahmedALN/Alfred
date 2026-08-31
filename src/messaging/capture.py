@@ -49,7 +49,12 @@ class ScreenShare:
         if not png:
             return "I couldn't grab the screen - nothing came back."
 
-        if self._send_file(png, "image", caption):
+        # Stamped with the moment it was taken. A picture of a screen
+        # looks the same whether it was captured now or an hour ago, and
+        # "is this current?" is not a question anybody should have to
+        # ask twice.
+        stamp = time.strftime("%H:%M:%S")
+        if self._send_file(png, "image", caption or f"Taken at {stamp}"):
             return ""          # the picture IS the reply
         return "I took it but couldn't send it."
 
@@ -79,7 +84,11 @@ class ScreenShare:
         try:
             if not out.exists() or out.stat().st_size == 0:
                 return "The recording came out empty."
-            if self._send_file(out.read_bytes(), "video", caption):
+            stamp = time.strftime("%H:%M:%S")
+            if self._send_file(
+                out.read_bytes(), "video",
+                caption or f"{seconds}s from {stamp}",
+            ):
                 return ""
             return "I recorded it but couldn't send it."
         finally:

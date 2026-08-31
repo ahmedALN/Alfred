@@ -101,6 +101,7 @@ class Conversation:
         screen=None,
         steer: "Callable[[str], bool] | None" = None,
         running: "Callable[[], str] | None" = None,
+        eyes=None,
     ) -> None:
         self._chat = chat
         self._submit = submit
@@ -109,10 +110,22 @@ class Conversation:
         # second job that fights the first.
         self._steer = steer
         self._running = running
+        # For looking at what you send it. Alfred could be talked to and
+        # not shown anything, which rules out most of the reasons a
+        # person picks up their phone: this error, this letter, this
+        # thing in front of me.
+        self._eyes = eyes
         self._history: deque[str] = deque(maxlen=remember)
 
-    def handle(self, text: str) -> str:
+    def handle(self, text: str, media: bytes | None = None,
+               kind: str = "") -> str:
         text = (text or "").strip()
+
+        # A picture is the message. Answer about it rather than routing
+        # it - "what is this?" is not a job for the task agent.
+        if media:
+            return self._look(text, media, kind)
+
         if not text:
             return ""
 
@@ -175,6 +188,42 @@ class Conversation:
         # lets you correct Alfred before it has done the wrong thing.
         return said or f"Right - {job[0].lower()}{job[1:].rstrip('.')}."
 
+
+    def _look(self, text: str, media: bytes, kind: str) -> str:
+        """Say what is in the thing they sent."""
+        if self._eyes is None:
+            return (
+                "I can see it arrived but I have no way to look at it "
+                "right now."
+            )
+        if kind == "video":
+            return (
+                "That's a video - I can only look at still pictures so "
+                "far. A screenshot of the moment would work."
+            )
+
+        # Whatever they asked, the answer is going to a phone. Nobody
+        # wants six headings and a bulleted list about a photo they
+        # just took.
+        asked = (
+            (text or "What is this?")
+            + " Answer in two or three short sentences, plain text - no "
+            "markdown, no headings, no bullet points. If there is "
+            "something in it they would obviously want pointed out, say "
+            "that too."
+        )
+        try:
+            seen = self._eyes.analyze(
+                media, asked, mime_type="image/jpeg",
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Message] could not look at that: {exc}")
+            return "I couldn't get a look at that one - send it again?"
+
+        answer = (seen or "").strip()[:_MAX_REPLY]
+        self._history.append(f"Them: [a picture] {text}"[:200])
+        self._history.append(f"You: {answer}"[:200])
+        return answer or "I can see it, but I can't make anything out."
 
     def _change(self, what: str) -> str:
         """Pass a correction to the job that is running."""

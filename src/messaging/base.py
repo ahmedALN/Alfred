@@ -13,6 +13,12 @@ class Inbound:
     text: str
     channel: str = ""
     raw: Any = None
+    # A picture or clip that came with it. Alfred could be talked to
+    # and not shown anything, which rules out most of the times a
+    # person reaches for their phone: this error, this letter, this
+    # thing on the shelf.
+    media: bytes | None = None
+    media_kind: str = ""     # image | video | document
 
 
 class Channel(ABC):

@@ -75,6 +75,7 @@ from src.windows.child_session.bootstrap import ensure_agent_running
 
 def _build_personal_whatsapp(
     settings, task_queue, status_tool, session, chat, screenshot=None,
+    eyes=None,
 ):
     """The linked-device route: Alfred messages your own chat.
 
@@ -97,6 +98,7 @@ def _build_personal_whatsapp(
         running=lambda: (
             task_queue.current().goal if task_queue.current() else ""
         ),
+        eyes=eyes,
     )
 
     router = MessageRouter(
@@ -136,7 +138,7 @@ def _status_reporter(status_tool):
 
 
 def _build_phone_channel(
-    settings, task_queue, status_tool, chat, screenshot=None,
+    settings, task_queue, status_tool, chat, screenshot=None, eyes=None,
 ):
     """Bring up the WhatsApp channel, if it has been set up.
 
@@ -153,7 +155,8 @@ def _build_phone_channel(
     )
     if session.exists() and settings.whatsapp_allowed:
         return _build_personal_whatsapp(
-            settings, task_queue, status_tool, session, chat, screenshot
+            settings, task_queue, status_tool, session, chat, screenshot,
+            eyes,
         )
 
     if not (settings.whatsapp_token and settings.whatsapp_phone_id):
@@ -531,22 +534,24 @@ async def main() -> None:
     # Messaging Alfred from a phone. Optional; off unless configured.
     # --------------------------------------------------------------
     def _screen_png() -> bytes:
-        """Whichever desktop Alfred is working on right now.
+        """The screen the person means.
 
-        The agent first, because during an isolated task the interesting
-        screen is Alfred's own rather than the one you are sitting in
-        front of. But the agent takes one connection at a time and a
-        running task holds it, so asking for a picture must not depend
-        on that pipe being free - grabbing the desktop directly always
-        works and is what "show me my screen" means anyway.
+        Asking to see your PC means the screen you sit in front of, and
+        grabbing that directly is both instant and unarguable - no
+        capture session, no frame pool, nothing that could hand back
+        something from a minute ago. The agent is asked only when Alfred
+        is working on its own desktop, where a direct grab would show
+        the wrong screen entirely.
         """
-        try:
-            client = session_router.client_for("child", fallback=True)
-            png = client.screenshot().png_bytes
-            if png:
-                return png
-        except Exception:  # noqa: BLE001
-            pass
+        if session_router.isolated:
+            try:
+                png = session_router.client_for(
+                    "child", fallback=True
+                ).screenshot().png_bytes
+                if png:
+                    return png
+            except Exception:  # noqa: BLE001
+                pass
 
         import io
 
@@ -558,7 +563,7 @@ async def main() -> None:
 
     phone = _build_phone_channel(
         settings, task_queue, task_status_tool, providers.plan_chat,
-        _screen_png,
+        _screen_png, providers.vision,
     )
 
     async def announce(text: str) -> None:

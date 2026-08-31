@@ -84,7 +84,7 @@ class MessageRouter:
             print(f"[Message] refused a message from {message.sender!r}")
             return None
 
-        if not text:
+        if not text and not getattr(message, "media", None):
             return None
 
         with self._lock:
@@ -105,7 +105,10 @@ class MessageRouter:
             # An empty answer is not a failure: sending a screenshot
             # answers the message by itself, and following the picture
             # with a sentence saying a picture was sent is noise.
-            answer = self._converse(text)
+            answer = self._converse(
+                text, getattr(message, "media", None),
+                getattr(message, "media_kind", ""),
+            )
             if answer:
                 self._reply(message.sender, answer)
             return answer or None

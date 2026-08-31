@@ -27,7 +27,27 @@ def test_the_picture_is_the_whole_reply():
     share, sent = _share()
 
     assert share.picture() == ""
-    assert sent.calls == [("image", 8, "")]
+    kind, size, _caption = sent.calls[0]
+    assert (kind, size) == ("image", 8)
+
+
+def test_it_says_when_it_was_taken():
+    """A picture of a screen looks the same whether it was captured now
+    or an hour ago, and "is this current?" is not a question anybody
+    should have to ask twice."""
+    import re
+
+    share, sent = _share()
+    share.picture()
+
+    assert re.search(r"Taken at \d\d:\d\d:\d\d", sent.calls[0][2])
+
+
+def test_a_caption_of_your_own_wins():
+    share, sent = _share()
+    share.picture("here is the error")
+
+    assert sent.calls[0][2] == "here is the error"
 
 
 def test_a_screen_it_cannot_grab_is_said_out_loud():

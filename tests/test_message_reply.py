@@ -242,3 +242,90 @@ def test_a_correction_with_nothing_to_correct_becomes_the_job():
 
     assert jobs == ["open the 1.21.11 instance"]
     assert said
+
+
+# ------------------------------------------- being shown something
+
+
+class _Eyes:
+    def __init__(self, says="A screenshot of a Python traceback."):
+        self.says = says
+        self.asked = []
+
+    def analyze(self, data, prompt, *, mime_type="image/png"):
+        self.asked.append((len(data), prompt, mime_type))
+        return self.says
+
+
+def _looker(eyes=None, **kw):
+    from src.messaging.reply import Conversation
+
+    jobs = []
+    return Conversation(_Chat("SAY: should not be used"), jobs.append,
+                        eyes=eyes or _Eyes(), **kw), jobs
+
+
+def test_a_picture_is_answered_not_routed():
+    """"What is this?" is not a job for the task agent."""
+    talk, jobs = _looker()
+
+    said = talk.handle("what is this?", media=b"JPEGDATA", kind="image")
+
+    assert "traceback" in said
+    assert jobs == []
+
+
+def test_a_picture_with_no_caption_is_still_a_message():
+    """It is the commonest way anybody shows anybody anything."""
+    eyes = _Eyes()
+    talk, _ = _looker(eyes)
+
+    said = talk.handle("", media=b"JPEGDATA", kind="image")
+
+    assert said
+    assert "What is this" in eyes.asked[0][1]
+
+
+def test_the_caption_is_the_question():
+    eyes = _Eyes()
+    talk, _ = _looker(eyes)
+
+    talk.handle("is this safe to click?", media=b"JPEGDATA", kind="image")
+
+    assert eyes.asked[0][1] == "is this safe to click?"
+
+
+def test_a_video_is_declined_in_a_useful_way():
+    talk, _ = _looker()
+
+    said = talk.handle("look at this", media=b"MP4DATA", kind="video")
+
+    assert "screenshot" in said
+
+
+def test_with_no_eyes_it_says_so_rather_than_pretending():
+    from src.messaging.reply import Conversation
+
+    talk = Conversation(_Chat("SAY: hi"), lambda job: None, eyes=None)
+
+    assert "no way to look" in talk.handle("what is this", b"X", "image")
+
+
+def test_a_broken_eye_does_not_swallow_the_message():
+    class _Blind:
+        def analyze(self, *a, **k):
+            raise RuntimeError("quota")
+
+    talk, _ = _looker(_Blind())
+
+    assert "send it again" in talk.handle("what is this", b"X", "image")
+
+
+def test_what_was_seen_is_remembered_for_the_next_message():
+    """So "and the line above it?" means something."""
+    eyes = _Eyes()
+    talk, _ = _looker(eyes)
+
+    talk.handle("what is this?", media=b"JPEGDATA", kind="image")
+
+    assert any("[a picture]" in line for line in talk._history)

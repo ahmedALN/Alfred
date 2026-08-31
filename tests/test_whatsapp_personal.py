@@ -485,3 +485,90 @@ def test_a_line_someone_else_took_is_left_alone():
     channel._thread.join(3)
 
     assert channel._client.connected_calls == 1
+
+
+# ------------------------------------------- a photo is a message
+
+
+def _media_event(kind, caption="", url="https://mmg.whatsapp.net/x"):
+    """Shaped like a real one: the sub-message is always present, and
+    only a url tells you something was actually attached."""
+    class Part:
+        def __init__(self, url, caption):
+            self.url = url
+            self.caption = caption
+
+    class Message:
+        conversation = ""
+        extendedTextMessage = None
+        imageMessage = Part(url if kind == "image" else "", caption)
+        videoMessage = Part(url if kind == "video" else "", caption)
+        documentMessage = Part("", "")
+
+    class Source:
+        Sender = type("J", (), {"User": "271712549638356"})()
+        Chat = type("J", (), {"User": "271712549638356"})()
+        IsFromMe = True
+
+    class Info:
+        MessageSource = Source()
+
+    return type("Ev", (), {"Message": Message(), "Info": Info()})()
+
+
+def test_a_photo_is_recognised_as_a_photo():
+    from src.messaging.whatsapp_personal import _kind_of
+
+    assert _kind_of(_media_event("image")) == "image"
+    assert _kind_of(_media_event("video")) == "video"
+
+
+def test_an_empty_sub_message_is_not_an_attachment():
+    """The protobuf always carries imageMessage; only a url means a
+    picture was actually sent."""
+    from src.messaging.whatsapp_personal import _kind_of
+
+    assert _kind_of(_media_event("image", url="")) == ""
+
+
+def test_a_photo_s_caption_is_its_words():
+    assert _text_of(_media_event("image", "what is this?")) == "what is this?"
+
+
+def test_a_photo_with_no_caption_still_gets_through():
+    """It is the commonest way anybody shows anybody anything, and it
+    used to be dropped in silence."""
+    channel = _channel()
+    heard = []
+    channel._on_message = heard.append
+    channel._fetch = lambda event: b"JPEGDATA"
+
+    channel._deliver(_media_event("image"))
+
+    assert len(heard) == 1
+    assert heard[0].media == b"JPEGDATA"
+    assert heard[0].media_kind == "image"
+
+
+def test_the_picture_is_fetched_and_carried():
+    channel = _channel()
+    heard = []
+    channel._on_message = heard.append
+    channel._fetch = lambda event: b"BYTES"
+
+    channel._deliver(_media_event("image", "look at this"))
+
+    assert heard[0].text == "look at this"
+    assert heard[0].media == b"BYTES"
+
+
+def test_a_photo_that_will_not_download_still_arrives_as_a_message():
+    channel = _channel()
+    heard = []
+    channel._on_message = heard.append
+    channel._fetch = lambda event: None
+
+    channel._deliver(_media_event("image", "look"))
+
+    assert heard[0].text == "look"
+    assert heard[0].media is None
