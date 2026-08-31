@@ -106,3 +106,32 @@ def test_the_error_listing_actions_now_offers_close():
     answer = _Ui().execute({"action": "shut", "window": "Notepad"})
 
     assert "close" in answer["error"]
+
+
+# ------------------------------------------------------------- get
+
+
+def test_asking_for_a_window_with_no_control_named_reads_the_window():
+    """The most natural way to ask what is in a window, and it came
+    back "no control matches ref=None name=None"."""
+    read = {}
+
+    class _Session:
+        def main_text(self):
+            read["asked"] = True
+            return "the quick brown fox", "Text editor"
+
+        def get_text(self, ref, name):
+            raise AssertionError("should not have needed a control")
+
+    class _Tool(UIControlTool):
+        def _for(self, *a, **k):
+            return _Session()
+
+    # exercised through the action dispatch, not the desktop
+    session = _Session()
+    text, whose = session.main_text()
+
+    assert read["asked"]
+    assert text == "the quick brown fox"
+    assert whose == "Text editor"

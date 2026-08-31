@@ -927,6 +927,15 @@ class UIControlTool(AlfredTool):
                 return {"status": "success", "keys": keys}
 
             if action == "get":
+                # No control named at all is the most natural way to
+                # ask what is in a window, and it resolved nothing -
+                # "no control matches ref=None name=None".
+                if ref is None and not name:
+                    text, whose = ui.main_text()
+                    if text:
+                        return {"status": "success", "text": text,
+                                "from": whose or "the window"}
+
                 try:
                     return {"status": "success", "text": ui.get_text(ref, name)}
                 except UiaError:
