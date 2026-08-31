@@ -111,6 +111,61 @@ CURRICULUM: list[dict] = [
         "goal": "What is my graphics card?",
         "check": ("answer_says_something",),
     },
+    # -- the machine, day to day --------------------------------
+    {
+        "goal": "What is using the most CPU right now?",
+        "check": ("answer_says_something",),
+    },
+    {
+        "goal": "How long until my battery runs out?",
+        "check": ("answer_says_something",),
+    },
+    {
+        "goal": "Is my wifi connected, and to what?",
+        "check": ("answer_says_something",),
+    },
+    {
+        "goal": "When did this PC last restart?",
+        "check": ("answer_says_something",),
+    },
+    {
+        "goal": "How many windows do I have open?",
+        "check": ("answer_says_something",),
+    },
+    # -- getting about ------------------------------------------
+    {
+        "goal": "Open the Documents folder.",
+        "check": ("window", "Documents"),
+        "after": ("close", "Documents"),
+    },
+    {
+        "goal": "Open Windows Settings.",
+        "check": ("window", "Settings"),
+        "after": ("close", "Settings"),
+    },
+    {
+        "goal": "Open Calculator.",
+        "check": ("window", "Calculator"),
+        "after": ("close", "Calculator"),
+    },
+    # -- inside apps --------------------------------------------
+    {
+        "goal": "Open Steam and go to my library.",
+        "check": ("window", "Steam"),
+    },
+    {
+        "goal": "In MultiMC, open the Settings window.",
+        "check": ("window", "MultiMC"),
+    },
+    # -- looking things up --------------------------------------
+    {
+        "goal": "Search the web for what time the sun sets in London today.",
+        "check": ("answer_says_something",),
+    },
+    {
+        "goal": "Look up who won the last Formula 1 race.",
+        "check": ("answer_says_something",),
+    },
 ]
 
 

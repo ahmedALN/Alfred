@@ -101,6 +101,44 @@ def _as_int(value: Any) -> int | None:
     return None
 
 
+def _explain(error: str, window: str | None) -> str:
+    """Say why a window that is plainly there cannot be touched.
+
+    Task Manager, Registry Editor, anything started as administrator:
+    the window is on screen, and the accessibility layer cannot see it
+    at all, because a program cannot read the controls of one running at
+    a higher integrity level than itself. What Alfred reported was
+    "window not found: timed out", so it tried again, and again, nine
+    times, while the window sat there in front of it.
+
+    Alfred is deliberately not an administrator. This is the honest
+    version of that limit rather than a mysterious timeout.
+    """
+    if not window or "not found" not in error and "did not become" not in error:
+        return error
+
+    try:
+        from src.brain.onscreen import look
+
+        wanted = window.strip().lower()
+        on_screen = [
+            title for _app, title in look(fresh=True).windows
+            if wanted in title.lower()
+        ]
+    except Exception:  # noqa: BLE001
+        return error
+
+    if not on_screen:
+        return error
+
+    return (
+        f"{error}. But {on_screen[0]!r} IS on screen - which means it is "
+        "running as administrator, and Alfred is not, so it cannot read "
+        "or click anything in it. Tell the user that window needs doing "
+        "by hand; do not keep trying."
+    )
+
+
 class UIControlTool(AlfredTool):
     """
     Control real Windows apps through the accessibility layer - reads
@@ -1507,6 +1545,6 @@ class UIControlTool(AlfredTool):
             return {"status": "error", "error": "unhandled action"}
 
         except UiaError as exc:
-            return {"status": "error", "error": str(exc)}
+            return {"status": "error", "error": _explain(str(exc), window)}
         except Exception as exc:  # noqa: BLE001
             return {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
