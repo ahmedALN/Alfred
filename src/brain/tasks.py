@@ -13,6 +13,14 @@ from src.brain.skills import SkillLibrary
 SpeakFn = Callable[[str], Awaitable[None]]
 
 
+def _current_loop() -> asyncio.AbstractEventLoop | None:
+    """The loop running on this thread, if this thread is running one."""
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+
+
 @dataclass
 class TaskRecord:
     id: str
@@ -181,8 +189,28 @@ class TaskQueue:
             except Exception as exc:  # noqa: BLE001
                 print(f"[Tasks] persist failed: {exc}")
 
-        self._queue.put_nowait(task_id)
+        self._enqueue(task_id)
         return task_id
+
+    def _enqueue(self, task_id: str) -> None:
+        """Wake the worker, whichever thread we are on.
+
+        Voice arrives on the event loop's own thread. A phone message
+        arrives on a callback thread belonging to the messaging library,
+        and put_nowait from the wrong thread does put the item in the
+        queue - it just never wakes the loop that is waiting on it. The
+        job then sits there indefinitely, which from the outside looks
+        exactly like Alfred saying "On it." and then nothing.
+        """
+        loop = self._loop
+        if loop is None or _current_loop() is loop:
+            self._queue.put_nowait(task_id)
+            return
+
+        try:
+            loop.call_soon_threadsafe(self._queue.put_nowait, task_id)
+        except RuntimeError:            # loop already closed; shutting down
+            self._queue.put_nowait(task_id)
 
     def restore(self) -> int:
         """Re-enqueue tasks left unfinished by a previous run."""

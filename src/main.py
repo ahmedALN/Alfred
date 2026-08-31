@@ -60,23 +60,29 @@ from src.windows.session_router import ROUTER as session_router
 from src.windows.child_session.bootstrap import ensure_agent_running
 
 
-def _build_personal_whatsapp(settings, task_queue, status_tool, session):
+def _build_personal_whatsapp(settings, task_queue, status_tool, session, chat):
     """The linked-device route: Alfred messages your own chat.
 
     Nothing is exposed - it connects outward like WhatsApp Web. Pair it
     once with: python -m src.whatsapp pair
     """
+    from src.messaging.reply import Conversation
     from src.messaging.router import MessageRouter
     from src.messaging.whatsapp_personal import PersonalWhatsApp
 
     owner = settings.whatsapp_allowed[0]
     channel = PersonalWhatsApp(session, owner)
 
+    talk = Conversation(
+        chat, lambda goal: task_queue.submit(goal, source="voice")
+    )
+
     router = MessageRouter(
         channel,
         list(settings.whatsapp_allowed),
         lambda text: task_queue.submit(text, source="voice"),
         status=_status_reporter(status_tool),
+        converse=talk.handle,
     )
     channel.start(router.handle)
 
@@ -107,12 +113,13 @@ def _status_reporter(status_tool):
     return status
 
 
-def _build_phone_channel(settings, task_queue, status_tool):
+def _build_phone_channel(settings, task_queue, status_tool, chat):
     """Bring up the WhatsApp channel, if it has been set up.
 
     Returns the router, or None. Everything about this is optional: an
     unconfigured Alfred behaves exactly as before.
     """
+    from src.messaging.reply import Conversation
     from src.messaging.router import MessageRouter
 
     # Two ways in, and the personal one wins when it has been linked,
@@ -122,7 +129,7 @@ def _build_phone_channel(settings, task_queue, status_tool):
     )
     if session.exists() and settings.whatsapp_allowed:
         return _build_personal_whatsapp(
-            settings, task_queue, status_tool, session
+            settings, task_queue, status_tool, session, chat
         )
 
     if not (settings.whatsapp_token and settings.whatsapp_phone_id):
@@ -154,11 +161,16 @@ def _build_phone_channel(settings, task_queue, status_tool):
         verify_token=settings.whatsapp_verify_token,
     )
 
+    talk = Conversation(
+        chat, lambda goal: task_queue.submit(goal, source="voice")
+    )
+
     router = MessageRouter(
         channel,
         list(settings.whatsapp_allowed),
         lambda text: task_queue.submit(text, source="voice"),
         status=_status_reporter(status_tool),
+        converse=talk.handle,
     )
     channel.start(router.handle)
 
@@ -467,7 +479,9 @@ async def main() -> None:
     # --------------------------------------------------------------
     # Messaging Alfred from a phone. Optional; off unless configured.
     # --------------------------------------------------------------
-    phone = _build_phone_channel(settings, task_queue, task_status_tool)
+    phone = _build_phone_channel(
+        settings, task_queue, task_status_tool, providers.plan_chat
+    )
 
     async def announce(text: str) -> None:
         """Say it in the room, and send it to the phone."""

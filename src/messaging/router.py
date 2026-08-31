@@ -41,6 +41,7 @@ class MessageRouter:
         submit: Callable[[str], str],
         *,
         status: Callable[[], str] | None = None,
+        converse: Callable[[str], str] | None = None,
         ack: bool = True,
     ) -> None:
         self._channel = channel
@@ -52,6 +53,10 @@ class MessageRouter:
             for a in allowed if str(a).strip()
         }
         self._submit = submit
+        # Reads the message and decides whether it is something to say
+        # back or something to do. Without one, everything is a job -
+        # which is how "Hello alfred" ended up typed into Notepad.
+        self._converse = converse
         self._status = status
         self._ack = ack
         self._lock = threading.Lock()
@@ -95,6 +100,12 @@ class MessageRouter:
             answer = self._status() if self._status else "Nothing running."
             self._reply(message.sender, answer)
             return answer
+
+        if self._converse is not None:
+            answer = self._converse(text)
+            if answer:
+                self._reply(message.sender, answer)
+            return answer or None
 
         try:
             self._submit(text)

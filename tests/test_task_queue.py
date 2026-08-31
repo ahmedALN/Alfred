@@ -196,3 +196,65 @@ def test_recent_is_bounded():
     assert len(recent) == 3
     assert q.record(ids[0]) is None
     assert q.record(ids[-1]) is not None
+
+
+# ------------------------------------------- asked from another thread
+
+
+def test_a_task_submitted_from_another_thread_actually_starts():
+    """A phone message arrives on the messaging library's own callback
+    thread, not on the event loop. put_nowait from there does enqueue
+    the job - it just never wakes the loop waiting on it, and the job
+    sits for ever. From the outside that is Alfred saying "On it." and
+    then nothing at all."""
+    import threading
+
+    queue = TaskQueue()
+    started = asyncio.Event()
+
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        queue._loop = loop
+
+        async def worker():
+            await queue._queue.get()
+            started.set()
+
+        job = asyncio.create_task(worker())
+
+        # Exactly how a WhatsApp message reaches it: off-loop, while the
+        # loop is parked awaiting the queue.
+        thread = threading.Thread(
+            target=lambda: queue.submit("open notepad", source="voice")
+        )
+        thread.start()
+        thread.join(2)
+
+        try:
+            await asyncio.wait_for(started.wait(), timeout=2)
+        finally:
+            job.cancel()
+
+        return True
+
+    assert asyncio.run(scenario()) is True
+
+
+def test_a_task_submitted_on_the_loop_still_works():
+    queue = TaskQueue()
+
+    async def scenario():
+        queue._loop = asyncio.get_running_loop()
+        queue.submit("say hello")
+        return await asyncio.wait_for(queue._queue.get(), timeout=1)
+
+    assert asyncio.run(scenario())
+
+
+def test_submitting_before_the_worker_runs_is_not_lost():
+    """Restored jobs are enqueued at startup, before run() has set the
+    loop."""
+    queue = TaskQueue()
+    task_id = queue.submit("something from last time")
+
+    assert queue._queue.get_nowait() == task_id
