@@ -32,6 +32,7 @@ from src.brain.activity import ActivityCollector, ActivityLog, watching
 from src.brain.signals import default_collectors
 from src.brain.mailwatch import MailCollector
 from src.brain.schedule import ScheduleStore
+from src.brain.undo import Undo
 from src.brain.world import World, refresh as refresh_world
 from src.brain.worldwatch import WorldCollector
 from src.mail import Gmail
@@ -64,6 +65,7 @@ from src.tools.web import WebTool
 from src.singleton import AlreadyRunning, SingleInstance
 from src.tools.calendar_tool import CalendarTool
 from src.tools.diary_tool import DiaryTool
+from src.tools.undo_tool import UndoTool
 from src.tools.world_tool import WorldTool
 from src.tools.classroom_tool import ClassroomTool
 from src.tools.mail_tool import MailTool
@@ -317,6 +319,9 @@ async def main() -> None:
     # assembled from the mail, calendar and coursework Alfred can
     # already read, so the proactive loop has something about YOU.
     world = World(_ROOT / "alfred_world.sqlite3")
+    # A short memory of what could be put back, written as things
+    # are done rather than guessed at from a log afterwards.
+    undo = Undo(_ROOT / "alfred_undo.sqlite3")
 
     # One Google sign-in, three services. Read and add; never send,
     # never delete. See src/workspace/account.py for which half of that
@@ -407,6 +412,7 @@ async def main() -> None:
         SteerTaskTool(task_queue),
         DiaryTool(providers.fast_chat, _ROOT),
         WorldTool(world),
+        UndoTool(undo, registry),
         ScheduleTool(schedule),
         MailTool(mail),
         CalendarTool(diary),
@@ -552,6 +558,7 @@ async def main() -> None:
         # against a log saying it was attempted.
         vision=providers.vision,
         screenshot=_screen_png,
+        undo=undo,
         # Verifying is a yes/no judgement over one substep, so it stays
         # on the fast local model - the reason it was split out.
         verify_chat=providers.chat,

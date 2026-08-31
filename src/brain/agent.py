@@ -223,6 +223,7 @@ class TaskAgent:
         fast_chat: ChatProvider | None = None,
         vision: Any = None,
         screenshot: Any = None,
+        undo: Any = None,
         verify_chat: ChatProvider | None = None,
         max_steps: int = 16,
         max_seconds: float = 240.0,
@@ -248,6 +249,9 @@ class TaskAgent:
         # happened, rather than only that it was attempted.
         self._vision = vision
         self._screenshot = screenshot
+        # A short memory of things that could be put back, written
+        # as they are done rather than reconstructed afterwards.
+        self._undo = undo
         # Verification defaults to the FAST model: the deterministic
         # fast-paths + strict per-substep scoping carry most of the load,
         # and a strong-model verify on every step of a multi-step task
@@ -331,6 +335,7 @@ class TaskAgent:
         )
         self._ask_user = ask_user
 
+        self._goal_now = goal
         result = TaskResult(goal=goal, status="failed", summary="")
         self._catalogue = self._tool_catalogue(full=True)
         self._exec_catalogue = self._tool_catalogue(full=False)
@@ -1354,6 +1359,15 @@ class TaskAgent:
             outcome = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
 
         ok = tool_succeeded(outcome)
+
+        # Noted here, at the moment of doing it, because this is the only
+        # place that knows what was actually done. Reconstructing it from
+        # a log afterwards is guessing.
+        if ok and self._undo is not None:
+            try:
+                self._undo.note_tool(tool or "", args, task=self._goal_now)
+            except Exception:  # noqa: BLE001
+                pass
 
         summary = summarize_result(outcome, 400)
         history.append(
