@@ -258,3 +258,49 @@ def test_submitting_before_the_worker_runs_is_not_lost():
     task_id = queue.submit("something from last time")
 
     assert queue._queue.get_nowait() == task_id
+
+
+# ------------------------------------------- saying what it found out
+
+
+def test_a_clean_answer_is_the_whole_message():
+    """You asked whether Steam was open. Being told the question was
+    investigated is not an answer."""
+    from src.brain.tasks import _announce
+
+    result = TaskResult(
+        goal="Check whether Steam is running.",
+        status="done",
+        summary=("Done on 'Check whether Steam is running.'. Confirmed: "
+                 "Run PowerShell to check if the Steam process is running."),
+        answer="Yes, Steam is running.",
+    )
+
+    assert _announce(result) == "(System: proactive) Yes, Steam is running."
+
+
+def test_a_job_that_went_badly_keeps_the_account_of_it():
+    """Then how far it got is the news."""
+    from src.brain.tasks import _announce
+
+    result = TaskResult(
+        goal="Open Steam and buy Hades.",
+        status="partial",
+        summary="Partly done on 'Open Steam and buy Hades.'. Confirmed: opened Steam.",
+        answer="Steam is open on the Hades page.",
+    )
+    said = _announce(result)
+
+    assert "Steam is open on the Hades page." in said
+    assert "Partly done" in said
+
+
+def test_work_with_nothing_to_find_out_reports_what_it_did():
+    from src.brain.tasks import _announce
+
+    result = TaskResult(
+        goal="Open Notepad.", status="done",
+        summary="Done on 'Open Notepad.'. Confirmed: opened Notepad.",
+    )
+
+    assert "Confirmed: opened Notepad." in _announce(result)

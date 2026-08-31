@@ -154,6 +154,9 @@ class TaskResult:
     unverified: list[str] = field(default_factory=list)
     plan: list[str] = field(default_factory=list)
     elapsed_seconds: float = 0.0
+    # What the work found, as opposed to what it did. Empty when
+    # there was nothing to find out.
+    answer: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -1071,6 +1074,50 @@ class TaskAgent:
                 "Left for you: " + "; ".join(result.skipped_confirmations) + "."
             )
         result.summary = " ".join(parts)
+        result.answer = self._finding(result)
+
+    # ----------------------------------------------------------------
+
+    def _finding(self, result: "TaskResult") -> str:
+        """What the work found out, in a sentence.
+
+        The summary reports what was done - "Confirmed: run PowerShell to
+        check whether Steam is running" - and stops exactly short of the
+        one thing that was asked. Spoken aloud that mostly passes,
+        because the live model has the conversation around it and fills
+        the gap. Sent to a phone it is useless: you asked whether Steam
+        was open and were told that the question had been looked into.
+
+        The answer is already sitting in the tool output. This just
+        reads it back.
+        """
+        useful = [
+            s for s in result.steps
+            if s.ok and s.result not in (None, "", {}, [])
+        ][-4:]
+        if not useful:
+            return ""
+
+        trace = "\n".join(
+            f"- {s.tool}: {_short(s.result, 400)}" for s in useful
+        )
+        prompt = (
+            f"REQUEST: {result.goal}\n\nWHAT CAME BACK:\n{trace}\n\n"
+            "Answer the request in one short sentence, as if replying to "
+            "a text message. Lead with the answer itself - yes, no, the "
+            "number, the name. If what came back does not answer it, "
+            "reply with exactly: NOTHING"
+        )
+        try:
+            line = self._plan_chat.generate(
+                prompt, system=_THINKING_OFF, temperature=0.2,
+                max_tokens=200,
+            ).strip()
+        except Exception:  # noqa: BLE001
+            return ""
+
+        line = line.splitlines()[0].strip() if line else ""
+        return "" if line.upper().startswith("NOTHING") else line[:300]
 
     # ----------------------------------------------------------------
 

@@ -466,10 +466,24 @@ async def _safe_speak(speak: SpeakFn, text: str) -> None:
 
 
 def _announce(result: TaskResult) -> str:
-    # result.summary is already an honest, self-contained sentence built by
-    # TaskAgent._finalize ("Partly done on '...'. Confirmed: ... Couldn't
-    # confirm: ... Left for you: ...").
-    msg = f"(System: proactive) {result.summary}".rstrip()
+    # result.summary is an honest, self-contained account of what was DONE
+    # ("Partly done on '...'. Confirmed: ... Couldn't confirm: ... Left for
+    # you: ..."). result.answer is what was FOUND, when there was anything
+    # to find.
+    #
+    # When the job went cleanly and there is an answer, the answer is the
+    # whole message: someone who asked whether Steam was open wants "Yes,
+    # Steam is running", not a report that the question was investigated.
+    # Anything less than clean keeps the account, because then how far it
+    # got is the news.
+    if result.answer and result.status == "done":
+        body = result.answer
+    elif result.answer:
+        body = f"{result.answer} {result.summary}"
+    else:
+        body = result.summary
+
+    msg = f"(System: proactive) {body}".rstrip()
 
     if result.skipped_confirmations and "Left for you" not in result.summary:
         msg += (

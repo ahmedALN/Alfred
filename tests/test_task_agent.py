@@ -278,3 +278,86 @@ def test_max_steps_caps_total_tool_calls():
 
     assert len(reg.executed) <= 4
     assert result.status in ("failed", "partial")
+
+
+# ----------------------------------------- reading the finding back out
+
+
+def _finding_for(goal, steps, answer="Yes, Steam is running."):
+    """_finding in isolation: it only needs a chat provider and steps."""
+    from src.brain.agent import TaskAgent, TaskResult
+
+    class _Chat:
+        def __init__(self):
+            self.prompts = []
+
+        def generate(self, prompt, **kwargs):
+            self.prompts.append(prompt)
+            return answer
+
+    chat = _Chat()
+    agent = TaskAgent.__new__(TaskAgent)
+    agent._plan_chat = chat
+    result = TaskResult(goal=goal, status="done", summary="", steps=steps)
+    return agent._finding(result), chat
+
+
+def _step(tool, output, ok=True):
+    from src.brain.agent import Step
+    return Step(1, "", tool, {}, "allow", output, ok)
+
+
+def test_the_finding_comes_from_what_the_tools_returned():
+    finding, chat = _finding_for(
+        "Check whether Steam is running.",
+        [_step("powershell", "steam.exe   12345  Running")],
+    )
+
+    assert finding == "Yes, Steam is running."
+    assert "steam.exe" in chat.prompts[0]
+
+
+def test_work_with_nothing_to_report_says_nothing():
+    """Opening Notepad has no finding, and inventing one would be worse
+    than staying quiet."""
+    finding, _ = _finding_for(
+        "Open Notepad.", [_step("open_app", {"status": "success"})],
+        answer="NOTHING",
+    )
+
+    assert finding == ""
+
+
+def test_steps_that_failed_are_not_read_as_findings():
+    finding, chat = _finding_for(
+        "Check whether Steam is running.",
+        [_step("powershell", "Access denied", ok=False),
+         _step("powershell", "steam.exe Running")],
+    )
+
+    assert "Access denied" not in chat.prompts[0]
+    assert "steam.exe Running" in chat.prompts[0]
+
+
+def test_a_task_with_no_steps_at_all_has_no_finding():
+    finding, chat = _finding_for("Do nothing.", [])
+
+    assert finding == ""
+    assert chat.prompts == []
+
+
+def test_a_model_that_falls_over_costs_only_the_finding():
+    from src.brain.agent import TaskAgent, TaskResult
+
+    class _Broken:
+        def generate(self, *a, **k):
+            raise RuntimeError("no route to host")
+
+    agent = TaskAgent.__new__(TaskAgent)
+    agent._plan_chat = _Broken()
+    result = TaskResult(
+        goal="Check Steam.", status="done", summary="",
+        steps=[_step("powershell", "running")],
+    )
+
+    assert agent._finding(result) == ""
