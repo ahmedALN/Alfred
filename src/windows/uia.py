@@ -106,12 +106,51 @@ def _title_score(title: str, wanted: str) -> int:
     return score - min(len(title) // 4, 40)
 
 
+def _is_deliberate_pattern(title: str) -> bool:
+    """Did somebody mean a regex, or is this just what the window is called?
+
+    Only a string that both contains metacharacters AND compiles is
+    given the benefit of the doubt. Everything else goes through the
+    scoring path, which matches literally and picks the best window
+    rather than the first - the path titles with an asterisk in them
+    used to be shut out of.
+    """
+    return bool(title) and bool(_REGEX_META.search(title)) and _compiles(title)
+
+
 def title_pattern(title: str) -> str:
-    """A plain string becomes a case-insensitive substring match."""
+    """A plain string becomes a case-insensitive substring match.
+
+    Containing a regex metacharacter used to be taken as proof that the
+    caller meant a regex. Real window titles are full of them: Notepad
+    marks unsaved work with a leading asterisk, Explorer counts
+    duplicates with (2), a terminal's title is a path full of
+    backslashes. "*Hello - Notepad" is not a pattern, it is an invalid
+    one - "nothing to repeat at position 0" - so a document with
+    unsaved changes could not be addressed at all, which is precisely
+    when you most want to close it.
+
+    So a title is always taken literally here. A caller who genuinely
+    means a pattern is served by window(), which tries that only after
+    nothing turned out to be called this.
+    """
     title = clean_title(title)
-    if _REGEX_META.search(title):
-        return title
     return f"(?i).*{re.escape(title)}.*"
+
+
+def _exists(win) -> bool:
+    try:
+        return bool(win.exists(timeout=0.4))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _compiles(pattern: str) -> bool:
+    try:
+        re.compile(pattern)
+    except re.error:
+        return False
+    return True
 
 
 class UiaSession:
@@ -184,18 +223,30 @@ class UiaSession:
         try:
             if pid:
                 win = dt.window(process=int(pid))
-            elif title_re and not _REGEX_META.search(clean_title(title_re)):
-                # Plain words get scored across every open window. Taking
-                # the first or shortest match picked the wrong one as soon
-                # as titles moved: searching in Explorer renamed it
-                # "notepad - Search Results in Windows - File Explorer",
-                # and a terminal called "C:\WINDOWS\system32\cmd.exe"
-                # became the better match for "Windows".
-                win = self._best_window(dt, clean_title(title_re))
+            elif title_re:
+                # Literally first, always. Every window is looked at and
+                # scored as plain text, because taking the first or
+                # shortest match picked the wrong one as soon as titles
+                # moved: searching in Explorer renamed it "notepad -
+                # Search Results in Windows - File Explorer", and a
+                # terminal called "C:\WINDOWS\system32\cmd.exe" became
+                # the better match for "Windows".
+                #
+                # This used to be skipped for anything containing a
+                # regex metacharacter, on the theory that such a string
+                # was meant as a pattern. Window titles are full of
+                # them - Notepad's unsaved asterisk, Explorer's (2), a
+                # path's backslashes - and read as patterns they match
+                # either nothing or the wrong thing. "Document (2)" as a
+                # regex does not even match the window it names.
+                wanted = clean_title(title_re)
+                win = self._best_window(dt, wanted)
                 if win is None:
                     win = dt.window(title_re=title_pattern(title_re))
-            elif title_re:
-                win = dt.window(title_re=title_pattern(title_re))
+                    # A genuine pattern gets its turn only once nothing
+                    # was called that.
+                    if _is_deliberate_pattern(wanted) and not _exists(win):
+                        win = dt.window(title_re=wanted)
             else:
                 from pywinauto import win32functions
 

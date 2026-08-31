@@ -259,9 +259,14 @@ def test_escape_special_keys_chars():
     assert _escape("plain text") == "plain text"
 
 
-def test_title_pattern_wraps_plain_strings_only():
+def test_title_pattern_always_matches_the_title_literally():
+    """It used to hand anything containing a metacharacter straight
+    through as a regex. Window titles are full of them - Notepad's
+    unsaved asterisk, Explorer's (2) - and read that way they match
+    nothing, or something else. A deliberate pattern gets its turn in
+    window(), after nothing turns out to be called this."""
     assert title_pattern("Spotify") == "(?i).*Spotify.*"
-    assert title_pattern(r"^Spot.*fy$") == r"^Spot.*fy$"
+    assert title_pattern("*Hello - Notepad") == r"(?i).*\*Hello\ \-\ Notepad.*"
 
 
 # ------------------------------------------- model-invented arg shapes
