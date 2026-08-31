@@ -52,3 +52,55 @@ def test_a_multi_word_value_is_kept_whole():
 
 def test_something_unrelated_still_does_not_match():
     assert align("Open Steam and {p0} for {p1}.", "What time is it") is None
+
+
+# ------------------------------------ what belongs in a routine at all
+
+from src.brain.skills import _without_trailing_reads as trim
+
+
+def _actions(trace):
+    return [(t, (a or {}).get("action", "-")) for t, a in trace]
+
+
+def test_the_checking_it_worked_steps_are_not_part_of_the_routine():
+    """A rerun typed "Celeste" into the search box and then read back
+    the control called "Hollow Knight" - the literal it was taught
+    with. Those steps do nothing on replay but take time and lie."""
+    steam = [
+        ("open_app", {"name": "Steam"}),
+        ("ui_control", {"action": "wait_ready", "window": "Steam"}),
+        ("ui_control", {"action": "search", "query": "Hollow Knight"}),
+        ("ui_control", {"action": "get", "name": "Hollow Knight"}),
+        ("ui_control", {"action": "tree", "contains": "Hollow Knight"}),
+    ]
+
+    assert _actions(trim(steam)) == [
+        ("open_app", "-"),
+        ("ui_control", "wait_ready"),
+        ("ui_control", "search"),
+    ]
+
+
+def test_a_routine_whose_whole_job_is_looking_keeps_looking():
+    """"What windows are open right now?" is all read, and that is the
+    job. Trimming it would leave nothing."""
+    assert _actions(trim([("ui_control", {"action": "windows"})])) == [
+        ("ui_control", "windows")
+    ]
+
+
+def test_reads_in_the_middle_are_left_alone():
+    """Reading the tree before clicking is how the clicking works."""
+    trace = [
+        ("ui_control", {"action": "tree", "window": "MultiMC"}),
+        ("ui_control", {"action": "click", "name": "1.21.11"}),
+    ]
+
+    assert _actions(trim(trace)) == _actions(trace)
+
+
+def test_a_query_routine_is_untouched():
+    trace = [("powershell", {"command": "Get-Process"})]
+
+    assert trim(trace) == trace

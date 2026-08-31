@@ -73,6 +73,47 @@ def _slug(text: str, words: int = 4) -> str:
 _SLOT_RE = re.compile(r"^[^\w{]*\{(\w+)\}[^\w}]*$")
 
 
+# ui_control actions that look rather than act.
+_LOOKING = {
+    "get", "tree", "find", "exists", "links", "unnamed", "windows",
+    "wait_ready", "wait_for",
+}
+
+
+def _without_trailing_reads(
+    trace: list[tuple[str, dict[str, Any]]]
+) -> list[tuple[str, dict[str, Any]]]:
+    """Drop the checking-it-worked steps off the end of a routine.
+
+    A task ends by looking at what it did, and those looks were being
+    kept as part of the routine. They do nothing on replay except take
+    time, and they carry the literal they were taught with - a rerun of
+    the Steam search typed "Celeste" into the box and then read back the
+    control called "Hollow Knight", which is at best pointless.
+
+    Only from the end, and only if something else remains: a skill whose
+    whole job is to look something up is all read and must stay that
+    way.
+    """
+    trimmed = list(trace)
+    while len(trimmed) > 1:
+        tool, args = trimmed[-1]
+        action = str((args or {}).get("action") or "").lower()
+        if tool == "ui_control" and action in _LOOKING:
+            trimmed.pop()
+            continue
+        break
+
+    if not any(
+        not (t == "ui_control"
+             and str((a or {}).get("action") or "").lower() in _LOOKING)
+        for t, a in trimmed
+    ):
+        return list(trace)      # all looking - that is the job
+
+    return trimmed
+
+
 def align(template: str, request: str) -> dict[str, str] | None:
     """Extract slot values by aligning ``template`` (with ``{slot}`` tokens)
     against ``request``. Returns ``None`` if a slot can't be filled."""
@@ -246,6 +287,8 @@ class SkillLibrary:
             if isinstance(obj, list):
                 return [_slotify_args(v, freeform) for v in obj]
             return obj
+
+        trace = _without_trailing_reads(trace)
 
         steps: list[dict[str, Any]] = []
         for tool, args in trace:
