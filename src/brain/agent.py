@@ -50,6 +50,10 @@ Notepad unless the user explicitly asked for a file. The user gets the answer \
 from the tool result.
 - Prefer ui_control for apps, powershell / system_info / network_info for the \
 machine's state. Use the ENVIRONMENT paths - never invent a username.
+- ON SCREEN NOW says what is already open and what is in front. Plan from \
+where the machine actually IS. If the app is already open there is no "open \
+it" step - the plan starts at the work. Only plan opening what is genuinely \
+not there.
 
 Example goal: "play a Drake song on Spotify, then tell me what's playing"
 {"plan":[
@@ -57,6 +61,10 @@ Example goal: "play a Drake song on Spotify, then tell me what's playing"
  {"step":"Search Spotify for Drake and start the top track","done_when":"ui_control get on the now-playing text shows a Drake track"}],
  "note":""}
 (Note: no third "tell me / confirm" step - that check is automatic.)
+
+Example goal: "type hello into Notepad", with Notepad already in front
+{"plan":[{"step":"Type hello into Notepad","done_when":"ui_control get on the editor shows hello"}],"note":""}
+(One step. Notepad is open; opening it again is not a step.)
 
 Example goal: "how much free space is on C"
 {"plan":[{"step":"Run system_info to get disk space","done_when":"system_info returns a FreeGB value for C:"}],"note":""}
@@ -80,6 +88,9 @@ Working INSIDE an app with ui_control:
  3. {"action":"type","window":"<app>","text":"<text>","into":<ref>}
  4. {"action":"click","window":"<app>","name":"<button>"} (or "ref":<n>)
  5. {"action":"get","window":"<app>","name":"<status text>"} - to confirm
+ 6. {"action":"close","window":"<app>"}         - to close a window
+    (if it has unsaved work it comes back needs_user with the buttons -
+     click "Don't save" only if the user asked to discard)
 Also available: find, select (combo/list), expand, scroll, menu, key,
 double_click, right_click, wait_for, windows, focus.
 
@@ -90,7 +101,7 @@ Rules:
 - Do the smallest set of actions that makes 'done_when' true, then action=done \
 with the tool result that proves it.
 - NEVER repeat a call with the same args - HISTORY shows what you already did.
-- If an app is already open in HISTORY, do NOT open it again.
+- ON SCREEN NOW lists what is already open and which window is in front. If the app you need is there, do NOT open it and do NOT wait_ready for it - go straight to the work. Only open what is genuinely missing.
 - After 2-3 failed calls, change tool or approach; if truly stuck, action=give_up.
 - Do not claim done unless a real tool result in HISTORY shows done_when holds.
 - NEVER type a password, PIN or security code. If the step needs a sign-in, \
@@ -525,12 +536,14 @@ class TaskAgent:
     def _make_plan(self, goal: str, extra: str = "") -> list[dict[str, str]]:
         know = getattr(self, "_run_knowledge", "") or self._relevant_knowledge(goal)
         apps = getattr(self, "_run_apps", "")
+        seen = self._onscreen()
         base_prompt = (
             f"{_PLAN_SYSTEM}\n\nGOAL: {goal}\n\n"
             f"ENVIRONMENT: {self._environment()}\n\n"
             + (f"APP NOTES (what worked here before):\n{apps}\n\n" if apps else "")
             + (f"KNOWN GOOD PRACTICE:\n{know}\n\n" if know else "")
             + (f"SITUATION:\n{self._situation_text()}\n\n" if self._situation else "")
+            + (f"ON SCREEN NOW:\n{seen}\n\n" if seen else "")
             + f"TOOLS:\n{self._catalogue}\n"
             + (f"\nCONTEXT: {extra}\n" if extra else "")
         )
@@ -768,6 +781,15 @@ class TaskAgent:
         self._log("task_reflect", {"goal": result.goal, "line": line}, None)
         return line
 
+    def _onscreen(self) -> str:
+        """What any glance would show. About twenty milliseconds."""
+        try:
+            from src.brain.onscreen import look
+
+            return look().brief()
+        except Exception:  # noqa: BLE001
+            return ""
+
     def _situation_text(self) -> str:
         if self._situation is None:
             return ""
@@ -837,10 +859,21 @@ class TaskAgent:
 
             know = getattr(self, "_run_knowledge", "")
             apps = getattr(self, "_run_apps", "")
+            # Asked every time round rather than once per step: an app
+            # opened on the first call was still "not open" for the
+            # rest of them. The look is cached for a couple of seconds,
+            # so asking again is free and is right more often.
+            onscreen = self._onscreen()
             prompt = (
                 f"{_EXEC_SYSTEM}\n\nOVERALL GOAL: {goal}\n\nPLAN:\n{plan_view}\n\n"
                 f"CURRENT STEP: {pstep['step']}\nDONE WHEN: {pstep['done_when']}\n\n"
                 f"ENVIRONMENT: {self._environment()}\n\n"
+                # The executor was told the goal, the plan, the tools and
+                # its own history, and nothing whatever about the machine
+                # it was working on. So its opening move was to find out
+                # what a glance would have shown it: launching apps that
+                # were already running, waiting for windows already up.
+                + (f"ON SCREEN NOW:\n{onscreen}\n\n" if onscreen else "")
                 + (f"APP NOTES (controls that worked here before):\n{apps}\n\n"
                    if apps else "")
                 + (f"KNOWN GOOD PRACTICE:\n{know}\n\n" if know else "")
@@ -1344,7 +1377,10 @@ def _answer_line(raw: str) -> str:
             if said:
                 return said
 
-    return lines[-1]
+    # The last line can be the marker itself with nothing after it,
+    # which is how "ANSWER:" came back to the user as the answer.
+    last = lines[-1]
+    return "" if last.rstrip().upper().rstrip(":") == "ANSWER" else last
 
 
 def _why_it_failed(step: "Step") -> str:
