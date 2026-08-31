@@ -131,3 +131,9 @@ def test_only_the_first_line_of_an_essay_is_used():
 
 def test_a_bare_sentence_is_talk():
     assert _read("Evening, sir.") == ("say", "Evening, sir.")
+
+
+def test_a_model_that_echoes_the_marker_back_is_understood():
+    """Seen from the real one: "SAY: SAY" instead of an answer."""
+    assert _read("SAY: SAY: Here.") == ("say", "Here.")
+    assert _read("DO: DO: Open Steam.") == ("do", "Open Steam.")

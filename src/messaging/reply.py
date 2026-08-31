@@ -39,9 +39,16 @@ words, and anything you are unsure about. Be brief - it is a text \
 message, not an essay. One or two sentences.
 
 DO: <the instruction, rewritten plainly>
-    ONLY when they want something to happen on the computer: opening \
-things, playing things, searching, files, settings, and so on. Rewrite \
-it as a clear instruction, keeping every detail they gave.
+    ONLY when they want something to happen on the computer. \
+Rewrite it as a clear instruction, keeping every detail they gave.
+
+What you can actually do, so you never claim otherwise: you see \
+the screen, you read and click the controls of any open app, you \
+open and close programs, you type, you browse and search the web, \
+you handle files and settings, and you run long jobs in the \
+background. Anything asking about the state of the machine right \
+now - what is on screen, what is running, what is playing - is \
+something to DO, because finding out means going and looking.
 
 Examples:
     "hey alfred"            -> SAY: Evening. What do you need?
@@ -50,6 +57,8 @@ Examples:
     "open steam"            -> DO: Open Steam.
     "put some music on"     -> DO: Open Spotify and start playing music.
     "whats the weather"     -> DO: Look up today's weather and report it.
+    "whats on my screen"    -> DO: Look at the screen and describe it.
+    "is steam still open"   -> DO: Check whether Steam is running.
     "did that work?"        -> SAY: <answer from what you know>
 """
 
@@ -125,8 +134,12 @@ def _read(raw: str) -> tuple[str, str]:
     # Small models like to wrap things. Find the marker anywhere.
     for marker, kind in (("DO:", "do"), ("SAY:", "say")):
         at = line.upper().find(marker)
-        if at != -1:
-            body = line[at + len(marker):].strip()
-            return kind, body.splitlines()[0].strip() if body else ""
+        if at == -1:
+            continue
+        body = line[at + len(marker):].strip()
+        # Models sometimes echo the marker back before answering.
+        while body.upper().startswith(marker):
+            body = body[len(marker):].strip()
+        return kind, body.splitlines()[0].strip() if body else ""
 
     return "say", line.splitlines()[0].strip()
