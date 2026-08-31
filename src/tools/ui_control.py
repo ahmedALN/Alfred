@@ -815,9 +815,25 @@ class UIControlTool(AlfredTool):
                 }
 
             if action == "find":
-                query = arguments.get("query") or name
+                # "contains" is what a model reaches for when it means
+                # "find me the thing whose label has this in it", which
+                # is exactly what find does. Refusing over the label on
+                # the argument spends a round trip teaching a synonym.
+                query = (
+                    arguments.get("query")
+                    or arguments.get("contains")
+                    or arguments.get("text")
+                    or arguments.get("search")
+                    or name
+                )
                 if not isinstance(query, str) or not query:
-                    return {"status": "error", "error": "'find' needs 'query'."}
+                    return {
+                        "status": "error",
+                        "error": (
+                            "'find' needs 'query' - the words to look "
+                            "for in a control's name."
+                        ),
+                    }
                 hits = ui.find(query)
                 return {
                     "status": "success",
@@ -899,7 +915,28 @@ class UIControlTool(AlfredTool):
                 return {"status": "success", "keys": keys}
 
             if action == "get":
-                return {"status": "success", "text": ui.get_text(ref, name)}
+                try:
+                    return {"status": "success", "text": ui.get_text(ref, name)}
+                except UiaError:
+                    if ref is not None or not name:
+                        raise
+                    # The name was a description of what was wanted -
+                    # "Text Editor", "Untitled", the window's own title -
+                    # rather than what a control is called. Reading the
+                    # window is what was meant; say plainly that this
+                    # came from somewhere else than asked.
+                    text, whose = ui.main_text()
+                    if not text:
+                        raise
+                    return {
+                        "status": "success",
+                        "text": text,
+                        "note": (
+                            "nothing here is called " + repr(name)
+                            + "; this is the text of "
+                            + (repr(whose) if whose else "the window")
+                        ),
+                    }
 
             if action == "select":
                 item = arguments.get("item")

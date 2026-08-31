@@ -802,6 +802,29 @@ class UiaSession:
 
         send_keys(keys, with_spaces=True)
 
+    def main_text(self) -> tuple[str, str]:
+        """The window's actual contents, and what holds them.
+
+        Asked to read a window, a model names what it expects to find -
+        "Text Editor", "Untitled", sometimes the window title itself -
+        and none of those is what the control is called, so the read
+        failed and it guessed again. What it wanted every time was the
+        text in the window, and there is usually exactly one control
+        with any real text in it.
+        """
+        best_text, best_label = "", ""
+
+        for el in list(self._by_ref.values()):
+            value = _value_of(el)
+            if value and len(value) > len(best_text):
+                best_text = value
+                try:
+                    best_label = (el.window_text() or "").strip()
+                except Exception:  # noqa: BLE001
+                    best_label = ""
+
+        return best_text, best_label
+
     def get_text(self, ref: int | None = None, name: str | None = None) -> str:
         """A control's value if it has one, otherwise its label.
 
@@ -811,19 +834,9 @@ class UiaSession:
         """
         el = self._resolve(ref, name)
 
-        try:
-            value = el.get_value()  # type: ignore[attr-defined]
-            if value is not None:
-                return str(value)
-        except Exception:  # noqa: BLE001
-            pass
-
-        try:
-            legacy = el.legacy_properties()  # type: ignore[attr-defined]
-            if isinstance(legacy, dict) and legacy.get("Value") is not None:
-                return str(legacy["Value"])
-        except Exception:  # noqa: BLE001
-            pass
+        value = _value_of(el)
+        if value is not None:
+            return value
 
         try:
             return str(el.window_text() or "")
@@ -976,6 +989,31 @@ class UiaSession:
 # ==================================================================
 # helpers
 # ==================================================================
+
+
+def _value_of(el) -> str | None:
+    """What a control holds, by whichever route it reports it.
+
+    Two routes, because UIA providers disagree: some answer the Value
+    pattern, some only the legacy accessibility properties. Reading one
+    of them meant a control that had text looked empty, which is how
+    "read the window" kept coming back with nothing.
+    """
+    try:
+        value = el.get_value()  # type: ignore[attr-defined]
+        if value is not None:
+            return str(value)
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
+        legacy = el.legacy_properties()  # type: ignore[attr-defined]
+        if isinstance(legacy, dict) and legacy.get("Value") is not None:
+            return str(legacy["Value"])
+    except Exception:  # noqa: BLE001
+        pass
+
+    return None
 
 
 def _actionable_count(descendants) -> int:

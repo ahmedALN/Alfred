@@ -70,6 +70,24 @@ def _is_web(target: str) -> bool:
     return any(lowered.startswith(p) for p in _WEB)
 
 
+# Every word a model has been seen to use for "the program to open".
+# Refusing a call over the label on an argument costs a whole round trip
+# to be told a synonym, and at several seconds a call that is most of
+# what "slow" was made of.
+_APP_KEYS = (
+    "app", "name", "application", "app_name",
+    "query", "program", "executable", "path",
+)
+
+
+def app_name(arguments: dict) -> str | None:
+    for key in _APP_KEYS:
+        value = arguments.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
 class OpenAppTool(AlfredTool):
     name = "open_app"
 
@@ -142,10 +160,7 @@ class OpenAppTool(AlfredTool):
         # Models reliably reach for 'name' here, and a rejected call costs
         # a whole step - accept the obvious synonyms.
         app = (
-            arguments.get("app")
-            or arguments.get("name")
-            or arguments.get("application")
-            or arguments.get("app_name")
+            app_name(arguments)
         )
 
         target = arguments.get(
@@ -154,7 +169,14 @@ class OpenAppTool(AlfredTool):
         )
 
         if not isinstance(app, str) or not app.strip():
-            return {"status": "error", "error": "'app' must be a non-empty string."}
+            return {
+                "status": "error",
+                "error": (
+                    "'app' must be a non-empty string - the name of the "
+                    "program to open, e.g. {\"app\": \"Notepad\"}. "
+                    "'target' only says which desktop to open it on."
+                ),
+            }
 
         if target not in {"alfred", "user", "current"}:
             target = "alfred"

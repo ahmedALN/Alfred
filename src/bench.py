@@ -165,7 +165,34 @@ def build():
     return agent, ui
 
 
+def _why(result) -> str:
+    if isinstance(result, dict):
+        for key in ("error", "stderr", "message", "status"):
+            text = str(result.get(key) or "").strip()
+            if text:
+                return text[:130]
+    return str(result)[:130]
+
+
+def reset() -> None:
+    """Start from the same desk every time.
+
+    A left-over Notepad from the last run is not a neutral starting
+    point: its title carries the previous run's typing, there are
+    suddenly two windows called Notepad, and the numbers stop being
+    comparable with anything.
+    """
+    import subprocess
+
+    for image in ("notepad.exe", "Notepad.exe"):
+        subprocess.run(
+            ["taskkill", "/IM", image, "/F"],
+            capture_output=True, timeout=20,
+        )
+
+
 def run(goals: list[dict]) -> list[dict]:
+    reset()
     agent, ui = build()
     rows = []
 
@@ -185,6 +212,17 @@ def run(goals: list[dict]) -> list[dict]:
                 ),
                 "detail": str(detail),
                 "tags": case.get("tags", []),
+                # Every wrong turn, kept. Which calls fail and why is
+                # the thing worth acting on: a wasted call costs both
+                # accuracy and the seconds spent making it.
+                "failures": [
+                    {
+                        "tool": s.tool,
+                        "args": {k: str(v)[:60] for k, v in (s.args or {}).items()},
+                        "error": _why(s.result),
+                    }
+                    for s in result.steps if s.tool and not s.ok
+                ],
             })
         except Exception as exc:  # noqa: BLE001
             rows.append({
