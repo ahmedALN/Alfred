@@ -19,9 +19,13 @@ def _channel(owner="+44 7700 900123"):
     return channel
 
 
-def _event(text, sender="447700900123"):
+def _event(text, sender="271712549638356", chat=None, from_me=True):
+    """Shaped like a real one: WhatsApp addresses by LID, not by number."""
+
     class Source:
         Sender = type("J", (), {"User": sender})()
+        Chat = type("J", (), {"User": sender if chat is None else chat})()
+        IsFromMe = from_me
 
     class Info:
         MessageSource = Source()
@@ -165,6 +169,21 @@ class _SlowClient(_Client):
         return "12345678"
 
 
+class _Holding(_SlowClient):
+    """A real connection lasts the whole session; it is not a call."""
+
+    def __init__(self, refusals=0):
+        super().__init__(refusals=refusals)
+        self.let_go = threading.Event()
+
+    def connect(self):
+        self.connected_calls += 1
+        self.let_go.wait(5)
+
+    def stop(self):
+        self.let_go.set()
+
+
 def _paired(client, owner="+447700900123"):
     channel = PersonalWhatsApp("session", owner)
     channel._client = client
@@ -181,35 +200,25 @@ def test_it_waits_for_whatsapp_to_come_up_before_taking_no_for_an_answer():
 
 
 def test_it_starts_connecting_because_a_code_needs_a_live_connection():
-    client = _SlowClient(refusals=0)
+    client = _Holding(refusals=0)
     channel = _paired(client)
     channel.pair()
 
     assert channel._thread is not None
-    channel._thread.join(2)
+    channel.stop()
     assert client.connected_calls == 1
 
 
 def test_it_only_connects_once_however_many_times_it_is_asked():
     """Pairing and then listening is one connection, not three."""
 
-    class _Holds(_SlowClient):
-        def __init__(self):
-            super().__init__(refusals=0)
-            self.let_go = threading.Event()
-
-        def connect(self):
-            self.connected_calls += 1
-            self.let_go.wait(5)          # a real one lasts the session
-
-    client = _Holds()
+    client = _Holding(refusals=0)
     channel = _paired(client)
 
     channel.pair()
     channel.start(lambda _m: None)
     channel.pair()
-    client.let_go.set()
-    channel._thread.join(2)
+    channel.stop()
 
     assert client.connected_calls == 1
 
@@ -257,3 +266,222 @@ def test_the_number_it_pairs_with_has_no_punctuation_in_it():
     channel.pair()
 
     assert seen["phone"] == "447700900123"
+
+
+# ------------------------------------------------------ letting go
+
+
+def test_stopping_cancels_the_worker_rather_than_just_closing_the_socket():
+    """The library's own thread is not a daemon: disconnect() alone
+    leaves the program alive after main() returns."""
+    called = []
+
+    class _Client(_SlowClient):
+        def stop(self):
+            called.append("stop")
+            self.let_go.set()
+
+        def disconnect(self):
+            called.append("disconnect")
+
+        def connect(self):
+            self.connected_calls += 1
+            self.let_go.wait(5)
+
+    client = _Client(refusals=0)
+    client.let_go = threading.Event()
+    channel = _paired(client)
+    channel.start(lambda _m: None)
+    channel.stop()
+
+    assert called == ["stop"]
+    assert channel.connected is False
+
+
+def test_it_still_lets_go_of_a_client_that_has_no_stop():
+    called = []
+
+    class _Old(_SlowClient):
+        def disconnect(self):
+            called.append("disconnect")
+
+    channel = _paired(_Old(refusals=0))
+    channel.stop()
+
+    assert called == ["disconnect"]
+
+
+def test_stopping_waits_for_the_thread_to_actually_finish():
+    class _Client(_SlowClient):
+        def __init__(self):
+            super().__init__(refusals=0)
+            self.let_go = threading.Event()
+
+        def stop(self):
+            self.let_go.set()
+
+        def connect(self):
+            self.let_go.wait(5)
+
+    client = _Client()
+    channel = _paired(client)
+    channel.start(lambda _m: None)
+    thread = channel._thread
+    channel.stop()
+
+    assert not thread.is_alive()
+
+
+# ------------------------------------------- knowing when it goes deaf
+
+
+def test_it_listens_for_being_unseated_not_just_for_messages(tmp_path):
+    """WhatsApp allows one live connection per linked device. A second
+    one unseats the first silently, and a silently deaf Alfred looks
+    exactly like an Alfred ignoring you."""
+    from neonize.events import (
+        ConnectedEv,
+        DisconnectedEv,
+        EVENT_TO_INT,
+        LoggedOutEv,
+        MessageEv,
+        StreamReplacedEv,
+    )
+
+    channel = PersonalWhatsApp(tmp_path / "s.sqlite3", "+447700900123")
+    client = channel._build()
+    subscribed = set(client.event.list_func)
+
+    for event in (ConnectedEv, MessageEv, StreamReplacedEv,
+                  LoggedOutEv, DisconnectedEv):
+        assert EVENT_TO_INT[event] in subscribed, event.__name__
+
+
+def test_being_unseated_stops_it_calling_itself_connected(tmp_path):
+    from neonize.events import EVENT_TO_INT, StreamReplacedEv
+
+    channel = PersonalWhatsApp(tmp_path / "s.sqlite3", "+447700900123")
+    client = channel._build()
+    channel.connected = True
+
+    client.event.list_func[EVENT_TO_INT[StreamReplacedEv]](client, None)
+
+    assert channel.connected is False
+    assert channel.displaced is True
+
+
+# --------------------------------------------- knowing which chat is mine
+
+
+def test_a_message_in_my_own_chat_gets_through():
+    """The one that did not: WhatsApp addressed it 271712549638356,
+    which is a LID and nothing like the number it came from."""
+    channel = _channel()
+    heard = []
+    channel._on_message = heard.append
+
+    channel._deliver(_event("Alfred are you there?"))
+
+    assert [m.text for m in heard] == ["Alfred are you there?"]
+
+
+def test_it_is_reported_as_coming_from_me_not_from_a_lid():
+    """Everything downstream - the allowlist, the reply - is written in
+    terms of the number, and reaching that point proves whose account
+    it was."""
+    channel = _channel(owner="+447435589157")
+    heard = []
+    channel._on_message = heard.append
+
+    channel._deliver(_event("Hello"))
+
+    assert heard[0].sender == "447435589157"
+
+
+def test_what_i_say_to_other_people_is_not_an_instruction_to_alfred():
+    """A linked device sees every chat on the account. Only one of them
+    is talking to Alfred."""
+    channel = _channel()
+    heard = []
+    channel._on_message = heard.append
+
+    channel._deliver(_event("see you at eight", chat="447700900999"))
+
+    assert heard == []
+
+
+def test_what_other_people_say_to_me_is_not_an_instruction_either():
+    channel = _channel()
+    heard = []
+    channel._on_message = heard.append
+
+    channel._deliver(
+        _event("delete everything", sender="447700900999", from_me=False)
+    )
+
+    assert heard == []
+
+
+def test_a_stranger_cannot_get_in_by_messaging_from_their_own_chat():
+    """Sender equal to chat is true of any one-to-one conversation. It
+    is "from me" that says whose account produced it, and that cannot be
+    forged by someone else's."""
+    channel = _channel()
+    heard = []
+    channel._on_message = heard.append
+
+    channel._deliver(
+        _event("open my bank", sender="447700900999", from_me=False)
+    )
+
+    assert heard == []
+
+
+def test_a_group_i_post_in_is_not_my_own_chat():
+    channel = _channel()
+    heard = []
+    channel._on_message = heard.append
+
+    channel._deliver(_event("anyone free?", chat="120363000000000000"))
+
+    assert heard == []
+
+
+# ----------------------------------------------------- coming back
+
+
+def test_a_dropped_line_is_redialled():
+    """Sleeping laptops and dead wifi should not leave Alfred deaf
+    until somebody happens to notice."""
+    tries = []
+
+    class _Drops(_SlowClient):
+        def connect(self):
+            self.connected_calls += 1
+            tries.append(1)
+            if len(tries) >= 3:
+                channel._stopping = True   # enough to prove the point
+
+    channel = _paired(_Drops(refusals=0))
+    channel.retry_wait = 0.01
+    channel.start(lambda _m: None)
+    channel._thread.join(3)
+
+    assert len(tries) == 3
+
+
+def test_a_line_someone_else_took_is_left_alone():
+    """Reconnecting there is two Alfreds unseating each other for
+    ever."""
+
+    class _Displaced(_SlowClient):
+        def connect(self):
+            self.connected_calls += 1
+            channel.displaced = True
+
+    channel = _paired(_Displaced(refusals=0))
+    channel.retry_wait = 0.01
+    channel.start(lambda _m: None)
+    channel._thread.join(3)
+
+    assert channel._client.connected_calls == 1

@@ -65,26 +65,40 @@ def cmd_pair(argv: list[str]) -> int:
     print("Link a device -> Link with phone number instead -> type that code.")
     print("\nWaiting for you to enter it (Ctrl+C to give up)...")
 
-    linked = {"done": False}
-
-    def _noticed(message):
-        linked["done"] = True
-
-    channel.start(_noticed)
+    channel.start(lambda _message: None)
 
     try:
         for _ in range(120):          # two minutes is plenty
             if channel.connected:
-                print("\nLinked. Alfred can now message your own chat.")
-                print("Send it something to check.")
-                return 0
+                return _done(channel)
             time.sleep(1)
+        note = "No link after two minutes. Codes expire - try again."
     except KeyboardInterrupt:
-        print("\nGave up waiting.")
-        return 1
+        note = "Gave up waiting."
 
-    print("\nNo link after two minutes. The code expires - run pair again.")
+    channel.stop()
+    print(note)
     return 1
+
+
+def _done(channel: "PersonalWhatsApp") -> int:
+    """Linked. Now let go, or the program never ends.
+
+    WhatsApp starts pouring years of history down the connection the
+    moment a device is linked, and the library waits on that in a
+    thread that is not a daemon. Returning from main() will not end
+    it; only asking it to stop will.
+    """
+    print("\nLinked. Alfred can now message your own chat.")
+    print("Letting the first sync settle...")
+    time.sleep(4)
+    channel.stop()
+
+    print("Done. Start Alfred, then message yourself to check.")
+    print("(If Alfred was already running, restart it - WhatsApp")
+    print(" allows one live connection per linked device, and this")
+    print(" one just took it.)")
+    return 0
 
 
 def cmd_status(_argv: list[str]) -> int:

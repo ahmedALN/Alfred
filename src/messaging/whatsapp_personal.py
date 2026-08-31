@@ -21,6 +21,7 @@ remembered for a moment so it is not answered as though you had said it.
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from collections import deque
@@ -44,6 +45,9 @@ class PersonalWhatsApp(Channel):
         # What Alfred has just said, so it does not reply to itself.
         self._echoes: deque[str] = deque(maxlen=40)
         self.connected = False
+        self.displaced = False
+        self._stopping = False
+        self.retry_wait = 2.0
 
     @property
     def configured(self) -> bool:
@@ -56,14 +60,47 @@ class PersonalWhatsApp(Channel):
             return self._client
 
         from neonize.client import NewClient
-        from neonize.events import ConnectedEv, MessageEv
+        from neonize.events import (
+            ConnectedEv,
+            DisconnectedEv,
+            LoggedOutEv,
+            MessageEv,
+            StreamReplacedEv,
+        )
 
+        _quieten()
         client = NewClient(self._session)
 
         @client.event(ConnectedEv)
         def _connected(_cli: Any, _event: Any) -> None:
             self.connected = True
             print("[WhatsApp] linked and listening.")
+
+        # WhatsApp allows one live connection per linked device. A
+        # second one silently unseats the first, and the first goes deaf
+        # without any sign it has - which looks exactly like Alfred
+        # ignoring you. So say so.
+        @client.event(StreamReplacedEv)
+        def _replaced(_cli: Any, _event: Any) -> None:
+            self.connected = False
+            self.displaced = True
+            print(
+                "[WhatsApp] something else took the link - probably "
+                "another Alfred, or 'python -m src.whatsapp pair' still "
+                "running. This one has stopped listening."
+            )
+
+        @client.event(LoggedOutEv)
+        def _logged_out(_cli: Any, _event: Any) -> None:
+            self.connected = False
+            print(
+                "[WhatsApp] the device was logged out on your phone. "
+                "Pair again: python -m src.whatsapp pair"
+            )
+
+        @client.event(DisconnectedEv)
+        def _disconnected(_cli: Any, _event: Any) -> None:
+            self.connected = False
 
         @client.event(MessageEv)
         def _message(_cli: Any, event: Any) -> None:
@@ -83,6 +120,16 @@ class PersonalWhatsApp(Channel):
         info = getattr(event, "Info", None)
         source = getattr(info, "MessageSource", None)
         sender = getattr(getattr(source, "Sender", None), "User", "") or ""
+        chat = getattr(getattr(source, "Chat", None), "User", "") or ""
+        from_me = bool(getattr(source, "IsFromMe", False))
+
+        # A linked device sees the whole account - every chat, every
+        # contact. Only one of them is an instruction to Alfred, and
+        # everything else is private correspondence it has no business
+        # reading, let alone obeying. Filter here, before a word of it
+        # reaches anything that acts.
+        if not _own_chat(sender, chat, from_me):
+            return
 
         # In your own chat every message is "from me", including the
         # ones Alfred just sent. Answering those is an endless
@@ -95,8 +142,16 @@ class PersonalWhatsApp(Channel):
         if self._on_message is None:
             return
 
+        # Report it as the owner's number rather than whatever WhatsApp
+        # addressed it with. It is not a guess: reaching this line means
+        # the message came from the very account this device is linked
+        # to, which is a stronger proof of who sent it than any number
+        # in the envelope. The number is what the rest of Alfred - the
+        # allowlist, the replies - is written in terms of.
         self._on_message(
-            Inbound(sender=sender, text=text, channel=self.name, raw=event)
+            Inbound(
+                sender=self._owner, text=text, channel=self.name, raw=event
+            )
         )
 
     # -------------------------------------------------------------- lifecycle
@@ -113,14 +168,33 @@ class PersonalWhatsApp(Channel):
                 return
 
             client = self._build()
+            self._stopping = False
 
             def run() -> None:
-                try:
-                    client.connect()
-                except Exception as exc:  # noqa: BLE001
-                    print(f"[WhatsApp] connection ended: {exc}")
-                finally:
-                    self.connected = False
+                """Redial a dropped line, but not one someone else holds.
+
+                A connection that simply dies - the laptop slept, the
+                wifi went - should come back on its own; being deaf
+                until somebody notices is the whole problem. A
+                connection taken by another program is different:
+                reconnecting there is two Alfreds unseating each other
+                for ever, so that one is reported and left alone.
+                """
+                wait = self.retry_wait
+                while not self._stopping:
+                    self.displaced = False
+                    try:
+                        client.connect()
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"[WhatsApp] connection ended: {exc}")
+                    finally:
+                        self.connected = False
+
+                    if self._stopping or self.displaced:
+                        return
+                    print(f"[WhatsApp] dropped - reconnecting in {wait:.0f}s.")
+                    time.sleep(wait)
+                    wait = min(wait * 2, 60.0)
 
             self._thread = threading.Thread(
                 target=run, name="alfred-whatsapp", daemon=True
@@ -154,12 +228,27 @@ class PersonalWhatsApp(Channel):
         self._connect()
 
     def stop(self) -> None:
-        if self._client is not None:
-            try:
-                self._client.disconnect()
-            except Exception:  # noqa: BLE001
-                pass
+        """Let go, properly.
+
+        disconnect() closes the socket but leaves the library's own
+        worker alive, and that worker is not a daemon - a program that
+        only disconnects hangs at exit. stop() cancels it, so ask for
+        that first and fall back to closing the socket.
+        """
+        self._stopping = True
+        client = self._client
+        if client is not None:
+            for release in ("stop", "disconnect"):
+                try:
+                    getattr(client, release)()
+                    break
+                except Exception:  # noqa: BLE001
+                    continue
         self.connected = False
+
+        thread, self._thread = self._thread, None
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(5)
 
     # --------------------------------------------------------------- sending
 
@@ -187,6 +276,39 @@ class PersonalWhatsApp(Channel):
                 if text[:4000].strip() in self._echoes:
                     self._echoes.remove(text[:4000].strip())
             return False
+
+
+def _own_chat(sender: str, chat: str, from_me: bool) -> bool:
+    """Is this me, talking to myself?
+
+    Not a question about phone numbers. WhatsApp increasingly addresses
+    people by a per-account "LID" instead - the messages that went
+    unanswered were addressed 271712549638356, nothing like the number
+    they came from - so matching digits does not work and will keep not
+    working.
+
+    What does work is the shape of the thing. "From me" can only be
+    produced by the account this device is linked to; sender and chat
+    being the same means that account is the other end as well. Both at
+    once is the self-chat and nothing else: a message to a friend has a
+    different chat, a message from a friend is not from me.
+    """
+    return bool(from_me and sender and sender == chat)
+
+
+def _quieten() -> None:
+    """WhatsApp's own logs are a wall of prekeys and history sync.
+
+    The library hands its Python log level down to the Go side, so
+    turning it down here turns it down there too, at the source, rather
+    than filtering a flood after the fact.
+    """
+    import logging
+
+    level = os.getenv("ALFRED_WHATSAPP_LOG", "WARNING").upper()
+    for name in ("neonize", "neonize.utils.log", "neonize.client",
+                 "whatsmeow", "whatsmeow.Client", "Whatsmeow.Database"):
+        logging.getLogger(name).setLevel(level)
 
 
 def _no_qr(*_args: Any) -> None:
