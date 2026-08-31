@@ -123,3 +123,64 @@ class _Registry:
 
     def execute(self, name, args):
         return {"status": "success"}
+
+
+# ------------------------------- resting a rung for as long as it deserves
+
+
+from src.ai.providers.fallback import _rest_for
+
+
+def _rest(message, default=600.0, patience=12.0):
+    return _rest_for(Exception(message), default, patience)
+
+
+def test_a_blip_is_seconds_not_minutes():
+    """One 503 - over before you noticed - used to bench the best model
+    for ten minutes, which is several tasks. That is most of why Alfred
+    spent a night planning with a 4B local model."""
+    assert _rest("503 Service Unavailable") <= 60
+    assert _rest("connection reset by peer") <= 60
+    assert _rest("no answer in 12s") <= 60
+
+
+def test_running_out_of_allowance_is_waited_out():
+    assert _rest("429 RESOURCE_EXHAUSTED: quota") == 600.0
+
+
+def test_a_refused_key_is_not_retried_all_afternoon():
+    assert _rest("401 unauthorized") >= 3600
+
+
+def test_being_told_when_to_come_back_is_believed():
+    assert _rest("Retry-After: 45") == 45.0
+
+
+def test_a_ridiculous_retry_after_is_capped():
+    assert _rest("retry-after: 99999") == 3600.0
+
+
+def test_something_unrecognised_gets_the_ordinary_wait():
+    assert _rest("something nobody has seen before") == 600.0
+
+
+# ------------------------------------------------- knowing it is degraded
+
+
+def test_it_knows_when_it_is_not_on_the_best_model():
+    """Until now this happened silently, and the only clue was
+    everything taking longer and going wrong more."""
+    down = _Provider("down", fail=True)
+    spare = _Provider("spare", "from the spare")
+    chain = _chain(down, spare)
+
+    assert chain.degraded is False
+    chain.generate("hi")
+    assert chain.degraded is True
+
+
+def test_a_healthy_chain_is_not_degraded():
+    chain = _chain(_Provider("good"), _Provider("spare"))
+    chain.generate("hi")
+
+    assert chain.degraded is False

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import re
 import time
 from typing import Callable
 
@@ -9,6 +10,41 @@ from src.ai.providers.base import (
     ProviderError,
     VisionProvider,
 )
+
+
+# How long a rung sits out, by what went wrong with it.
+#
+# Everything used to get the same ten minutes, which meant one 503 -
+# a blip, over in seconds - benched the best model for the length of
+# several tasks. That is most of why Alfred spent last night planning
+# with a 4B local model and doing visibly worse work.
+_QUOTA = re.compile(r"429|RESOURCE_EXHAUSTED|quota|rate.?limit", re.I)
+_REFUSED = re.compile(r"401|403|unauthor|forbidden|invalid.{0,10}key", re.I)
+_BLIP = re.compile(
+    r"50[0234]|timeout|timed out|unavailable|no answer in|"
+    r"connection|reset|temporarily",
+    re.I,
+)
+
+
+def _rest_for(exc: BaseException, default: float, patience: float) -> float:
+    """How long to leave a rung alone after it failed."""
+    text = str(exc)
+
+    # Told outright when to come back.
+    said = re.search(r"retry[ -]?after[\"':\s]+(\d+)", text, re.I)
+    if said:
+        return min(float(said.group(1)), 3600.0)
+
+    if _REFUSED.search(text):
+        return 3600.0        # not coming back this hour whatever we do
+    if _QUOTA.search(text):
+        return default       # out of allowance; wait it out
+    if _BLIP.search(text):
+        # Seconds, not minutes. A stumble is not an outage, and the
+        # cost of asking again too soon is one wasted call.
+        return max(30.0, patience * 2)
+    return default
 
 
 class FallbackChatProvider(ChatProvider):
@@ -89,17 +125,16 @@ class FallbackChatProvider(ChatProvider):
                 )
                 if out and out.strip():
                     if i != self._active:
-                        print(
-                            f"[Plan] now using {provider.name}:"
-                            f"{getattr(provider, 'model', '?')}"
-                        )
+                        self._note_move(i, provider)
                         self._active = i
                     return out
                 errors.append(f"{provider.name}: empty response")
                 self._cooldown_until[i] = now + 60.0
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{provider.name}: {exc}")
-                self._cooldown_until[i] = now + self._retry_after
+                self._cooldown_until[i] = now + _rest_for(
+                    exc, self._retry_after, self._patience
+                )
                 self._record_failover(provider.name)
 
         if not tried:
@@ -145,6 +180,27 @@ class FallbackChatProvider(ChatProvider):
                 ) from None
         finally:
             pool.shutdown(wait=False)
+
+    @property
+    def degraded(self) -> bool:
+        """Is this running on something other than the best rung?
+
+        Worth being able to ask. When the good models are out Alfred
+        gets noticeably worse at planning, and until now that happened
+        silently - the only clue was everything taking longer and going
+        wrong more.
+        """
+        return self._active > 0
+
+    def _note_move(self, i: int, provider) -> None:
+        was = self._active
+        self._active = i
+        where = f"{provider.name}:{getattr(provider, 'model', '?')}"
+
+        if i > was:
+            print(f"[Plan] falling back to {where} - expect worse plans.")
+        else:
+            print(f"[Plan] back on {where}.")
 
     def _record_failover(self, name: str) -> None:
         try:
