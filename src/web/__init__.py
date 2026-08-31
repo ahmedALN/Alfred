@@ -129,13 +129,32 @@ def search(query: str, limit: int = 8) -> list[dict[str, str]]:
     snippets = _SNIPPET.findall(body)
 
     results: list[dict[str, str]] = []
-    for i, (href, title) in enumerate(titles[:limit]):
+    for i, (href, title) in enumerate(titles):
+        url = _unwrap(_html.unescape(href))
+        # Adverts come back as the top results and answer nothing.
+        # "Who won the last Formula 1 race" led with the official F1
+        # store, and the search was reported as a success.
+        if _is_advert(url):
+            continue
         results.append({
             "title": _strip(title),
-            "url": _unwrap(_html.unescape(href)),
+            "url": url,
             "snippet": _strip(snippets[i]) if i < len(snippets) else "",
         })
+        if len(results) >= limit:
+            break
     return results
+
+
+def _is_advert(url: str) -> bool:
+    low = (url or "").lower()
+    return (
+        "duckduckgo.com/y.js" in low
+        or "ad_domain=" in low
+        or "ad_provider=" in low
+        or low.startswith("https://duckduckgo.com/l/?uddg=")
+        and "ad_" in low
+    )
 
 
 def fetch(url: str, max_chars: int = 6000) -> dict[str, Any]:
