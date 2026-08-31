@@ -113,3 +113,38 @@ def test_it_says_what_to_do_about_it():
 
     assert "without saving" in told or "discard" in told
     assert "cancel" in told          # warns against the escape hatch
+
+
+# ------------------------------------- a blocked step is not a done one
+
+
+def test_a_window_still_open_and_asking_is_not_a_success():
+    """The bench closed Notepad in one call and stopped: the tool said
+    success, the executor believed it, and Notepad was still there
+    waiting to be answered."""
+    from src.tools.results import tool_succeeded
+
+    asking = {
+        "status": "needs_user", "closed": False, "window": "*Doc - Notepad",
+        "needs_user": "save_changes", "choices": ["Save", "Don't save"],
+    }
+
+    assert tool_succeeded(asking) is False
+
+
+def test_a_window_that_actually_closed_is_a_success():
+    from src.tools.results import tool_succeeded
+
+    assert tool_succeeded(
+        {"status": "success", "closed": True, "window": "Untitled - Notepad"}
+    ) is True
+
+
+def test_the_model_is_told_plainly_that_nothing_moved():
+    from src.tools.results import for_model
+
+    shown = for_model({"status": "needs_user", "closed": False,
+                       "needs_user": "save_changes"})
+
+    assert shown["outcome"] == "FAILED"
+    assert "Do not tell the user it worked" in shown["note"]

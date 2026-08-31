@@ -1219,7 +1219,11 @@ class UIControlTool(AlfredTool):
                         break
 
                 if need is not None and need.kind == "save_changes":
-                    out = {"status": "success", "closed": False,
+                    # Not a success. The window is still there and the
+                    # app is waiting to be answered - reporting this as
+                    # done is how "close Notepad" came back finished
+                    # with Notepad open.
+                    out = {"status": "needs_user", "closed": False,
                            "window": title}
                     out.update(need.as_dict())
                     return out

@@ -4,7 +4,13 @@ from typing import Any
 
 # Statuses that mean "this did not achieve anything", regardless of which
 # key a given tool happens to use.
-_FAILURE_STATUSES = {"error", "not_found", "refused", "failed", "denied"}
+# "needs_user" is not an error - the tool worked and found a question -
+# but it is not progress either: the popup is still up, the window is
+# still open, and nothing moves until somebody answers. Counting it as
+# success is how a close came back finished with the app still there.
+_FAILURE_STATUSES = {
+    "error", "not_found", "refused", "failed", "denied", "needs_user",
+}
 
 
 def tool_succeeded(result: Any) -> bool:
