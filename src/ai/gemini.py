@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import queue
 import threading
 import time
@@ -22,6 +23,10 @@ _CONNECTION_ERROR_HINTS = (
     "policy violation", "going away", "timeout", "timed out",
     "deadline", "unavailable", "reset by peer", "broken pipe",
 )
+
+
+def _is_muted() -> bool:
+    return os.getenv("ALFRED_QUIET", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _is_connection_error(exc: BaseException) -> bool:
@@ -116,6 +121,7 @@ class AlfredLiveSession:
         # What the server last offered as a way back into this same
         # conversation. Empty until it offers one.
         self._resume_handle: str = ""
+        self._muted = _is_muted()
 
         self._passphrase = settings.voice_passphrase
         self._passphrase_window = settings.voice_passphrase_window
@@ -568,6 +574,15 @@ class AlfredLiveSession:
         if self._audio_output is not None:
             return
 
+        # Night mode. Alfred lives in a bedroom and the work of testing
+        # it does not stop when the person in that room goes to sleep -
+        # so it can be told to do everything it normally does except
+        # make a sound. Everything else stays on: it still hears, still
+        # acts, still answers on the phone.
+        if self._muted:
+            print("[Speaker] quiet mode - Alfred will not speak aloud.")
+            return
+
         self._audio_output = sd.RawOutputStream(
             samplerate=self.OUTPUT_SAMPLE_RATE,
             channels=self.OUTPUT_CHANNELS,
@@ -598,6 +613,14 @@ class AlfredLiveSession:
         audio_data: bytes,
     ) -> None:
         if not audio_data:
+            return
+
+        # In quiet mode nothing drains this queue, so the audio has to
+        # be dropped here rather than piled up. It also keeps
+        # _alfred_is_speaking() honest: with a queue that never empties
+        # Alfred would believe it was talking for ever and stop
+        # listening.
+        if self._muted:
             return
 
         self._last_audio_queued_at = time.monotonic()
