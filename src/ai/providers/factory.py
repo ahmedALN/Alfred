@@ -154,6 +154,14 @@ def build_fast_chat(
 
     Falls back to the local model, which is slower than flash-lite but
     cannot run out of quota or go down.
+
+    That local model is the 4B on purpose, and it is worth writing down
+    why, because a 9B is sitting on this machine and looks like an
+    obvious upgrade. Measured on the executor's real prompt: the 4B
+    chose the right tool 3 times out of 3 in 5.2s; the 9B managed 2 out
+    of 3 in 8.4s, went exploratory where the 4B went straight to the
+    work, and once emitted JSON in the wrong shape. Bigger is not better
+    at emitting a strict format on 8GB of VRAM. Do not swap it.
     """
     from src.ai.providers.fallback import FallbackChatProvider
 

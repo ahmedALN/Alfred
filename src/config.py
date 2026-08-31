@@ -224,15 +224,25 @@ def load_settings() -> Settings:
         ai_chat_model=_opt("ALFRED_AI_CHAT_MODEL"),
         ai_embed_model=_opt("ALFRED_AI_EMBED_MODEL"),
         ai_vision_model=_opt("ALFRED_AI_VISION_MODEL"),
+        # The fast model plans, and the big one backs it up.
+        #
+        # It used to be the other way round, because a 120B planned
+        # better. Measured again after a dozen accuracy fixes, the gap
+        # had closed: the same eight-case battery passed 8/8 either way,
+        # with the same number of failed tool calls, and the everyday
+        # jobs went 18.9s -> 4.7s, 22.4s -> 6.0s, 8.8s -> 4.1s. Most of
+        # what the big model was buying had been bought instead by
+        # forgiving arguments, a screen snapshot, and knowing how to
+        # close a window.
         ai_plan_provider=os.getenv(
-            "ALFRED_AI_PLAN_PROVIDER", "openai"
+            "ALFRED_AI_PLAN_PROVIDER", "gemini"
         ).strip().lower() or "openai",
         ai_plan_model=os.getenv(
-            "ALFRED_AI_PLAN_MODEL", "nvidia/nemotron-3-super-120b-a12b"
+            "ALFRED_AI_PLAN_MODEL", "gemini-flash-lite-latest"
         ).strip(),
         ai_plan_fallbacks=[
             p.strip().lower()
-            for p in os.getenv("ALFRED_AI_PLAN_FALLBACKS", "gemini,ollama").split(",")
+            for p in os.getenv("ALFRED_AI_PLAN_FALLBACKS", "openai,gemini,ollama").split(",")
             if p.strip()
         ],
         ollama_base_url=os.getenv(

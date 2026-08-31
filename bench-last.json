@@ -3,7 +3,7 @@
     "goal": "Open Notepad.",
     "ok": true,
     "status": "done",
-    "secs": 18.5,
+    "secs": 4.7,
     "steps": 1,
     "failed_steps": 0,
     "detail": "*the quick brown fox jumps over the - Notepad",
@@ -16,8 +16,8 @@
     "goal": "Type the words quick brown fox into Notepad.",
     "ok": true,
     "status": "done",
-    "secs": 11.6,
-    "steps": 5,
+    "secs": 8.8,
+    "steps": 4,
     "failed_steps": 1,
     "detail": "the quick brown fox jumps over the lazy dog 0123456789helloh",
     "tags": [
@@ -40,10 +40,10 @@
     "goal": "Check whether Steam is running.",
     "ok": true,
     "status": "done",
-    "secs": 4.4,
+    "secs": 4.1,
     "steps": 1,
     "failed_steps": 0,
-    "detail": "Yes, Steam is running.",
+    "detail": "Yes, Steam is currently running.",
     "tags": [
       "query"
     ],
@@ -53,10 +53,10 @@
     "goal": "What version of Windows is this?",
     "ok": true,
     "status": "done",
-    "secs": 12.6,
+    "secs": 6.0,
     "steps": 1,
     "failed_steps": 0,
-    "detail": "It's Windows 11 Pro.",
+    "detail": "It's Microsoft Windows 11 Pro.",
     "tags": [
       "query"
     ],
@@ -66,10 +66,10 @@
     "goal": "How much free space is on the C drive?",
     "ok": true,
     "status": "done",
-    "secs": 17.9,
+    "secs": 14.8,
     "steps": 1,
     "failed_steps": 0,
-    "detail": "You have 143.2 GB of free space on the C drive.",
+    "detail": "You have 153.7 GB of free space on the C drive.",
     "tags": [
       "query"
     ],
@@ -79,8 +79,8 @@
     "goal": "Open Steam and search the store for Hades.",
     "ok": true,
     "status": "done",
-    "secs": 81.6,
-    "steps": 8,
+    "secs": 52.6,
+    "steps": 5,
     "failed_steps": 1,
     "detail": "Steam",
     "tags": [
@@ -91,7 +91,7 @@
       {
         "tool": "open_app",
         "args": {
-          "target": "user"
+          "target": "current"
         },
         "error": "'app' must be a non-empty string - the name of the program to open, e.g. {\"app\": \"Notepad\"}. 'target' only says which desktop to o"
       }
@@ -99,53 +99,49 @@
   },
   {
     "goal": "In MultiMC, select the 1.21.11 instance.",
-    "ok": false,
-    "status": "partial",
-    "secs": 86.3,
-    "steps": 7,
+    "ok": true,
+    "status": "done",
+    "secs": 185.7,
+    "steps": 14,
     "failed_steps": 5,
-    "detail": "no MultiMC window",
+    "detail": "MultiMC",
     "tags": [
       "in-app",
       "unnamed-controls"
     ],
     "failures": [
       {
-        "tool": "ui_control",
+        "tool": "powershell",
         "args": {
-          "window": "MultiMC",
-          "action": "focus",
-          "name": "Console window for 1.21.11"
+          "command": "dir \"C:\\Users\\ahmed\\.multimc\" /s /b | findstr \"1.21.11\""
         },
-        "error": "window not found: timed out"
+        "error": "Get-ChildItem : A positional parameter cannot be found that accepts argument '/b'.\nAt line:1 char:1\n+ dir \"C:\\Users\\ahmed\\.multimc"
       },
       {
         "tool": "powershell",
         "args": {
-          "command": "cd C:\\Users\\ahmed\\MultiMC\\instances\\1.21.11"
+          "command": "dir \"C:\\Users\\ahmed\\.multimc\" /s | findstr \"1.21.11\""
         },
-        "error": "cd : Cannot find path 'C:\\Users\\ahmed\\MultiMC\\instances\\1.21.11' because it does not exist.\nAt line:1 char:1\n+ cd C:\\Users\\ahmed\\M"
+        "error": "dir : Cannot find path 'C:\\Users\\ahmed\\.multimc' because it does not exist.\nAt line:1 char:1\n+ dir \"C:\\Users\\ahmed\\.multimc\" /s | "
       },
       {
         "tool": "powershell",
         "args": {
-          "command": "Get-ChildItem -Path 'C:\\Users\\ahmed\\MultiMC\\instances' -Filt"
+          "command": "Get-ChildItem \"C:\\Users\\ahmed\\.multimc\" -Recurse | Select-St"
         },
-        "error": "Get-ChildItem : Cannot find path 'C:\\Users\\ahmed\\MultiMC\\instances' because it does not exist.\nAt line:1 char:1\n+ Get-ChildItem -P"
+        "error": "Command timed out after 30.0s."
+      },
+      {
+        "tool": "powershell",
+        "args": {},
+        "error": "{'refused': 'empty command'}"
       },
       {
         "tool": "powershell",
         "args": {
-          "command": "Get-ChildItem -Path 'C:\\Users\\ahmed\\MultiMC\\instances' -Filt"
+          "command": "Get-ChildItem \"C:\\Users\\ahmed\\.multimc\" -Recurse -File | Sel"
         },
-        "error": "Get-ChildItem : Cannot find path 'C:\\Users\\ahmed\\MultiMC\\instances' because it does not exist.\nAt line:1 char:1\n+ Get-ChildItem -P"
-      },
-      {
-        "tool": "powershell",
-        "args": {
-          "command": "Get-ChildItem -Path 'C:\\Users\\ahmed\\MultiMC\\instances'"
-        },
-        "error": "Get-ChildItem : Cannot find path 'C:\\Users\\ahmed\\MultiMC\\instances' because it does not exist.\nAt line:1 char:1\n+ Get-ChildItem -P"
+        "error": "Command timed out after 30.0s."
       }
     ]
   },
@@ -153,9 +149,9 @@
     "goal": "Close Notepad without saving.",
     "ok": true,
     "status": "done",
-    "secs": 55.6,
-    "steps": 2,
-    "failed_steps": 1,
+    "secs": 42.4,
+    "steps": 4,
+    "failed_steps": 3,
     "detail": "gone",
     "tags": [
       "cleanup"
@@ -164,9 +160,23 @@
       {
         "tool": "powershell",
         "args": {
-          "command": "[Console]::Exit(0)"
+          "command": "[console] Close-Process -Id (Get-WmiObject Win32_Process | W"
         },
-        "error": "Method invocation failed because [System.Console] does not contain a method named 'Exit'.\nAt line:1 char:1\n+ [Console]::Exit(0)\n+ "
+        "error": "At line:1 char:11\n+ [console] Close-Process -Id (Get-WmiObject Win32_Process | Where-Obje ...\n+           ~~~~~~~~~~~~~\nUnexpected"
+      },
+      {
+        "tool": "powershell",
+        "args": {
+          "command": "Stop-Process -Id (Get-WmiObject Win32_Process | Where-Object"
+        },
+        "error": "error"
+      },
+      {
+        "tool": "powershell",
+        "args": {
+          "command": "Stop-Process -Name notepad"
+        },
+        "error": "Stop-Process : Cannot find a process with the name \"notepad\". Verify the process name and call the cmdlet again.\nAt line:1 char:1\n"
       }
     ]
   }
