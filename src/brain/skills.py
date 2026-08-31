@@ -73,6 +73,32 @@ def _slug(text: str, words: int = 4) -> str:
 _SLOT_RE = re.compile(r"^[^\w{]*\{(\w+)\}[^\w}]*$")
 
 
+def stumbled(steps: list[Any]) -> bool:
+    """Did this run go wrong in a way worth refusing to learn from?
+
+    Not every failed call is a stumble. The executor opens with
+    open_app {"target": "current"} - no app named - on nearly every
+    task, is told so, and gets it right on the next call. Treating that
+    as a bad run meant the Steam routine could never be learned at all,
+    however cleanly the actual work went.
+
+    A failure the same tool recovered from is a typo. A failure nothing
+    ever answered is a stumble, and replaying it means walking into the
+    same wall on purpose.
+    """
+    for i, step in enumerate(steps):
+        tool = getattr(step, "tool", None)
+        if not tool or getattr(step, "ok", False):
+            continue
+        recovered = any(
+            getattr(later, "tool", None) == tool and getattr(later, "ok", False)
+            for later in steps[i + 1:]
+        )
+        if not recovered:
+            return True
+    return False
+
+
 # ui_control actions that look rather than act.
 _LOOKING = {
     "get", "tree", "find", "exists", "links", "unnamed", "windows",

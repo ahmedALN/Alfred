@@ -195,6 +195,8 @@ def setup(before) -> None:
 
 
 def teach_one(agent, ui, library, lesson: dict) -> dict:
+    from src.brain.skills import stumbled
+
     goal = lesson["goal"]
     setup(lesson.get("before"))
     started = time.time()
@@ -222,7 +224,7 @@ def teach_one(agent, ui, library, lesson: dict) -> dict:
 
     # Same rule the task queue uses: nothing is learned from a run that
     # stumbled, because replaying it means stumbling again on purpose.
-    if any(s.tool and not s.ok for s in result.steps):
+    if stumbled(result.steps):
         row["why"] = "worked, but not cleanly - not worth keeping"
         return row
 

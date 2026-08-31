@@ -8,7 +8,7 @@ from typing import Any, Awaitable, Callable
 
 from src.brain.agent import TaskAgent, TaskResult
 from src.brain.isolation import strip_isolation_phrase, wants_isolation
-from src.brain.skills import SkillLibrary
+from src.brain.skills import SkillLibrary, stumbled
 
 SpeakFn = Callable[[str], Awaitable[None]]
 
@@ -429,7 +429,7 @@ class TaskQueue:
         # A run containing a step that fell over is not a routine worth
         # replaying, even when it recovered. Replaying it means doing
         # the broken thing again on purpose.
-        if any(s.tool and not s.ok for s in result.steps):
+        if stumbled(result.steps):
             print("[Skills] not learning that one - a step failed on the way.")
             return
 

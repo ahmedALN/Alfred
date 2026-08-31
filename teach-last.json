@@ -1,1 +1,11 @@
-[]
+[
+  {
+    "goal": "Open Steam and search the store for Hollow Knight.",
+    "ok": true,
+    "learned": true,
+    "secs": 70.7,
+    "steps": 5,
+    "why": "Open {p0} and search the store for {p1}.",
+    "name": "open-steam-search-store"
+  }
+]

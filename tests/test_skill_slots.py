@@ -104,3 +104,35 @@ def test_a_query_routine_is_untouched():
     trace = [("powershell", {"command": "Get-Process"})]
 
     assert trim(trace) == trace
+
+
+# ------------------------------ a typo it corrected is not a bad run
+
+
+from src.brain.agent import Step
+from src.brain.skills import stumbled
+
+
+def _step(tool, ok):
+    return Step(1, "", tool, {}, "auto", {}, ok)
+
+
+def test_a_slip_the_same_tool_corrected_is_not_a_stumble():
+    """The executor opens with open_app {"target": "current"} - no app
+    named - on nearly every task, is told so, and gets it right next
+    call. Counting that as a bad run meant the Steam routine could
+    never be learned, however cleanly the actual work went."""
+    assert stumbled([_step("open_app", False), _step("open_app", True)]) is False
+
+
+def test_a_failure_nothing_ever_answered_is_a_stumble():
+    """Replaying it means walking into the same wall on purpose."""
+    assert stumbled([_step("ui_control", False), _step("open_app", True)]) is True
+
+
+def test_a_clean_run_is_clean():
+    assert stumbled([_step("open_app", True), _step("ui_control", True)]) is False
+
+
+def test_a_run_that_ends_on_a_failure_is_a_stumble():
+    assert stumbled([_step("open_app", True), _step("ui_control", False)]) is True
