@@ -184,3 +184,78 @@ def test_a_healthy_chain_is_not_degraded():
     chain.generate("hi")
 
     assert chain.degraded is False
+
+
+# ------------------------------------------ the chain is what it says
+
+
+def _chain_of(monkeypatch, primary, model, fallbacks):
+    """Build the real plan chain from settings, with no network."""
+    from src.ai.providers import factory
+
+    class _Fake:
+        def __init__(self, name, model=""):
+            self.name = name
+            self.model = model
+
+        def generate(self, *a, **k):
+            return "ok"
+
+        def unload(self):
+            pass
+
+    monkeypatch.setattr(
+        factory, "_build_chat",
+        lambda p, m, s, c: _Fake(p, m),
+    )
+    monkeypatch.setattr(
+        factory, "GeminiChatProvider", lambda c, m: _Fake("gemini", m)
+    )
+    monkeypatch.setattr(
+        factory, "OllamaChatProvider", lambda m, url: _Fake("ollama", m)
+    )
+
+    class _Settings:
+        ai_plan_provider = primary
+        ai_plan_model = model
+        ai_plan_fallbacks = fallbacks
+        openai_api_key = "key"
+        gemini_text_model = "gemini-flash-latest"
+        ai_chat_model = "qwen3.5:4b"
+        ollama_base_url = "http://localhost:11434"
+
+    built = factory.build_plan_chat(_Settings(), None, _Fake("ollama", "local"))
+    return [f"{p.name}:{p.model}" for p in built._providers]
+
+
+def test_the_strong_model_survives_being_demoted(monkeypatch):
+    """Listing openai as a FALLBACK used to drop it silently - it was
+    only ever handled as the primary - so promoting the fast model
+    deleted the strong one from the chain entirely."""
+    rungs = _chain_of(
+        monkeypatch, "gemini", "gemini-flash-lite-latest",
+        ["openai", "gemini", "ollama"],
+    )
+
+    assert rungs[0] == "gemini:gemini-flash-lite-latest"
+    assert any("nemotron" in r for r in rungs), rungs
+
+
+def test_no_rung_appears_twice(monkeypatch):
+    """Promoting one above another must not leave the loser in the list
+    a second time under a different name."""
+    rungs = _chain_of(
+        monkeypatch, "gemini", "gemini-flash-lite-latest",
+        ["openai", "gemini", "ollama"],
+    )
+
+    assert len(rungs) == len(set(rungs)), rungs
+
+
+def test_the_local_model_is_always_last(monkeypatch):
+    rungs = _chain_of(
+        monkeypatch, "gemini", "gemini-flash-lite-latest",
+        ["openai", "gemini", "ollama"],
+    )
+
+    assert rungs[-1].startswith("ollama:")

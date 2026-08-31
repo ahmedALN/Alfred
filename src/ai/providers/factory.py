@@ -35,6 +35,8 @@ _DEFAULT_MODELS: dict[tuple[str, str], str] = {
     ("ollama", "chat"): "qwen3.5",
     ("ollama", "embed"): "nomic-embed-text",
     ("ollama", "vision"): "moondream",
+    # The strong planner, now a fallback rather than the primary.
+    ("openai", "plan"): "nvidia/nemotron-3-super-120b-a12b",
 }
 
 
@@ -221,11 +223,36 @@ def build_plan_chat(
                 lite = "gemini-flash-lite-latest"
                 if settings.gemini_text_model != lite:
                     chain.append(GeminiChatProvider(gemini_client, lite))
+            elif name == "openai":
+                # Only ever handled as the PRIMARY before, so listing it
+                # as a fallback silently dropped it - which is how the
+                # big model vanished from the chain entirely the moment
+                # the fast one was promoted ahead of it.
+                if settings.openai_api_key and primary != "openai":
+                    chain.append(
+                        _build_chat(
+                            "openai",
+                            _DEFAULT_MODELS[("openai", "plan")],
+                            settings, gemini_client,
+                        )
+                    )
             elif name == "ollama":
                 model = settings.ai_chat_model or _DEFAULT_MODELS[("ollama", "chat")]
                 chain.append(OllamaChatProvider(model, settings.ollama_base_url))
         except Exception:  # noqa: BLE001
             pass
+
+    # Nothing twice: promoting one rung above another must not leave the
+    # loser in the list a second time under a different name.
+    seen: set[str] = set()
+    deduped = []
+    for provider in chain:
+        key = f"{provider.name}:{getattr(provider, 'model', '')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(provider)
+    chain = deduped
 
     if not chain:
         chain.append(local_chat)
