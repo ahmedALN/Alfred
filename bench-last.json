@@ -3,10 +3,10 @@
     "goal": "Open Notepad.",
     "ok": true,
     "status": "done",
-    "secs": 5.4,
+    "secs": 20.8,
     "steps": 2,
     "failed_steps": 1,
-    "detail": "*HelloHello - Notepad",
+    "detail": "*HelloHellounsaved dddds - Notepad",
     "tags": [
       "launch"
     ]
@@ -15,10 +15,10 @@
     "goal": "What version of Windows is this?",
     "ok": true,
     "status": "done",
-    "secs": 5.7,
+    "secs": 4.0,
     "steps": 1,
     "failed_steps": 0,
-    "detail": "It's Windows 11 Pro.",
+    "detail": "This is Windows 11, version 26200.",
     "tags": [
       "query"
     ]
@@ -27,9 +27,9 @@
     "goal": "Close Notepad without saving.",
     "ok": true,
     "status": "done",
-    "secs": 59.2,
-    "steps": 6,
-    "failed_steps": 3,
+    "secs": 20.9,
+    "steps": 4,
+    "failed_steps": 2,
     "detail": "gone",
     "tags": [
       "cleanup"

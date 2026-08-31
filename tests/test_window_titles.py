@@ -69,3 +69,53 @@ def test_a_title_that_cannot_compile_is_never_a_pattern():
 def test_plain_words_are_never_a_pattern():
     assert _is_deliberate_pattern("Notepad") is False
     assert _is_deliberate_pattern("") is False
+
+
+# ------------------------------------- waiting for what is not there
+
+
+class _Session:
+    """Only the bits wait_ready touches."""
+
+    def __init__(self, script):
+        from src.windows.uia import UiaSession
+
+        self._script = list(script)
+        self.looks = 0
+        self.wait_ready = UiaSession.wait_ready.__get__(self)
+
+    def tree(self, title_re=None, pid=None):
+        from src.windows.uia import UiaError
+
+        self.looks += 1
+        item = self._script.pop(0) if self._script else self._script_last
+        self._script_last = item
+        if item == "gone":
+            raise UiaError("window not found")
+        return None, [object()] * item
+
+
+def test_it_stops_waiting_for_a_window_that_is_not_there():
+    """The executor often waits on a title it remembers from earlier
+    that has since closed. Twenty-five seconds of nothing."""
+    session = _Session(["gone", "gone", "gone", "gone", "gone"])
+
+    assert session.wait_ready("*Gone - Notepad", timeout=25) is False
+    assert session.looks == 2
+
+
+def test_an_app_still_painting_is_still_waited_for():
+    """A window that exists but has not finished drawing is the case
+    this was written for."""
+    session = _Session([0, 1, 2, 9])
+
+    assert session.wait_ready("Notepad", timeout=25, min_controls=3) is True
+    assert session.looks == 4
+
+
+def test_a_window_that_appears_late_is_still_caught():
+    """One miss is not proof of absence - an app mid-launch has no
+    window for a moment."""
+    session = _Session(["gone", 9])
+
+    assert session.wait_ready("Notepad", timeout=25, min_controls=3) is True

@@ -949,13 +949,25 @@ class UiaSession:
         comes back empty and the executor concludes the app is broken.
         """
         deadline = time.monotonic() + timeout
+        missing = 0
+
         while True:
             try:
                 _, controls = self.tree(title_re, pid)
                 if len(controls) >= min_controls:
                     return True
+                missing = 0
             except UiaError:
-                pass
+                # There is a difference between a window that is still
+                # painting and one that is not there at all, and waiting
+                # 25 seconds for the second is 25 seconds of nothing.
+                # Two misses is enough: an app mid-launch has a window
+                # within a second, and the executor often waits on a
+                # title it remembers from earlier that has since closed.
+                missing += 1
+                if missing >= 2:
+                    return False
+
             if time.monotonic() >= deadline:
                 return False
             time.sleep(1.0)
