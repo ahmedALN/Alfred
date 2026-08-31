@@ -3,7 +3,7 @@
     "goal": "Open Notepad.",
     "ok": true,
     "status": "done",
-    "secs": 16.7,
+    "secs": 4.7,
     "steps": 1,
     "failed_steps": 0,
     "detail": "*HelloHellounsaved ddddsthe iiick oo - Notepad",
@@ -16,21 +16,14 @@
     "goal": "Type the words quick brown fox into Notepad.",
     "ok": false,
     "status": "done",
-    "secs": 19.0,
-    "steps": 7,
-    "failed_steps": 2,
+    "secs": 21.2,
+    "steps": 6,
+    "failed_steps": 1,
     "detail": "",
     "tags": [
       "in-app"
     ],
     "failures": [
-      {
-        "tool": "open_app",
-        "args": {
-          "target": "current"
-        },
-        "error": "'app' must be a non-empty string - the name of the program to open, e.g. {\"app\": \"Notepad\"}. 'target' only says which desktop to o"
-      },
       {
         "tool": "ui_control",
         "args": {
@@ -45,10 +38,10 @@
     "goal": "Check whether Steam is running.",
     "ok": true,
     "status": "done",
-    "secs": 4.9,
+    "secs": 4.3,
     "steps": 1,
     "failed_steps": 0,
-    "detail": "Yes, Steam is currently running.",
+    "detail": "Yes, Steam is running.",
     "tags": [
       "query"
     ],
@@ -58,10 +51,10 @@
     "goal": "What version of Windows is this?",
     "ok": true,
     "status": "done",
-    "secs": 5.8,
+    "secs": 4.3,
     "steps": 1,
     "failed_steps": 0,
-    "detail": "It's Windows 11 Pro.",
+    "detail": "It's Windows 11, version 26200.",
     "tags": [
       "query"
     ],
@@ -71,10 +64,10 @@
     "goal": "How much free space is on the C drive?",
     "ok": true,
     "status": "done",
-    "secs": 4.4,
+    "secs": 14.5,
     "steps": 1,
     "failed_steps": 0,
-    "detail": "There are 144.4 GB of free space on the C drive.",
+    "detail": "You have 144.4 GB of free space on the C drive.",
     "tags": [
       "query"
     ],
@@ -84,29 +77,21 @@
     "goal": "Open Steam and search the store for Hades.",
     "ok": true,
     "status": "done",
-    "secs": 66.0,
-    "steps": 5,
-    "failed_steps": 1,
+    "secs": 83.1,
+    "steps": 7,
+    "failed_steps": 0,
     "detail": "Steam",
     "tags": [
       "in-app",
       "slow"
     ],
-    "failures": [
-      {
-        "tool": "open_app",
-        "args": {
-          "target": "user"
-        },
-        "error": "'app' must be a non-empty string - the name of the program to open, e.g. {\"app\": \"Notepad\"}. 'target' only says which desktop to o"
-      }
-    ]
+    "failures": []
   },
   {
     "goal": "In MultiMC, select the 1.21.11 instance.",
     "ok": true,
     "status": "done",
-    "secs": 55.4,
+    "secs": 56.4,
     "steps": 6,
     "failed_steps": 0,
     "detail": "MultiMC",
@@ -120,13 +105,38 @@
     "goal": "Close Notepad without saving.",
     "ok": false,
     "status": "failed",
-    "secs": 97.7,
-    "steps": 10,
-    "failed_steps": 0,
+    "secs": 67.3,
+    "steps": 6,
+    "failed_steps": 3,
     "detail": "still open: *unsaved wordswords to losequick rro - N",
     "tags": [
       "cleanup"
     ],
-    "failures": []
+    "failures": [
+      {
+        "tool": "ui_control",
+        "args": {
+          "action": "close",
+          "window": "Notepad"
+        },
+        "error": "action must be one of ['windows', 'focus', 'tree', 'find', 'click', 'double_click', 'right_click', 'invoke', 'type', 'key', 'get',"
+      },
+      {
+        "tool": "ui_control",
+        "args": {
+          "action": "close",
+          "window": "Notepad"
+        },
+        "error": "action must be one of ['windows', 'focus', 'tree', 'find', 'click', 'double_click', 'right_click', 'invoke', 'type', 'key', 'get',"
+      },
+      {
+        "tool": "ui_control",
+        "args": {
+          "action": "close",
+          "window": "Notepad"
+        },
+        "error": "action must be one of ['windows', 'focus', 'tree', 'find', 'click', 'double_click', 'right_click', 'invoke', 'type', 'key', 'get',"
+      }
+    ]
   }
 ]

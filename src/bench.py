@@ -102,12 +102,23 @@ def verify(check, result, ui) -> tuple[bool, str]:
         return (not hit), ("still open: " + hit[0][:40]) if hit else "gone"
 
     if kind == "text_in_window":
-        try:
-            got = ui.execute({"action": "get", "window": check[1]})
+        # Every window of that name, not the best-scoring one. Notepad
+        # restores its old tabs on launch, so "the Notepad window" is
+        # routinely several windows, and the one that was typed into is
+        # not necessarily the one a scorer picks.
+        seen = []
+        for title in _windows(ui):
+            if check[1].lower() not in title.lower():
+                continue
+            try:
+                got = ui.execute({"action": "get", "window": title})
+            except Exception:  # noqa: BLE001
+                continue
             text = str(got.get("value") or got.get("text") or "")
-        except Exception as exc:  # noqa: BLE001
-            return False, str(exc)[:60]
-        return check[2].lower() in text.lower(), text[:60]
+            seen.append(text)
+            if check[2].lower() in text.lower():
+                return True, text[:60]
+        return False, (seen[0][:60] if seen else "no " + check[1] + " window")
 
     if kind == "answer_mentions":
         said = (str(result.answer) + " " + str(result.summary)).lower()

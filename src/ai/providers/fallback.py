@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import time
 from typing import Callable
 
@@ -27,6 +28,7 @@ class FallbackChatProvider(ChatProvider):
         providers: list[ChatProvider],
         *,
         retry_primary_after: float = 600.0,
+        patience: float = 12.0,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._providers = [p for p in providers if p is not None]
@@ -34,6 +36,15 @@ class FallbackChatProvider(ChatProvider):
             raise ProviderError("FallbackChatProvider needs at least one provider.")
 
         self._retry_after = retry_primary_after
+        # How long a rung gets before the next one is tried. The
+        # transport timeout underneath is three minutes, which is the
+        # right patience for a request nobody is waiting on and quite
+        # wrong for one somebody asked out loud: the bench watched a
+        # four-second question take a hundred and twenty-three because
+        # the good model was having a bad minute. This is not about
+        # which model is better - it is about not being stuck with a
+        # choice made before the call started.
+        self._patience = patience
         self._monotonic = monotonic
         self._active = 0
         # index -> monotonic time the provider is on cooldown until
@@ -69,9 +80,12 @@ class FallbackChatProvider(ChatProvider):
 
             tried = True
             try:
-                out = provider.generate(
-                    prompt, system=system, temperature=temperature,
-                    max_tokens=max_tokens,
+                out = self._ask(
+                    provider, prompt, system, temperature, max_tokens,
+                    # The last rung is the safety net. Hurrying it along
+                    # would leave nowhere to fall.
+                    patience=None if provider is self._providers[-1]
+                    else self._patience,
                 )
                 if out and out.strip():
                     if i != self._active:
@@ -103,6 +117,34 @@ class FallbackChatProvider(ChatProvider):
         raise ProviderError(
             "every plan provider failed - " + " | ".join(errors)
         )
+
+    def _ask(self, provider, prompt, system, temperature, max_tokens,
+             patience: float | None):
+        """One rung's answer, or a timeout if it is taking too long.
+
+        The call cannot be cancelled - it is a blocking HTTP request -
+        so the wait is abandoned rather than the work. That thread
+        finishes into nothing a moment later, which costs one wasted
+        response and saves everybody the other two minutes.
+        """
+        call = lambda: provider.generate(          # noqa: E731
+            prompt, system=system, temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        if patience is None:
+            return call()
+
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        try:
+            future = pool.submit(call)
+            try:
+                return future.result(timeout=patience)
+            except concurrent.futures.TimeoutError:
+                raise ProviderError(
+                    f"no answer in {patience:.0f}s"
+                ) from None
+        finally:
+            pool.shutdown(wait=False)
 
     def _record_failover(self, name: str) -> None:
         try:
@@ -153,6 +195,7 @@ class FallbackVisionProvider(VisionProvider):
         providers: "list[VisionProvider]",
         *,
         retry_primary_after: float = 600.0,
+        patience: float = 12.0,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._providers = [p for p in providers if p is not None]
