@@ -1,5 +1,7 @@
 """Talking to yourself on WhatsApp, without talking to yourself forever."""
 
+import threading
+
 from src.messaging.whatsapp_personal import PersonalWhatsApp, _text_of
 
 
@@ -136,3 +138,122 @@ def test_an_empty_message_is_not_sent():
 
     assert channel.send("   ") is False
     assert channel._client.sent == []
+
+
+# --------------------------------------------- waiting for the line up
+
+
+class _SlowClient(_Client):
+    """WhatsApp is not up the instant you ask for it."""
+
+    def __init__(self, refusals=3):
+        super().__init__()
+        self.refusals = refusals
+        self.asked = 0
+        self.connected_calls = 0
+
+    def qr(self, _fn):
+        pass
+
+    def connect(self):
+        self.connected_calls += 1
+
+    def PairPhone(self, phone, notify, *a, **k):
+        self.asked += 1
+        if self.asked <= self.refusals:
+            raise RuntimeError("client is nil")
+        return "12345678"
+
+
+def _paired(client, owner="+447700900123"):
+    channel = PersonalWhatsApp("session", owner)
+    channel._client = client
+    return channel
+
+
+def test_it_waits_for_whatsapp_to_come_up_before_taking_no_for_an_answer():
+    """"client is nil" means asked too early, not refused."""
+    client = _SlowClient(refusals=3)
+    channel = _paired(client)
+
+    assert channel.pair() == "12345678"
+    assert client.asked == 4
+
+
+def test_it_starts_connecting_because_a_code_needs_a_live_connection():
+    client = _SlowClient(refusals=0)
+    channel = _paired(client)
+    channel.pair()
+
+    assert channel._thread is not None
+    channel._thread.join(2)
+    assert client.connected_calls == 1
+
+
+def test_it_only_connects_once_however_many_times_it_is_asked():
+    """Pairing and then listening is one connection, not three."""
+
+    class _Holds(_SlowClient):
+        def __init__(self):
+            super().__init__(refusals=0)
+            self.let_go = threading.Event()
+
+        def connect(self):
+            self.connected_calls += 1
+            self.let_go.wait(5)          # a real one lasts the session
+
+    client = _Holds()
+    channel = _paired(client)
+
+    channel.pair()
+    channel.start(lambda _m: None)
+    channel.pair()
+    client.let_go.set()
+    channel._thread.join(2)
+
+    assert client.connected_calls == 1
+
+
+def test_a_real_refusal_is_not_retried():
+    class _Refuses(_SlowClient):
+        def PairPhone(self, phone, notify, *a, **k):
+            self.asked += 1
+            raise RuntimeError("phone number is not registered")
+
+    client = _Refuses()
+    channel = _paired(client)
+
+    try:
+        channel.pair()
+    except RuntimeError as exc:
+        assert "not registered" in str(exc)
+    else:
+        raise AssertionError("should have given up")
+
+    assert client.asked == 1
+
+
+def test_it_gives_up_eventually_rather_than_asking_for_ever():
+    client = _SlowClient(refusals=10_000)
+    channel = _paired(client)
+
+    try:
+        channel.pair(timeout=0.5)
+    except RuntimeError as exc:
+        assert "client is nil" in str(exc)
+    else:
+        raise AssertionError("should have given up")
+
+
+def test_the_number_it_pairs_with_has_no_punctuation_in_it():
+    seen = {}
+
+    class _Records(_SlowClient):
+        def PairPhone(self, phone, notify, *a, **k):
+            seen["phone"] = phone
+            return "87654321"
+
+    channel = _paired(_Records(), owner="+44 (7700) 900-123")
+    channel.pair()
+
+    assert seen["phone"] == "447700900123"

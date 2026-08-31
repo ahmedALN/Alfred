@@ -27,7 +27,7 @@ business route is used if configured; otherwise the channel is off.
 python -m src.whatsapp pair +447700900123
 ```
 
-It prints an eight-digit code. On your phone:
+It prints a short code like `BR65-843N`. On your phone:
 
 **WhatsApp → Settings → Linked Devices → Link a device → Link with phone
 number instead** → type the code.

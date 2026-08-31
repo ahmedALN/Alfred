@@ -59,6 +59,9 @@ def cmd_pair(argv: list[str]) -> int:
         print(f"Could not start pairing: {exc}")
         return 2
 
+    print("Enter this in WhatsApp within about a minute - it expires.
+")
+
     print(f"    YOUR CODE:  {code}\n")
     print("On your phone: WhatsApp -> Settings -> Linked Devices ->")
     print("Link a device -> Link with phone number instead -> type that code.")

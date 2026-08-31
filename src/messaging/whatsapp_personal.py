@@ -22,6 +22,7 @@ remembered for a moment so it is not answered as though you had said it.
 from __future__ import annotations
 
 import threading
+import time
 from collections import deque
 from pathlib import Path
 from typing import Any, Callable
@@ -39,6 +40,7 @@ class PersonalWhatsApp(Channel):
         self._on_message: Callable[[Inbound], None] | None = None
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
+        self._starting = threading.Lock()
         # What Alfred has just said, so it does not reply to itself.
         self._echoes: deque[str] = deque(maxlen=40)
         self.connected = False
@@ -99,27 +101,57 @@ class PersonalWhatsApp(Channel):
 
     # -------------------------------------------------------------- lifecycle
 
-    def pair(self, show_notification: bool = True) -> str:
-        """Ask WhatsApp for the code you type into Linked Devices."""
+    def _connect(self) -> None:
+        """Get the connection going, once, in the background.
+
+        The library's connect() does not return until the link is torn
+        down - it is the whole session, not a handshake - so it can only
+        ever live on its own thread.
+        """
+        with self._starting:
+            if self._thread is not None and self._thread.is_alive():
+                return
+
+            client = self._build()
+
+            def run() -> None:
+                try:
+                    client.connect()
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[WhatsApp] connection ended: {exc}")
+                finally:
+                    self.connected = False
+
+            self._thread = threading.Thread(
+                target=run, name="alfred-whatsapp", daemon=True
+            )
+            self._thread.start()
+
+    def pair(self, show_notification: bool = True, timeout: float = 30.0) -> str:
+        """Ask WhatsApp for the code you type into Linked Devices.
+
+        A code can only be asked for over a live connection, and the
+        connection is only up once the background thread above has got
+        going. Until then the request comes back "client is nil", which
+        is not a failure - it is being early. So: start connecting, then
+        keep asking until it takes.
+        """
         client = self._build()
-        return client.PairPhone(self._owner, show_notification)
+        client.qr(_no_qr)          # we are pairing by code, not by camera
+        self._connect()
+
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                return client.PairPhone(self._owner, show_notification)
+            except Exception as exc:  # noqa: BLE001
+                if not _still_waking(exc) or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.4)
 
     def start(self, on_message: Callable[[Inbound], None]) -> None:
         self._on_message = on_message
-        client = self._build()
-
-        def run() -> None:
-            try:
-                client.connect()
-            except Exception as exc:  # noqa: BLE001
-                print(f"[WhatsApp] connection ended: {exc}")
-            finally:
-                self.connected = False
-
-        self._thread = threading.Thread(
-            target=run, name="alfred-whatsapp", daemon=True
-        )
-        self._thread.start()
+        self._connect()
 
     def stop(self) -> None:
         if self._client is not None:
@@ -155,6 +187,15 @@ class PersonalWhatsApp(Channel):
                 if text[:4000].strip() in self._echoes:
                     self._echoes.remove(text[:4000].strip())
             return False
+
+
+def _no_qr(*_args: Any) -> None:
+    """Swallow the QR image. Pairing by code has no use for it."""
+
+
+def _still_waking(exc: Exception) -> bool:
+    """Is this "not up yet" rather than "no"?"""
+    return "client is nil" in str(exc).lower()
 
 
 def _text_of(event: Any) -> str:
