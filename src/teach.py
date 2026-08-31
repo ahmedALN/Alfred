@@ -80,9 +80,35 @@ CURRICULUM: list[dict] = [
         "goal": "In MultiMC, select the 1.21.11 instance.",
         "check": ("window", "MultiMC"),
     },
+    {
+        "goal": "Open MultiMC.",
+        "check": ("window", "MultiMC"),
+    },
+    {
+        "goal": "Close Notepad.",
+        "check": ("no_window", "Notepad"),
+        "before": ("open", "notepad.exe"),
+    },
     # -- looking things up ---------------------------------------
     {
         "goal": "Search the web for the height of Ben Nevis.",
+        "check": ("answer_says_something",),
+    },
+    {
+        "goal": "Look up what the weather is in London today.",
+        "check": ("answer_says_something",),
+    },
+    # -- the machine, in more detail -----------------------------
+    {
+        "goal": "What is my local IP address?",
+        "check": ("answer_says_something",),
+    },
+    {
+        "goal": "How much space is left on every drive?",
+        "check": ("answer_says_something",),
+    },
+    {
+        "goal": "What is my graphics card?",
         "check": ("answer_says_something",),
     },
 ]
@@ -104,6 +130,10 @@ def verify(check, result, ui) -> tuple[bool, str]:
     if kind == "window":
         hit = [t for t in _windows(ui) if check[1].lower() in t.lower()]
         return bool(hit), (hit[0][:46] if hit else "no " + check[1] + " window")
+
+    if kind == "no_window":
+        hit = [t for t in _windows(ui) if check[1].lower() in t.lower()]
+        return (not hit), ("still open: " + hit[0][:36]) if hit else "gone"
 
     if kind == "answer_mentions":
         said = (str(result.answer) + " " + str(result.summary)).lower()
@@ -152,8 +182,21 @@ def already_known(library, goal: str) -> bool:
         return False
 
 
+def setup(before) -> None:
+    """Some lessons need something to act on - you cannot practise
+    closing Notepad without a Notepad."""
+    if not before:
+        return
+    if before[0] == "open":
+        import subprocess
+
+        subprocess.Popen([before[1]])
+        time.sleep(3)
+
+
 def teach_one(agent, ui, library, lesson: dict) -> dict:
     goal = lesson["goal"]
+    setup(lesson.get("before"))
     started = time.time()
 
     try:
