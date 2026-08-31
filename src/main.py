@@ -30,6 +30,7 @@ from src.brain.app_memory import AppMemory
 from src.brain.limitations import LimitationStore
 from src.brain.activity import ActivityCollector, ActivityLog, watching
 from src.brain.signals import default_collectors
+from src.brain.mailwatch import MailCollector
 from src.brain.schedule import ScheduleStore
 from src.mail import Gmail
 from src.brain.skill_store import SkillStore
@@ -568,6 +569,9 @@ async def main() -> None:
         # which left the proactive loop nothing personal to be
         # proactive about.
         watchers = default_collectors()
+        # A lapsed mailbox link is silent otherwise: the inbox stops
+        # being mentioned and nothing says why.
+        watchers.append(MailCollector(mail))
         if watching():
             watchers.append(ActivityCollector(activity))
             print("[Brain] watching apps and window titles (ALFRED_WATCH_ME=false to stop).")

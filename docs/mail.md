@@ -66,23 +66,39 @@ do this part for you and shouldn't be able to.
 
   - re-run `python -m src.mail link` when it tells you to — ten seconds,
     once a week
-  - or **Audience → Publish app**. No weekly expiry.
+  - or **Audience → Publish app**. No weekly expiry - but read the next
+    section before you try, because publishing asks for more than it
+    first appears.
+
+  Alfred does not leave the expiry to be discovered. It checks the link
+  every half hour and says, through whatever channel it normally speaks
+  on, that access has lapsed and what to run. The failure it is guarding
+  against is silence: an inbox that quietly stops being mentioned, so a
+  week of "nothing important came in" turns out to have been a week of
+  not looking.
 
   ### If you publish
 
+  Not as simple as it sounds. Google will refuse to publish an External
+  app until Branding is complete, and complete means a **home page** and
+  a **privacy policy URL** on a domain registered as authorized - a
+  public website, for a program that runs on your own PC and has no
+  users. GitHub Pages will do it in about fifteen minutes if you want to
+  go that way.
+
   The Branding page asks for a great deal and needs almost none of it.
 
-  Fill in: **App name**, **User support email**, and — at the bottom,
-  easy to miss — **Developer contact information → Email addresses**.
+  Fill in: **App name**, **User support email**, **Developer contact
+  information → Email addresses** (at the bottom, easy to miss), and -
+  required for publishing, though not for testing - a **home page** and
+  **privacy policy** URL, with their domain added under **Authorized
+  domains**.
 
-  Leave blank: **App logo**, home page, privacy policy, terms of
-  service, authorized domains.
+  Leave blank: **App logo** and terms of service.
 
-  The logo is the trap. The console says it plainly, in small type:
-  *after you upload a logo you will need to submit your app for
-  verification*. An app with no logo does not. Nothing else on that page
-  is required unless you are going through verification, which is the
-  thing you are avoiding.
+  The logo is still a trap even here. The console says it plainly, in
+  small type: *after you upload a logo you will need to submit your app
+  for verification*. An app with no logo does not.
 
   Then **Save → Audience → Publish app**.
 
