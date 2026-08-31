@@ -45,10 +45,31 @@ do this part for you and shouldn't be able to.
 
 - **APIs & Services → OAuth consent screen**
 - User type **External**, then fill in the three required fields
-- Under **Audience → Test users**, add your own Gmail address
+- Under **Audience → Test users**, add the exact Gmail address you will
+  sign in with
 
-  Leaving it in testing mode is deliberate. It means only the addresses
-  you list can ever use these credentials, and it needs no review.
+  This one is not optional and the error if you skip it is unhelpful:
+
+      Error 403: access_denied
+      Alfred has not completed the Google verification process
+
+  That is not a problem with Alfred or with the credentials. It means
+  the account at the consent screen is not on the tester list. Add it
+  and try again; it takes effect immediately.
+
+  Leaving the app in testing mode is deliberate — only addresses you
+  list can ever use these credentials, and it needs no review.
+
+  **The catch:** Google expires the refresh token of a Testing-mode app
+  after seven days, so Alfred will lose the mailbox about weekly and
+  say so. Two ways out, neither free:
+
+  - re-run `python -m src.mail link` when it tells you to — ten seconds,
+    once a week
+  - or **Audience → Publish app**. No weekly expiry. You will get a
+    louder "Google hasn't verified this app" screen the first time, and
+    since `gmail.modify` is a restricted scope, Google may ask for
+    verification if the app is ever used beyond your own account.
 
 **3. Create the credentials**
 
