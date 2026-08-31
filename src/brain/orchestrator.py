@@ -133,6 +133,7 @@ class BrainLoop:
         self._resource_mode = None  # set via attach_resource_mode()
         self._task_queue = None  # set via attach_task_queue()
         self._episodes = None  # set via attach_episodes()
+        self._schedule = None  # set via attach_schedule()
 
         self._tick_seconds = tick_seconds
         self._min_speak_gap = min_speak_gap_seconds
@@ -173,6 +174,12 @@ class BrainLoop:
 
     def attach_task_queue(self, task_queue: object) -> None:
         self._task_queue = task_queue
+
+    def attach_schedule(self, schedule: object) -> None:
+        """What Alfred owes, and when. The tick has been running every
+        ninety seconds since the day it was written with nothing to
+        check; this is the thing it checks."""
+        self._schedule = schedule
 
     def attach_episodes(self, episodes: object) -> None:
         self._episodes = episodes
@@ -217,6 +224,11 @@ class BrainLoop:
 
         if self._paused:
             return
+
+        # What was owed by now, before anything else. A thing asked for
+        # at seven should not wait behind a round of thinking about disk
+        # space.
+        await self._keep_appointments()
 
         notables, observations = await asyncio.to_thread(
             self._perception.sense
@@ -299,6 +311,46 @@ class BrainLoop:
         await self._flush_proactive(force_high=False)
 
     # ----------------------------------------------------------------
+
+    async def _keep_appointments(self) -> None:
+        """Anything due, done or said."""
+        if self._schedule is None:
+            return
+
+        try:
+            due = await asyncio.to_thread(self._schedule.due)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Schedule] could not read what is due: {exc}")
+            return
+
+        for item in due:
+            try:
+                await self._keep_one(item)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[Schedule] {item['id']} failed: {exc}")
+            finally:
+                # Marked done either way. An appointment that throws
+                # must not be retried every ninety seconds for ever.
+                await asyncio.to_thread(self._schedule.ran, item["id"])
+
+    async def _keep_one(self, item: dict) -> None:
+        goal = item["goal"]
+
+        if item["kind"] == "do" and self._task_queue is not None:
+            self._audit.record(
+                "scheduled_task", {"id": item["id"], "goal": goal},
+                self._get_session_id(),
+            )
+            self._task_queue.submit(goal, source="voice")
+            return
+
+        self._audit.record(
+            "scheduled_reminder", {"id": item["id"], "goal": goal},
+            self._get_session_id(),
+        )
+        # force: this was asked for at this time, so the quiet-gap rules
+        # that hold back Alfred's own observations do not apply.
+        await self._say(f"(System: proactive) {goal}", force=True)
 
     def _in_startup_grace(self) -> bool:
         return self._monotonic() - self._started_at < self._startup_grace

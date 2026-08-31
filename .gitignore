@@ -65,3 +65,4 @@ src/windows/native/ChildScreenCapture/child-monitor-*.png
 models/
 
 alfred_usage.json
+alfred_schedule.sqlite3

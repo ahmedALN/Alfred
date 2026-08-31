@@ -28,6 +28,7 @@ from src.brain.policy import Policy
 from src.brain.reasoner import LLMReasoner
 from src.brain.app_memory import AppMemory
 from src.brain.limitations import LimitationStore
+from src.brain.schedule import ScheduleStore
 from src.brain.skill_store import SkillStore
 from src.brain.skills import SkillLibrary
 from src.brain.tasks import TaskQueue
@@ -52,6 +53,7 @@ from src.tools.registry import ToolRegistry
 from src.tools.system_info import SystemInfoTool
 from src.tools.web import WebTool
 from src.singleton import AlreadyRunning, SingleInstance
+from src.tools.schedule_tool import ScheduleTool
 from src.tools.task_tool import RunTaskTool, TaskStatusTool
 from src.windows.child_session import ChildSessionClient
 from src.windows.isolated_desktop import IsolatedDesktop
@@ -280,6 +282,9 @@ async def main() -> None:
 
     # Background task agent: delegate multi-step jobs (persisted so a
     # job survives an Alfred restart).
+    # What Alfred owes, and when.
+    schedule = ScheduleStore(_ROOT / "alfred_schedule.sqlite3")
+
     task_store = TaskStore(_ROOT / "alfred_tasks.sqlite3")
 
     skill_store = SkillStore(settings.skill_db_path)
@@ -353,6 +358,7 @@ async def main() -> None:
         recall_tool,
         forget_tool,
         RunTaskTool(task_queue),
+        ScheduleTool(schedule),
         task_status_tool,
         EpisodesTool(episode_store),
         ResourceModeTool(resource_mode),
@@ -582,6 +588,7 @@ async def main() -> None:
         session.attach_brain(brain)
         brain.attach_resource_mode(resource_mode)
         brain.attach_task_queue(task_queue)
+        brain.attach_schedule(schedule)
         brain.attach_episodes(episode_store)
         resource_mode.attach_brain(brain)
 
