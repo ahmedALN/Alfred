@@ -66,10 +66,35 @@ do this part for you and shouldn't be able to.
 
   - re-run `python -m src.mail link` when it tells you to — ten seconds,
     once a week
-  - or **Audience → Publish app**. No weekly expiry. You will get a
-    louder "Google hasn't verified this app" screen the first time, and
-    since `gmail.modify` is a restricted scope, Google may ask for
-    verification if the app is ever used beyond your own account.
+  - or **Audience → Publish app**. No weekly expiry.
+
+  ### If you publish
+
+  The Branding page asks for a great deal and needs almost none of it.
+
+  Fill in: **App name**, **User support email**, and — at the bottom,
+  easy to miss — **Developer contact information → Email addresses**.
+
+  Leave blank: **App logo**, home page, privacy policy, terms of
+  service, authorized domains.
+
+  The logo is the trap. The console says it plainly, in small type:
+  *after you upload a logo you will need to submit your app for
+  verification*. An app with no logo does not. Nothing else on that page
+  is required unless you are going through verification, which is the
+  thing you are avoiding.
+
+  Then **Save → Audience → Publish app**.
+
+  The first sign-in afterwards shows **"Google hasn't verified this
+  app"**. Click **Advanced → Go to Alfred (unsafe)**. The warning is
+  accurate and not alarming: the unverified app is the folder on your
+  own machine, asking for your own mailbox.
+
+  `gmail.modify` is a restricted scope, so Google reserves the right to
+  ask for verification later even in production. For one personal
+  mailbox this normally just works. If it ever stops, the fallback is
+  the weekly re-link, and Alfred says when it needs one.
 
 **3. Create the credentials**
 
