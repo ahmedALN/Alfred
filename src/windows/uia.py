@@ -334,6 +334,46 @@ class UiaSession:
             except Exception:  # noqa: BLE001
                 time.sleep(0.3)
 
+    def close_window(self, title_re: str | None = None,
+                     pid: int | None = None) -> str:
+        """Ask a window to close, the way its own X button would.
+
+        Not a kill. An app with unsaved work is supposed to stop and ask,
+        and that question is the caller's to answer - so this returns
+        once the request is made rather than waiting for the window to
+        vanish, and the caller looks at what is on screen afterwards.
+        """
+        win = self.window(title_re, pid)
+        try:
+            title = win.window_text() or ""
+        except Exception:  # noqa: BLE001
+            title = ""
+
+        try:
+            win.close()
+        except Exception:
+            # Some windows refuse the polite request - a modal is up, or
+            # the frame does not handle it. Alt+F4 goes to the same
+            # place through the keyboard.
+            self.focus(win)
+            time.sleep(0.2)
+            try:
+                from pywinauto.keyboard import send_keys
+
+                send_keys("%{F4}")
+            except Exception as exc:  # noqa: BLE001
+                raise UiaError(f"could not close {title!r}: {exc}") from exc
+
+        return title
+
+    def is_open(self, title_re: str | None = None,
+                pid: int | None = None) -> bool:
+        try:
+            self.window(title_re, pid)
+            return True
+        except UiaError:
+            return False
+
     def focus_window(self, title_re: str | None = None,
                      pid: int | None = None) -> str:
         """Bring a window to the foreground and make it the active target."""

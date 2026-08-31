@@ -103,7 +103,11 @@ class ScreenNeed:
         out: dict[str, Any] = {"needs_user": self.kind, "question": self.question}
         if self.choices:
             out["choices"] = self.choices
-        out["instruction"] = _INSTRUCTIONS[self.kind]
+        # A kind with no instruction is still worth reporting; saying
+        # nothing about it is worse than saying only what it is.
+        instruction = _INSTRUCTIONS.get(self.kind)
+        if instruction:
+            out["instruction"] = instruction
         return out
 
 
@@ -128,7 +132,38 @@ _INSTRUCTIONS = {
         "Read out what is being agreed to and ask the user whether to "
         "accept. Never accept terms on their behalf."
     ),
+    "save_changes": (
+        "The app is asking whether to save before closing, and the "
+        "answer decides whether work survives. If the user already said "
+        "to close WITHOUT saving, or to discard, click \"Don't save\". "
+        "If they said to save, click \"Save\". If they said neither, "
+        "ask them - do not guess, and do not click Cancel to make the "
+        "question go away, because that leaves the app open."
+    ),
 }
+
+
+# The only buttons that answer "shall I save?". Everything else on
+# screen is the app's own furniture, and listing Bold and Add New Tab as
+# though they were choices makes the real ones harder to see.
+_AN_ANSWER = re.compile(
+    r"^(save( all| as\.*\.*\.*)?|don'?t save|do not save|discard"
+    r"( changes)?|no|yes|cancel|keep editing|back)$",
+    re.I,
+)
+
+
+def _answers(controls: list[Any]) -> list[str]:
+    out, seen = [], set()
+    for control in controls:
+        if getattr(control, "control_type", "") != "Button":
+            continue
+        name = (getattr(control, "name", "") or "").strip()
+        if not name or name.lower() in seen or not _AN_ANSWER.match(name):
+            continue
+        seen.add(name.lower())
+        out.append(name)
+    return out
 
 
 def _texts(controls: list[Any]) -> str:
@@ -221,7 +256,7 @@ def assess(title: str, controls: list[Any]) -> ScreenNeed | None:
             "save_changes",
             f"{title or 'This app'} is asking whether to save changes "
             "before closing.",
-            _options(controls, drop_chrome=False),
+            _answers(controls),
         )
 
     if _UPDATE.search(haystack):

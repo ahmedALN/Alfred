@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 from typing import Any
 
 from src.tools.base import AlfredTool
@@ -34,6 +35,10 @@ _ACTIONS = (
     # real tree instead of guessed from a list.
     "search", "open_item", "clear_popups", "learn_control", "unnamed",
     "links", "map",
+    # Closing a window had no verb at all. Alfred reached for one three
+    # times in a single bench run, was told the action does not exist,
+    # and fell back to guessing at Alt+F4 and taskkill.
+    "close",
 )
 
 # What an app's search box tends to be called.
@@ -902,8 +907,15 @@ class UIControlTool(AlfredTool):
                 return result
 
             if action == "key":
+                # "text" is what the type action calls its argument, so
+                # it is what gets reached for here too. A keystroke is
+                # not text, but refusing over the label spends a round
+                # trip teaching that.
                 keys = normalise_keys(
-                    arguments.get("keys") or arguments.get("key")
+                    arguments.get("keys")
+                    or arguments.get("key")
+                    or arguments.get("text")
+                    or arguments.get("keystrokes")
                 )
                 if not keys:
                     return {
@@ -1182,6 +1194,43 @@ class UIControlTool(AlfredTool):
                         "is the newest or top-ranked one. Open it with "
                         "click ref=<ref>."
                     ),
+                }
+
+            if action == "close":
+                title = ui.close_window(window, pid)
+
+                # An app with unsaved work stops and asks, and that
+                # question belongs to whoever asked for the close - so
+                # say what is being asked rather than answering it.
+                # Looked at more than once, because the dialog takes a
+                # moment to paint and a window that has gone reports
+                # nothing at all.
+                need = None
+                for _ in range(4):
+                    time.sleep(0.5)
+                    if not ui.is_open(window, pid):
+                        break
+                    try:
+                        now, controls = ui.tree(window, pid, limit=60)
+                    except UiaError:
+                        break
+                    need = assess(now, controls)
+                    if need is not None:
+                        break
+
+                if need is not None and need.kind == "save_changes":
+                    out = {"status": "success", "closed": False,
+                           "window": title}
+                    out.update(need.as_dict())
+                    return out
+
+                # Asked about the exact window, not the name it shares
+                # with others: closing one Notepad does not stop
+                # "Notepad" from matching the two still open.
+                return {
+                    "status": "success",
+                    "closed": not ui.is_open(title or window, pid),
+                    "window": title,
                 }
 
             if action == "clear_popups":

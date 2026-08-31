@@ -3,10 +3,10 @@
     "goal": "Open Notepad.",
     "ok": true,
     "status": "done",
-    "secs": 4.7,
+    "secs": 20.2,
     "steps": 1,
     "failed_steps": 0,
-    "detail": "*HelloHellounsaved ddddsthe iiick oo - Notepad",
+    "detail": "*unsaved wordswords to losequick rro - Notepad",
     "tags": [
       "launch"
     ],
@@ -16,21 +16,29 @@
     "goal": "Type the words quick brown fox into Notepad.",
     "ok": false,
     "status": "done",
-    "secs": 21.2,
-    "steps": 6,
-    "failed_steps": 1,
+    "secs": 22.0,
+    "steps": 7,
+    "failed_steps": 2,
     "detail": "",
     "tags": [
       "in-app"
     ],
     "failures": [
       {
+        "tool": "open_app",
+        "args": {
+          "target": "current"
+        },
+        "error": "'app' must be a non-empty string - the name of the program to open, e.g. {\"app\": \"Notepad\"}. 'target' only says which desktop to o"
+      },
+      {
         "tool": "ui_control",
         "args": {
-          "action": "get",
-          "window": "Notepad"
+          "action": "key",
+          "window": "Notepad",
+          "text": "^a"
         },
-        "error": "no control matches ref=None name=None - run 'tree' first, or the control may not be on screen yet"
+        "error": "'key' needs 'keys', e.g. '^a', 'ctrl+a' or '{ENTER}'."
       }
     ]
   },
@@ -38,7 +46,7 @@
     "goal": "Check whether Steam is running.",
     "ok": true,
     "status": "done",
-    "secs": 4.3,
+    "secs": 4.9,
     "steps": 1,
     "failed_steps": 0,
     "detail": "Yes, Steam is running.",
@@ -51,7 +59,7 @@
     "goal": "What version of Windows is this?",
     "ok": true,
     "status": "done",
-    "secs": 4.3,
+    "secs": 4.0,
     "steps": 1,
     "failed_steps": 0,
     "detail": "It's Windows 11, version 26200.",
@@ -64,7 +72,7 @@
     "goal": "How much free space is on the C drive?",
     "ok": true,
     "status": "done",
-    "secs": 14.5,
+    "secs": 13.4,
     "steps": 1,
     "failed_steps": 0,
     "detail": "You have 144.4 GB of free space on the C drive.",
@@ -77,8 +85,8 @@
     "goal": "Open Steam and search the store for Hades.",
     "ok": true,
     "status": "done",
-    "secs": 83.1,
-    "steps": 7,
+    "secs": 85.1,
+    "steps": 5,
     "failed_steps": 0,
     "detail": "Steam",
     "tags": [
@@ -91,22 +99,50 @@
     "goal": "In MultiMC, select the 1.21.11 instance.",
     "ok": true,
     "status": "done",
-    "secs": 56.4,
-    "steps": 6,
-    "failed_steps": 0,
+    "secs": 108.9,
+    "steps": 9,
+    "failed_steps": 3,
     "detail": "MultiMC",
     "tags": [
       "in-app",
       "unnamed-controls"
     ],
-    "failures": []
+    "failures": [
+      {
+        "tool": "ui_control",
+        "args": {
+          "action": "get",
+          "window": "MultiMC",
+          "name": "1.21.11 Instance selected"
+        },
+        "error": "no control matches ref=None name='1.21.11 Instance selected' - run 'tree' first, or the control may not be on screen yet"
+      },
+      {
+        "tool": "ui_control",
+        "args": {
+          "action": "get",
+          "window": "MultiMC",
+          "name": "1.21.11 Instance selected"
+        },
+        "error": "no control matches ref=None name='1.21.11 Instance selected' - run 'tree' first, or the control may not be on screen yet"
+      },
+      {
+        "tool": "ui_control",
+        "args": {
+          "action": "get",
+          "window": "MultiMC",
+          "name": "1.21.11 Instance selected"
+        },
+        "error": "no control matches ref=None name='1.21.11 Instance selected' - run 'tree' first, or the control may not be on screen yet"
+      }
+    ]
   },
   {
     "goal": "Close Notepad without saving.",
     "ok": false,
     "status": "failed",
-    "secs": 67.3,
-    "steps": 6,
+    "secs": 55.6,
+    "steps": 3,
     "failed_steps": 3,
     "detail": "still open: *unsaved wordswords to losequick rro - N",
     "tags": [

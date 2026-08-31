@@ -77,3 +77,32 @@ def test_find_with_nothing_to_look_for_says_what_it_wants():
 
     assert "query" in answer["error"]
     assert "look for" in answer["error"]
+
+
+# ---------------------------------------------------------------- key
+
+
+def test_a_keystroke_sent_as_text_is_still_a_keystroke():
+    """'text' is what the type action calls its argument, so it is what
+    gets reached for here too."""
+    tool = _Ui()
+    for key in ("keys", "key", "text", "keystrokes"):
+        answer = tool.execute({"action": "key", "window": "Notepad", key: "^a"})
+        assert "needs 'keys'" not in str(answer.get("error", "")), key
+
+
+# --------------------------------------------------------------- close
+
+
+def test_closing_a_window_is_a_thing_that_can_be_asked_for():
+    """Alfred reached for it three times in one bench run and was told
+    the action does not exist."""
+    from src.tools.ui_control import _ACTIONS
+
+    assert "close" in _ACTIONS
+
+
+def test_the_error_listing_actions_now_offers_close():
+    answer = _Ui().execute({"action": "shut", "window": "Notepad"})
+
+    assert "close" in answer["error"]

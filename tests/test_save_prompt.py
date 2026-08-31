@@ -77,3 +77,39 @@ def test_the_other_wordings_are_caught_too():
     ):
         need = assess("App", [_C(words, "Text"), _C("Save"), _C("Discard")])
         assert need is not None and need.kind == "save_changes", words
+
+
+# ------------------------------------------------- only the real answers
+
+
+def test_only_the_buttons_that_answer_it_are_offered():
+    """Listing Bold and Add New Tab as though they were choices makes
+    the three that matter harder to find."""
+    need = assess("*Doc - Notepad", [
+        _C("Do you want to save changes to Doc?", "Text"),
+        _C("Save"), _C("Don't save"), _C("Cancel"),
+        _C("Bold (Ctrl+B)"), _C("Add New Tab"), _C("Settings"),
+    ])
+
+    assert need.choices == ["Save", "Don't save", "Cancel"]
+
+
+def test_the_other_ways_apps_word_it_are_answers_too():
+    need = assess("Editor", [
+        _C("You have unsaved changes.", "Text"),
+        _C("Yes"), _C("No"), _C("Discard changes"), _C("Toolbar"),
+    ])
+
+    assert "Discard changes" in need.choices
+    assert "Toolbar" not in need.choices
+
+
+def test_it_says_what_to_do_about_it():
+    need = assess("*Doc - Notepad", [
+        _C("Do you want to save changes to Doc?", "Text"),
+        _C("Save"), _C("Don't save"),
+    ])
+    told = need.as_dict()["instruction"].lower()
+
+    assert "without saving" in told or "discard" in told
+    assert "cancel" in told          # warns against the escape hatch
