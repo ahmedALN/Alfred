@@ -60,12 +60,15 @@ from src.windows.session_router import ROUTER as session_router
 from src.windows.child_session.bootstrap import ensure_agent_running
 
 
-def _build_personal_whatsapp(settings, task_queue, status_tool, session, chat):
+def _build_personal_whatsapp(
+    settings, task_queue, status_tool, session, chat, screenshot=None,
+):
     """The linked-device route: Alfred messages your own chat.
 
     Nothing is exposed - it connects outward like WhatsApp Web. Pair it
     once with: python -m src.whatsapp pair
     """
+    from src.messaging.capture import ScreenShare
     from src.messaging.reply import Conversation
     from src.messaging.router import MessageRouter
     from src.messaging.whatsapp_personal import PersonalWhatsApp
@@ -74,7 +77,9 @@ def _build_personal_whatsapp(settings, task_queue, status_tool, session, chat):
     channel = PersonalWhatsApp(session, owner)
 
     talk = Conversation(
-        chat, lambda goal: task_queue.submit(goal, source="voice")
+        chat,
+        lambda goal: task_queue.submit(goal, source="voice"),
+        screen=ScreenShare(screenshot, channel.send_file) if screenshot else None,
     )
 
     router = MessageRouter(
@@ -113,7 +118,9 @@ def _status_reporter(status_tool):
     return status
 
 
-def _build_phone_channel(settings, task_queue, status_tool, chat):
+def _build_phone_channel(
+    settings, task_queue, status_tool, chat, screenshot=None,
+):
     """Bring up the WhatsApp channel, if it has been set up.
 
     Returns the router, or None. Everything about this is optional: an
@@ -129,7 +136,7 @@ def _build_phone_channel(settings, task_queue, status_tool, chat):
     )
     if session.exists() and settings.whatsapp_allowed:
         return _build_personal_whatsapp(
-            settings, task_queue, status_tool, session, chat
+            settings, task_queue, status_tool, session, chat, screenshot
         )
 
     if not (settings.whatsapp_token and settings.whatsapp_phone_id):
@@ -479,8 +486,35 @@ async def main() -> None:
     # --------------------------------------------------------------
     # Messaging Alfred from a phone. Optional; off unless configured.
     # --------------------------------------------------------------
+    def _screen_png() -> bytes:
+        """Whichever desktop Alfred is working on right now.
+
+        The agent first, because during an isolated task the interesting
+        screen is Alfred's own rather than the one you are sitting in
+        front of. But the agent takes one connection at a time and a
+        running task holds it, so asking for a picture must not depend
+        on that pipe being free - grabbing the desktop directly always
+        works and is what "show me my screen" means anyway.
+        """
+        try:
+            client = session_router.client_for("child", fallback=True)
+            png = client.screenshot().png_bytes
+            if png:
+                return png
+        except Exception:  # noqa: BLE001
+            pass
+
+        import io
+
+        from PIL import ImageGrab
+
+        buffer = io.BytesIO()
+        ImageGrab.grab(all_screens=True).save(buffer, format="PNG")
+        return buffer.getvalue()
+
     phone = _build_phone_channel(
-        settings, task_queue, task_status_tool, providers.plan_chat
+        settings, task_queue, task_status_tool, providers.plan_chat,
+        _screen_png,
     )
 
     async def announce(text: str) -> None:

@@ -277,6 +277,34 @@ class PersonalWhatsApp(Channel):
                     self._echoes.remove(text[:4000].strip())
             return False
 
+    def send_file(
+        self, data: bytes | str, kind: str = "image",
+        caption: str = "", to: str | None = None,
+    ) -> bool:
+        """A picture, or a clip of the screen, into the same chat.
+
+        Sent as a real WhatsApp image or video rather than a file, so it
+        shows in the conversation instead of asking to be downloaded -
+        which is the whole point of asking for it from a phone.
+        """
+        try:
+            from neonize.utils import build_jid
+
+            client = self._build()
+            number = "".join(
+                c for c in str(to or self._owner) if c.isdigit()
+            ) or self._owner
+            where = build_jid(number)
+
+            if kind == "video":
+                client.send_video(where, data, caption=caption or None)
+            else:
+                client.send_image(where, data, caption=caption or None)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            print(f"[WhatsApp] could not send the {kind}: {exc}")
+            return False
+
 
 def _own_chat(sender: str, chat: str, from_me: bool) -> bool:
     """Is this me, talking to myself?

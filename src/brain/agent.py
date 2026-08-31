@@ -181,6 +181,11 @@ class TaskResult:
         ]
 
 
+# Below this many steps, a job finishes before a running commentary
+# would have been any use, and the commentary is just interruption.
+_WORTH_NARRATING = 4
+
+
 class TaskAgent:
     """
     Bounded plan -> act -> observe -> retry loop.
@@ -213,6 +218,7 @@ class TaskAgent:
         # Walls hit before, and what got past them.
         self._limitations = limitations
         self._last_wall: str = ""
+        self._wall_tool: str = ""
         self._plan_chat = plan_chat or chat
         # Verification defaults to the FAST model: the deterministic
         # fast-paths + strict per-substep scoping carry most of the load,
@@ -314,8 +320,15 @@ class TaskAgent:
         result.plan = [p["step"] for p in plan]
         self._first_plan_len = len(plan)
         self._planned_ever.update(result.plan)
-        if on_progress is not None:
-            on_progress("Plan: " + "; ".join(result.plan[:6]))
+        # Reading the plan out is worth it only when the job is long
+        # enough that silence would be worrying. For "open Steam" it is
+        # noise, and it arrives before anything has happened, which is
+        # the least useful moment to be talked at.
+        if on_progress is not None and len(plan) >= _WORTH_NARRATING:
+            on_progress(
+                f"This one's {len(plan)} steps: "
+                + "; ".join(result.plan[:6])
+            )
         self._log("task_plan", {"goal": goal, "plan": plan}, session_id)
 
         replans = 0
@@ -340,7 +353,11 @@ class TaskAgent:
                 break
 
             pstep = plan[pi]
-            if on_progress is not None and pi > 0:
+            if (
+                on_progress is not None
+                and pi > 0
+                and len(plan) >= _WORTH_NARRATING
+            ):
                 on_progress(f"Step {pi + 1}/{len(plan)}: {pstep['step'][:70]}")
 
             before = len(result.steps)
@@ -639,17 +656,20 @@ class TaskAgent:
 
         try:
             if not step.ok:
-                error = ""
-                if isinstance(step.result, dict):
-                    error = str(step.result.get("error") or step.verdict)
                 self._last_wall = self._limitations.hit(
-                    step.tool, error or "failed", app
+                    step.tool, _why_it_failed(step), app
                 )
+                self._wall_tool = step.tool
                 return
 
-            if self._last_wall:
-                action = str(args.get("action") or "")
-                how = f"{step.tool} {action}".strip()
+            # Only the same tool succeeding counts. Alfred failed a
+            # PowerShell command, went and looked at the screen, and
+            # recorded "when powershell fails, use desktop_control look"
+            # as a standing lesson - which is not a workaround, it is
+            # just whatever happened next. A wrong lesson is worse than
+            # no lesson, because it gets followed.
+            if self._last_wall and step.tool == self._wall_tool:
+                how = _short(args, 120)
                 self._limitations.got_past(self._last_wall, how)
                 self._last_wall = ""
         except Exception as exc:  # noqa: BLE001
@@ -1042,13 +1062,25 @@ class TaskAgent:
             and len(current) < self._first_plan_len - 1
         )
 
+        # A task whose last act failed did not end well, whatever the
+        # steps before it managed. Alfred announced a saved screenshot
+        # over a step that returned code 1, and then learned the whole
+        # thing as a reusable skill, because everything up to the last
+        # move had gone fine and nothing looked at how it finished.
+        if result.status not in ("cancelled", "exhausted", "error"):
+            acted = [s for s in result.steps if s.tool]
+            if acted and not acted[-1].ok:
+                result.unverified.append(
+                    f"the last thing I tried ({acted[-1].tool}) failed"
+                )
+
         if result.status in ("cancelled", "exhausted", "error"):
             base = {
                 "cancelled": "Stopped at your request",
                 "exhausted": "Ran out of time",
                 "error": "Hit an error",
             }[result.status]
-        elif n_ok and not outstanding and not shrank:
+        elif n_ok and not outstanding and not shrank and not _ended_badly(result):
             result.status = "done"
             base = "Done"
         elif n_ok:
@@ -1278,6 +1310,51 @@ def _parse(raw: str) -> dict[str, Any] | None:
         return None
 
     return parsed if isinstance(parsed, dict) else None
+
+
+def _why_it_failed(step: "Step") -> str:
+    """The words that say what went wrong.
+
+    Tools disagree about where they put it: PowerShell has stderr, others
+    have error or message. Reading only "error" meant every PowerShell
+    failure on the machine collapsed into one signature whose detail was
+    the string "auto" - the step's verdict, not its error - so a bad
+    enum name and an access denial counted as the same wall.
+    """
+    result = step.result
+    if isinstance(result, dict):
+        for key in ("error", "stderr", "message", "reason", "detail"):
+            text = str(result.get(key) or "").strip()
+            if text:
+                command = str(result.get("command") or "")
+                return _without_echo(text, command)[:300]
+        status = str(result.get("status") or "").strip()
+        if status and status != "success":
+            return status
+    elif isinstance(result, str) and result.strip():
+        return result.strip()[:300]
+
+    return "failed"
+
+
+def _without_echo(text: str, command: str) -> str:
+    """Shells repeat the failing command back before saying what broke."""
+    command = command.strip()
+    if len(command) < 40 or command not in text:
+        return text
+    return text.replace(command, "").lstrip(" :\r\n") or text
+
+
+def _ended_badly(result: "TaskResult") -> bool:
+    """Did the last thing Alfred actually did fail?
+
+    Everything else about finishing looks at the plan - which steps were
+    ticked off - and a plan can be fully ticked off by a run whose final
+    move fell over. That is how a screenshot that was never saved came
+    to be reported as done and then learned as a routine.
+    """
+    acted = [s for s in result.steps if s.tool]
+    return bool(acted) and not acted[-1].ok
 
 
 def _short(value: Any, limit: int = 240) -> str:

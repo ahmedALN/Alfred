@@ -35,14 +35,17 @@ def test_a_greeting_is_answered_not_performed():
 
 
 def test_real_work_still_gets_done():
-    talk, jobs, _ = _talk("DO: Open Steam.")
+    talk, jobs, _ = _talk("DO: Open Steam. || Opening Steam now.")
 
-    assert talk.handle("open steam") == "On it."
+    assert talk.handle("open steam") == "Opening Steam now."
     assert jobs == ["Open Steam."]
 
 
 def test_the_job_keeps_the_details_it_was_given():
-    talk, jobs, _ = _talk("DO: Open MultiMC and launch the 1.21.11 instance.")
+    talk, jobs, _ = _talk(
+        "DO: Open MultiMC and launch the 1.21.11 instance. || "
+        "Launching your 1.21.11 instance."
+    )
     talk.handle("open multimc and launch 1.21.11")
 
     assert "1.21.11" in jobs[0]
@@ -85,7 +88,7 @@ def test_a_job_that_will_not_start_says_so():
     def _refuse(job):
         raise RuntimeError("queue is full")
 
-    talk = Conversation(_Chat("DO: Open Steam."), _refuse)
+    talk = Conversation(_Chat("DO: Open Steam. || Opening it."), _refuse)
 
     assert "queue is full" in talk.handle("open steam")
 
@@ -137,3 +140,45 @@ def test_a_model_that_echoes_the_marker_back_is_understood():
     """Seen from the real one: "SAY: SAY" instead of an answer."""
     assert _read("SAY: SAY: Here.") == ("say", "Here.")
     assert _read("DO: DO: Open Steam.") == ("do", "Open Steam.")
+
+
+# ------------------------------------- saying what it understood
+
+
+def test_it_says_what_it_understood_not_just_that_it_heard():
+    """"On it." tells you a message arrived. It does not tell you
+    whether the right thing is about to happen - which is the one
+    moment you could still correct it."""
+    talk, _, _ = _talk(
+        "DO: Open MultiMC and launch the 1.21.11 instance. || "
+        "Launching your 1.21.11 instance."
+    )
+
+    said = talk.handle("open multimc and launch 1.21.11")
+
+    assert said == "Launching your 1.21.11 instance."
+    assert said != "On it."
+
+
+def test_a_model_that_forgets_the_words_still_says_something_specific():
+    talk, _, _ = _talk("DO: Open Steam and search for Hades.")
+
+    said = talk.handle("find hades on steam")
+
+    assert "Steam" in said and "Hades" in said
+    assert said != "On it."
+
+
+def test_the_job_is_not_polluted_by_the_words_said_back():
+    talk, jobs, _ = _talk("DO: Open Steam. || Opening Steam now.")
+    talk.handle("open steam")
+
+    assert jobs == ["Open Steam."]
+
+
+def test_the_separator_is_only_taken_when_it_is_there():
+    from src.messaging.reply import _split
+
+    assert _split("Open Steam.") == ("Open Steam.", "")
+    assert _split("Open Steam. || Opening Steam.") == \
+        ("Open Steam.", "Opening Steam.")

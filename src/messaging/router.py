@@ -102,6 +102,9 @@ class MessageRouter:
             return answer
 
         if self._converse is not None:
+            # An empty answer is not a failure: sending a screenshot
+            # answers the message by itself, and following the picture
+            # with a sentence saying a picture was sent is noise.
             answer = self._converse(text)
             if answer:
                 self._reply(message.sender, answer)

@@ -426,6 +426,13 @@ class TaskQueue:
         if not trace:
             return
 
+        # A run containing a step that fell over is not a routine worth
+        # replaying, even when it recovered. Replaying it means doing
+        # the broken thing again on purpose.
+        if any(s.tool and not s.ok for s in result.steps):
+            print("[Skills] not learning that one - a step failed on the way.")
+            return
+
         try:
             skill = self._skills.distill(
                 goal, trace,

@@ -31,16 +31,19 @@ person's Windows PC. They are texting you from their phone.
 Every message is one of two things: something to SAY back, or something \
 to DO on the computer.
 
-Answer with ONE line, starting with SAY: or DO:
+Answer with ONE line, starting with SAY:, DO: or SHOW:
 
 SAY: <your reply>
     For conversation, greetings, thanks, questions you can answer in \
 words, and anything you are unsure about. Be brief - it is a text \
 message, not an essay. One or two sentences.
 
-DO: <the instruction, rewritten plainly>
+DO: <the instruction, rewritten plainly> || <what you say back>
     ONLY when they want something to happen on the computer. \
-Rewrite it as a clear instruction, keeping every detail they gave.
+Rewrite it as a clear instruction, keeping every detail they gave, then \
+|| and what you are telling them, which should show you understood \
+the particular thing they asked for. Never just "On it." - say what \
+it is you are going off to do.
 
 What you can actually do, so you never claim otherwise: you see \
 the screen, you read and click the controls of any open app, you \
@@ -50,16 +53,28 @@ background. Anything asking about the state of the machine right \
 now - what is on screen, what is running, what is playing - is \
 something to DO, because finding out means going and looking.
 
+SHOW: picture
+SHOW: clip <seconds>
+    When they want to SEE the screen rather than be told about it -
+    "send me a screenshot", "what does it look like", "show me",
+    "record the screen for 10 seconds". This sends them the actual
+    picture or video, which is faster and better than describing it.
+    Default to picture. Use clip only when they ask for a recording,
+    a video, or something happening over time.
+
 Examples:
     "hey alfred"            -> SAY: Evening. What do you need?
     "how are you"           -> SAY: Running fine, nothing on. You?
     "you there?"            -> SAY: Here.
-    "open steam"            -> DO: Open Steam.
-    "put some music on"     -> DO: Open Spotify and start playing music.
-    "whats the weather"     -> DO: Look up today's weather and report it.
-    "whats on my screen"    -> DO: Look at the screen and describe it.
-    "is steam still open"   -> DO: Check whether Steam is running.
+    "open steam"            -> DO: Open Steam. || Opening Steam now.
+    "put some music on"     -> DO: Open Spotify and play something. || Putting something on now.
+    "whats the weather"     -> DO: Look up today's weather. || Checking the forecast.
+    "whats on my screen"    -> DO: Look at the screen and describe it. || Having a look.
+    "is steam still open"   -> DO: Check whether Steam is running. || Checking.
     "did that work?"        -> SAY: <answer from what you know>
+    "send me a screenshot"  -> SHOW: picture
+    "show me the screen"    -> SHOW: picture
+    "record my screen 10s"  -> SHOW: clip 10
 """
 
 _MAX_REPLY = 900
@@ -73,9 +88,11 @@ class Conversation:
         chat,
         submit: Callable[[str], object],
         remember: int = 6,
+        screen=None,
     ) -> None:
         self._chat = chat
         self._submit = submit
+        self._screen = screen
         self._history: deque[str] = deque(maxlen=remember)
 
     def handle(self, text: str) -> str:
@@ -95,8 +112,11 @@ class Conversation:
 
         kind, body = _read(raw)
 
-        if kind == "do":
-            answer = self._start(body or text)
+        if kind == "show":
+            answer = self._show(body)
+        elif kind == "do":
+            job, said = _split(body or text)
+            answer = self._start(job, said)
         else:
             answer = body or "Sorry - say that again?"
 
@@ -112,12 +132,44 @@ class Conversation:
         recent = "\n".join(self._history)
         return f"Recently:\n{recent}\n\nMessage: {text}"
 
-    def _start(self, job: str) -> str:
+    def _start(self, job: str, said: str = "") -> str:
         try:
             self._submit(job)
         except Exception as exc:  # noqa: BLE001
             return f"I couldn't start that: {exc}"
-        return "On it."
+        # "On it." says only that a message was received. What was
+        # understood is the part worth hearing, and it is the part that
+        # lets you correct Alfred before it has done the wrong thing.
+        return said or f"Right - {job[0].lower()}{job[1:].rstrip('.')}."
+
+
+    def _show(self, what: str) -> str:
+        """Send the screen itself rather than a description of it."""
+        if self._screen is None:
+            return "I can't send pictures on this channel."
+
+        want = (what or "").strip().lower()
+        if want.startswith("clip") or "record" in want:
+            return self._screen.clip(_seconds(want))
+        return self._screen.picture()
+
+
+def _seconds(want: str) -> int:
+    from src.messaging.capture import DEFAULT_SECONDS
+
+    digits = "".join(c if c.isdigit() else " " for c in want).split()
+    return int(digits[0]) if digits else DEFAULT_SECONDS
+
+
+def _split(body: str) -> tuple[str, str]:
+    """"Open Steam. || Opening Steam now." -> the job, and the words.
+
+    Both come out of the one call because they are one thought. Asking
+    for them separately would cost a second round trip to be told again
+    what had just been decided.
+    """
+    job, sep, said = body.partition("||")
+    return job.strip(), (said.strip() if sep else "")
 
 
 def _read(raw: str) -> tuple[str, str]:
@@ -132,7 +184,7 @@ def _read(raw: str) -> tuple[str, str]:
         return "say", ""
 
     # Small models like to wrap things. Find the marker anywhere.
-    for marker, kind in (("DO:", "do"), ("SAY:", "say")):
+    for marker, kind in (("SHOW:", "show"), ("DO:", "do"), ("SAY:", "say")):
         at = line.upper().find(marker)
         if at == -1:
             continue

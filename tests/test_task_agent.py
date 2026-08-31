@@ -361,3 +361,92 @@ def test_a_model_that_falls_over_costs_only_the_finding():
     )
 
     assert agent._finding(result) == ""
+
+
+# ------------------------------------- not calling a bad end a good one
+
+
+def _result_with(steps, plan=None, verified=None):
+    from src.brain.agent import TaskAgent, TaskResult
+
+    agent = TaskAgent.__new__(TaskAgent)
+    agent._limitations = None
+    agent._plan_chat = None
+    agent._first_plan_len = len(plan or [])
+    result = TaskResult(
+        goal="Save the clipboard image to Downloads.",
+        status="running", summary="", steps=steps,
+        plan=list(plan or []), verified=list(verified or []),
+    )
+    # _finding needs a chat provider; this test is about status only.
+    agent._finding = lambda _r: ""
+    agent._finalize(result)
+    return result
+
+
+def test_a_task_whose_last_act_failed_is_not_done():
+    """Alfred announced a saved screenshot over a step that returned
+    code 1, then learned the whole run as a reusable skill."""
+    steps = [
+        _step("powershell", {"status": "success"}),
+        _step("powershell", {"status": "error"}, ok=False),
+    ]
+    result = _result_with(steps, plan=["save it"], verified=["save it"])
+
+    assert result.status == "partial"
+    assert any("failed" in u for u in result.unverified)
+
+
+def test_a_task_that_recovered_and_finished_is_still_done():
+    steps = [
+        _step("powershell", {"status": "error"}, ok=False),
+        _step("powershell", {"status": "success"}),
+    ]
+    result = _result_with(steps, plan=["save it"], verified=["save it"])
+
+    assert result.status == "done"
+
+
+def test_a_task_with_no_tool_calls_is_judged_on_its_plan_as_before():
+    result = _result_with([], plan=["say hello"], verified=["say hello"])
+
+    assert result.status == "done"
+
+
+# ----------------------------------------- recording the right wall
+
+
+def test_the_wall_records_what_actually_went_wrong():
+    """It recorded the string "auto" - the step's verdict - so every
+    PowerShell failure on the machine was one indistinguishable wall."""
+    from src.brain.agent import _why_it_failed
+
+    command = "$Path = [Environment]::GetFolderPath('Downloads')" + " " * 30
+    step = _step("powershell", {
+        "status": "error", "success": False, "command": command,
+        "stderr": command + " : Cannot convert value Downloads to SpecialFolder",
+    }, ok=False)
+
+    detail = _why_it_failed(step)
+
+    assert "Cannot convert value Downloads" in detail
+    assert "auto" != detail
+    assert command not in detail          # the echo is not the error
+
+
+def test_two_different_powershell_failures_are_two_different_walls():
+    from src.brain.agent import _why_it_failed
+    from src.brain.limitations import shape_of
+
+    enum = _step("powershell", {"status": "error", "stderr": "Cannot convert value Downloads"}, ok=False)
+    denied = _step("powershell", {"status": "error", "stderr": "Access is denied"}, ok=False)
+
+    assert shape_of("powershell", _why_it_failed(enum)) != \
+        shape_of("powershell", _why_it_failed(denied))
+
+
+def test_a_failure_with_nothing_to_say_still_records_something():
+    from src.brain.agent import _why_it_failed
+
+    assert _why_it_failed(_step("open_app", {"status": "not_found"}, ok=False)) \
+        == "not_found"

@@ -109,18 +109,35 @@ def _step(tool, ok, error="", args=None):
                 {"status": "error", "error": error} if error else {}, ok)
 
 
-def test_a_failure_then_a_success_is_recorded_as_the_way_past(tmp_path):
+def test_the_same_tool_working_afterwards_is_the_way_past(tmp_path):
     """The only evidence of a workaround worth having: a route that
-    actually worked, not a plausible guess about one."""
+    actually worked on the thing that failed."""
     store = _store(tmp_path)
     agent = _agent(store)
 
     agent._note_wall(_step("ui_control", False, "no search box found",
                            {"window": "Steam"}))
-    agent._note_wall(_step("desktop_control", True, args={"action": "look"}))
+    agent._note_wall(_step("ui_control", True,
+                           args={"action": "search", "window": "Steam"}))
 
     rows = store.all()
-    assert rows[0]["workaround"] == "desktop_control look"
+    assert "search" in rows[0]["workaround"]
+    store.close()
+
+
+def test_whatever_happened_next_is_not_a_workaround(tmp_path):
+    """Alfred failed a PowerShell command, went and looked at the
+    screen, and banked "when powershell fails, use desktop_control
+    look" as a standing lesson. That is not a route round anything - it
+    is just the next thing that happened. A wrong lesson is worse than
+    no lesson, because it gets followed."""
+    store = _store(tmp_path)
+    agent = _agent(store)
+
+    agent._note_wall(_step("powershell", False, "Cannot convert Downloads"))
+    agent._note_wall(_step("desktop_control", True, args={"action": "look"}))
+
+    assert store.all()[0]["workaround"] == ""
     store.close()
 
 
@@ -141,13 +158,13 @@ def test_the_agent_banks_the_lesson_once_it_has_earned_it(tmp_path):
     for _ in range(2):
         agent._note_wall(_step("ui_control", False, "no search box found",
                                {"window": "Steam"}))
-        agent._note_wall(_step("desktop_control", True,
-                               args={"action": "look"}))
+        agent._note_wall(_step("ui_control", True,
+                               args={"action": "search", "window": "Steam"}))
 
     learned = agent.learn_workarounds()
 
     assert len(learned) == 1
-    assert "desktop_control look" in learned[0]
+    assert "search" in learned[0]
     assert "Steam" in learned[0]
     assert learner.facts[0][1] == "learned_workaround"
     # And never twice.
@@ -160,7 +177,7 @@ def test_nothing_is_banked_from_a_single_encounter(tmp_path):
     agent = _agent(store, learner)
 
     agent._note_wall(_step("ui_control", False, "no box", {"window": "Steam"}))
-    agent._note_wall(_step("desktop_control", True, args={"action": "look"}))
+    agent._note_wall(_step("ui_control", True, args={"action": "search"}))
 
     assert agent.learn_workarounds() == []
     assert learner.facts == []

@@ -27,7 +27,10 @@ def _agent(chat, reg):
     )
 
 
-def test_plan_summary_and_step_progress_are_spoken():
+def test_a_short_job_is_done_without_a_running_commentary():
+    """Reading the plan out for "play drake" is noise, and it arrives
+    before anything has happened - the least useful moment to be talked
+    at."""
     said = []
     chat = DispatchChat(
         plan=[[
@@ -44,9 +47,26 @@ def test_plan_summary_and_step_progress_are_spoken():
         "play drake", source="voice", on_progress=said.append,
     )
 
-    assert said and said[0].startswith("Plan:")
-    assert "open Spotify" in said[0] and "search drake" in said[0]
-    assert any("Step 2/2" in line for line in said)
+    assert said == []
+
+
+def test_a_long_job_says_what_it_is_in_for():
+    """Silence through something with many steps is worrying rather
+    than restful."""
+    said = []
+    steps = ["open Spotify", "search drake", "play the track",
+             "open Steam", "check the library"]
+    chat = DispatchChat(
+        plan=[[{"step": s, "done_when": "window exists"} for s in steps]],
+        steps={s: [_use("ui_control", {"action": "tree"})] for s in steps},
+        verify=True,
+    )
+    _agent(chat, FakeRegistry()).run(
+        "sort out my whole desktop", source="voice", on_progress=said.append,
+    )
+
+    assert said and "5 steps" in said[0]
+    assert any("Step 2/5" in line for line in said)
 
 
 def test_zero_action_claim_never_verifies_even_if_model_would_pass():

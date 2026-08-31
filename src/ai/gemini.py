@@ -1248,9 +1248,9 @@ class AlfredLiveSession:
                 f"[Tool Result] {result}"
             )
 
-            if self._store is not None:
-                from src.tools.results import tool_succeeded
+            from src.tools.results import for_model, tool_succeeded
 
+            if self._store is not None:
                 self._store.add_tool_event(
                     self._session_id,
                     call.name,
@@ -1259,11 +1259,14 @@ class AlfredLiveSession:
                     tool_succeeded(result),
                 )
 
+            # The verdict goes first and in words. Handing the raw dict
+            # back is how Alfred came to announce a saved screenshot
+            # over a step that had failed with return code 1.
             function_responses.append(
                 types.FunctionResponse(
                     name=call.name,
                     id=call.id,
-                    response=result,
+                    response=for_model(result),
                 )
             )
 
