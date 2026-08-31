@@ -27,6 +27,16 @@ _MAX_STEPS = 8
 # Arg keys that carry free-form user content (as opposed to structural
 # things like action names, control names, hotkeys). Only these become
 # parameter slots when distilling a skill.
+# Argument values that came from the request rather than from the app,
+# so they change when the request changes.
+#
+# "name" is deliberately NOT here, though it was tried. A control's
+# label often coincides with a word in the request - "play drake on
+# spotify" contains "play", and so does the Play button - and slotting
+# it substitutes the new request's subject into a button name, which
+# breaks the skill outright. The cost of leaving it out is smaller: a
+# read-back step keeps the literal it was taught with, which reads the
+# wrong thing but does not press the wrong thing.
 _FREEFORM_KEYS = {
     "text", "query", "q", "search", "value", "content", "message",
     "prompt", "term", "phrase", "input",
@@ -54,7 +64,13 @@ def _slug(text: str, words: int = 4) -> str:
 # template alignment: fill {slot}s in a template from a fresh request
 # --------------------------------------------------------------------
 
-_SLOT_RE = re.compile(r"^\{(\w+)\}$")
+# A slot, with whatever punctuation the sentence happened to put round
+# it. Anchoring to the whole token meant "{p1}." - a parameter at the end
+# of a sentence, which is where parameters usually are - was not
+# recognised as a slot at all. It was matched as the literal text
+# "{p1}.", never found, and the value was never filled, so every skill
+# whose last word is its parameter failed on the spot with no steps run.
+_SLOT_RE = re.compile(r"^[^\w{]*\{(\w+)\}[^\w}]*$")
 
 
 def align(template: str, request: str) -> dict[str, str] | None:
@@ -97,7 +113,9 @@ def align(template: str, request: str) -> dict[str, str] | None:
 
         if not grabbed:
             return None
-        out[slot] = " ".join(grabbed).strip()
+        # The value carries the sentence's punctuation - "Celeste." - and
+        # what is wanted is the name.
+        out[slot] = " ".join(grabbed).strip().strip(".,!?;:")
 
     return out
 
