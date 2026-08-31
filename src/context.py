@@ -26,6 +26,7 @@ def build_situation(
     learner: Any = None,
     episodes: Any = None,
     world: Any = None,
+    memory: Any = None,
     foreground: Callable[[], str | None] = _fg,
     idle: Callable[[], float] = _idle,
     max_len: int = 900,
@@ -106,6 +107,21 @@ def build_situation(
                 lines.append(f"{len(queued)} task(s) queued.")
         except Exception:  # noqa: BLE001
             pass
+
+    # --- what we were just saying ------------------------------
+    # The voice session is torn down and rebuilt every hundred and fifty
+    # seconds, each time with a new id, so a day of talking was eleven
+    # separate conversations that could not see each other. "About that
+    # thing earlier" had nothing to refer to.
+    if memory is not None:
+        try:
+            said = memory.recent_turns(limit=6, hours=6.0)
+        except Exception:  # noqa: BLE001
+            said = []
+        if said:
+            lines.append("Just before this: " + " | ".join(
+                f"{t['role']}: {t['text'][:90]}" for t in said[-4:]
+            ))
 
     # --- recently learned --------------------------------------
     if learner is not None:

@@ -102,6 +102,7 @@ class Conversation:
         steer: "Callable[[str], bool] | None" = None,
         running: "Callable[[], str] | None" = None,
         eyes=None,
+        record=None,
     ) -> None:
         self._chat = chat
         self._submit = submit
@@ -115,6 +116,10 @@ class Conversation:
         # person picks up their phone: this error, this letter, this
         # thing in front of me.
         self._eyes = eyes
+        # Written to the same place the voice conversation goes, so what
+        # you said on the phone is known in the room and the other way
+        # round. One thread, two doors into it.
+        self._record = record
         self._history: deque[str] = deque(maxlen=remember)
 
     def handle(self, text: str, media: bytes | None = None,
@@ -153,9 +158,21 @@ class Conversation:
 
         self._history.append(f"Them: {text}")
         self._history.append(f"You: {answer}")
+        self._keep(text, answer)
         return answer[:_MAX_REPLY]
 
     # ------------------------------------------------------------------
+
+    def _keep(self, said: str, answered: str) -> None:
+        """Into the shared thread, so the room knows about the phone."""
+        if self._record is None:
+            return
+        try:
+            self._record("user", said)
+            if answered:
+                self._record("alfred", answered)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _prompt(self, text: str) -> str:
         parts = []
@@ -223,6 +240,7 @@ class Conversation:
         answer = (seen or "").strip()[:_MAX_REPLY]
         self._history.append(f"Them: [a picture] {text}"[:200])
         self._history.append(f"You: {answer}"[:200])
+        self._keep(f"[a picture] {text}", answer)
         return answer or "I can see it, but I can't make anything out."
 
     def _change(self, what: str) -> str:

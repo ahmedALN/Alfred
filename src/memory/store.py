@@ -276,6 +276,36 @@ class MemoryStore:
 
         return [dict(row) for row in rows]
 
+    def recent_turns(
+        self, limit: int = 8, hours: float = 24.0
+    ) -> list[dict[str, str]]:
+        """The last things said, whichever session they were said in.
+
+        The voice session is torn down and rebuilt every hundred and
+        fifty seconds by the model provider, and each one got a new id -
+        so a day of conversation was eleven separate conversations, none
+        of which could see the others. Continuity is not a session
+        property; it belongs to the person.
+        """
+        import datetime as _dt
+
+        since = (
+            _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=hours)
+        ).isoformat()
+
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT role, text, created_at FROM turns
+                WHERE created_at >= ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (since, max(1, limit)),
+            ).fetchall()
+
+        return [dict(row) for row in reversed(rows)]
+
     # ----------------------------------------------------------------
     # Tool events
     # ----------------------------------------------------------------

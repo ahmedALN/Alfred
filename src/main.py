@@ -78,7 +78,7 @@ from src.windows.child_session.bootstrap import ensure_agent_running
 
 def _build_personal_whatsapp(
     settings, task_queue, status_tool, session, chat, screenshot=None,
-    eyes=None,
+    eyes=None, remember_turn=None,
 ):
     """The linked-device route: Alfred messages your own chat.
 
@@ -102,6 +102,7 @@ def _build_personal_whatsapp(
             task_queue.current().goal if task_queue.current() else ""
         ),
         eyes=eyes,
+        record=remember_turn,
     )
 
     router = MessageRouter(
@@ -142,6 +143,7 @@ def _status_reporter(status_tool):
 
 def _build_phone_channel(
     settings, task_queue, status_tool, chat, screenshot=None, eyes=None,
+    remember_turn=None,
 ):
     """Bring up the WhatsApp channel, if it has been set up.
 
@@ -159,7 +161,7 @@ def _build_phone_channel(
     if session.exists() and settings.whatsapp_allowed:
         return _build_personal_whatsapp(
             settings, task_queue, status_tool, session, chat, screenshot,
-            eyes,
+            eyes, remember_turn,
         )
 
     if not (settings.whatsapp_token and settings.whatsapp_phone_id):
@@ -381,6 +383,7 @@ async def main() -> None:
             learner=learner,
             episodes=episode_store,
             world=world,
+            memory=store,
         )
 
     session._situation_fn = _situation
@@ -573,6 +576,10 @@ async def main() -> None:
     phone = _build_phone_channel(
         settings, task_queue, task_status_tool, providers.plan_chat,
         _screen_png, providers.vision,
+        # One conversation thread, whichever door it came through.
+        lambda role, text: store.add_turn(
+            session.session_key, role, text
+        ),
     )
 
     async def announce(text: str) -> None:
