@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import logging
 from pathlib import Path
 
@@ -59,16 +60,74 @@ from src.windows.session_router import ROUTER as session_router
 from src.windows.child_session.bootstrap import ensure_agent_running
 
 
+def _build_personal_whatsapp(settings, task_queue, status_tool, session):
+    """The linked-device route: Alfred messages your own chat.
+
+    Nothing is exposed - it connects outward like WhatsApp Web. Pair it
+    once with: python -m src.whatsapp pair
+    """
+    from src.messaging.router import MessageRouter
+    from src.messaging.whatsapp_personal import PersonalWhatsApp
+
+    owner = settings.whatsapp_allowed[0]
+    channel = PersonalWhatsApp(session, owner)
+
+    router = MessageRouter(
+        channel,
+        list(settings.whatsapp_allowed),
+        lambda text: task_queue.submit(text, source="voice"),
+        status=_status_reporter(status_tool),
+    )
+    channel.start(router.handle)
+
+    print(f"[Message] WhatsApp linked to {owner} - messaging your own chat.")
+    return router
+
+
+def _status_reporter(status_tool):
+    def status() -> str:
+        try:
+            report = status_tool.execute({})
+            running = report.get("running") or []
+            recent = report.get("recent") or []
+            if running:
+                return "Working on: " + "; ".join(
+                    str(t.get("goal", ""))[:80] for t in running[:2]
+                )
+            if recent:
+                last = recent[0]
+                return (
+                    f"Nothing running. Last: {str(last.get('goal',''))[:70]} "
+                    f"({last.get('status','')})"
+                )
+        except Exception:  # noqa: BLE001
+            pass
+        return "Nothing running."
+
+    return status
+
+
 def _build_phone_channel(settings, task_queue, status_tool):
     """Bring up the WhatsApp channel, if it has been set up.
 
     Returns the router, or None. Everything about this is optional: an
     unconfigured Alfred behaves exactly as before.
     """
+    from src.messaging.router import MessageRouter
+
+    # Two ways in, and the personal one wins when it has been linked,
+    # because it needs no business number and nothing exposed.
+    session = _ROOT / os.getenv(
+        "ALFRED_WHATSAPP_SESSION", "alfred_whatsapp.sqlite3"
+    )
+    if session.exists() and settings.whatsapp_allowed:
+        return _build_personal_whatsapp(
+            settings, task_queue, status_tool, session
+        )
+
     if not (settings.whatsapp_token and settings.whatsapp_phone_id):
         return None
 
-    from src.messaging.router import MessageRouter
     from src.messaging.server import WebhookServer
     from src.messaging.whatsapp import WhatsAppChannel
 
@@ -95,30 +154,11 @@ def _build_phone_channel(settings, task_queue, status_tool):
         verify_token=settings.whatsapp_verify_token,
     )
 
-    def status() -> str:
-        try:
-            report = status_tool.execute({})
-            running = report.get("running") or []
-            recent = report.get("recent") or []
-            if running:
-                return "Working on: " + "; ".join(
-                    str(t.get("goal", ""))[:80] for t in running[:2]
-                )
-            if recent:
-                last = recent[0]
-                return (
-                    f"Nothing running. Last: {str(last.get('goal',''))[:70]} "
-                    f"({last.get('status','')})"
-                )
-        except Exception:  # noqa: BLE001
-            pass
-        return "Nothing running."
-
     router = MessageRouter(
         channel,
         list(settings.whatsapp_allowed),
         lambda text: task_queue.submit(text, source="voice"),
-        status=status,
+        status=_status_reporter(status_tool),
     )
     channel.start(router.handle)
 

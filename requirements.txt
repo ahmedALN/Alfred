@@ -27,3 +27,4 @@ pytest>=8.0.0
 # External (not pip): .NET 8+ SDK for the native helpers, and Ollama
 # (https://ollama.com) if ALFRED_AI_PROVIDER=ollama. Custom wake-word
 # training also needs: torch, openwakeword[train], piper-sample-generator.
+neonize>=0.4.3

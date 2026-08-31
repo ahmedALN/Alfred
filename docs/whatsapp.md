@@ -1,10 +1,66 @@
 # Messaging Alfred from your phone
 
-Alfred can take instructions over WhatsApp and message you back when a
-job finishes or it needs a decision. A message from you is treated
-exactly as if you had said it in the room.
+There are two ways, and they are very different. Pick one.
 
-**That is the whole security model, so read the first section.**
+| | **Your own chat** | **Business number** |
+| --- | --- | --- |
+| Setup | one command, one code | Meta account, tunnel, ~20 min |
+| Where messages land | your "Message yourself" chat | a chat with a business number |
+| Exposed to the internet | nothing | a webhook, behind a tunnel |
+| Can message you any time | yes | only within 24h of your last message |
+| Supported by Meta | **no** | yes |
+| Risk to your account | **your number could be banned** | none |
+
+The first is what most "WhatsApp bots" do: it links as a companion
+device, exactly like WhatsApp Web, and WhatsApp's terms do not permit
+unofficial clients. It is far nicer to use and it is your account on the
+line. The second is Meta's supported route and carries no such risk.
+
+Alfred supports both. If a link exists it is used; otherwise the
+business route is used if configured; otherwise the channel is off.
+
+---
+
+# Option 1 - your own chat (linked device)
+
+```bash
+python -m src.whatsapp pair +447700900123
+```
+
+It prints an eight-digit code. On your phone:
+
+**WhatsApp → Settings → Linked Devices → Link a device → Link with phone
+number instead** → type the code.
+
+That is the whole setup. Put your number in `.env` so Alfred knows who
+is allowed to talk to it:
+
+```
+ALFRED_WHATSAPP_ALLOWED=+447700900123
+```
+
+Then start Alfred. It prints:
+
+```
+[Message] WhatsApp linked to +447700900123 - messaging your own chat.
+```
+
+Message yourself on WhatsApp and Alfred answers in the same chat.
+
+- `python -m src.whatsapp status` - is it linked?
+- `python -m src.whatsapp unlink` - forget it here. **Also log the
+  device out on your phone**; deleting the file does not revoke it.
+
+Alfred ignores its own messages in that chat, so it does not end up
+talking to itself.
+
+---
+
+
+# Option 2 - a business number (Meta Cloud API)
+
+Meta's supported route. No risk to your personal account, at the cost of
+a business number and a tunnel.
 
 ## What this channel is
 
