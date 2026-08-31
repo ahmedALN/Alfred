@@ -65,6 +65,67 @@ class RunTaskTool(AlfredTool):
         }
 
 
+class SteerTaskTool(AlfredTool):
+    name = "steer_task"
+
+    description = (
+        "Say something to the job Alfred is running RIGHT NOW - a "
+        "correction, a change of mind, a detail it got wrong. Use this "
+        "when the user reacts to work in progress: 'no, the other one', "
+        "'make it the 1.21.11 one', 'search for Hollow Knight instead'. "
+        "The running task reads it before its next move and the plan is "
+        "redone around it. If nothing is running this returns "
+        "not_running - then treat what they said as a new request."
+    )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "said": {
+                    "type": "string",
+                    "description": (
+                        "What the user just said, in their own words."
+                    ),
+                }
+            },
+            "required": ["said"],
+        }
+
+    def __init__(self, queue: TaskQueue) -> None:
+        self._queue = queue
+
+    def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        said = str(
+            arguments.get("said") or arguments.get("text")
+            or arguments.get("message") or ""
+        ).strip()
+
+        if not said:
+            return {"status": "error", "error": "'said' is needed."}
+
+        if not self._queue.steer(said):
+            return {
+                "status": "not_running",
+                "error": (
+                    "nothing is running to say that to - treat it as a "
+                    "new request instead"
+                ),
+            }
+
+        current = self._queue.current()
+        return {
+            "status": "success",
+            "told": said,
+            "task": current.goal if current else "",
+            "note": (
+                "The running task will read this before its next move. "
+                "Tell the user you have passed it on."
+            ),
+        }
+
+
 class TaskStatusTool(AlfredTool):
     name = "task_status"
 

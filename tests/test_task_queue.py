@@ -12,12 +12,12 @@ class FakeAgent:
         self.replays = []
 
     def run(self, goal, session_id=None, cancel_check=None, on_progress=None,
-            *, source="brain", ask_user=None):
+            *, source="brain", ask_user=None, steers=None):
         self.calls.append(goal)
         return self._result
 
     def replay(self, skill, request, session_id=None, cancel_check=None,
-               on_progress=None, *, source="voice", ask_user=None):
+               on_progress=None, *, source="voice", ask_user=None, steers=None):
         self.replays.append((skill["id"], request))
         return self._replay_result or self._result
 

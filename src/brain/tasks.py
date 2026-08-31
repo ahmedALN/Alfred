@@ -64,6 +64,12 @@ class TaskQueue:
         self._gate = asyncio.Event()
         self._gate.set()  # not paused
         self._cancel = threading.Event()
+        # Words said to a job while it is running. Stopping it was the
+        # only thing that could be said to a task in flight, so a wrong
+        # turn had to be watched all the way to the end and then asked
+        # for again from the start.
+        self._steers: list[str] = []
+        self._steer_lock = threading.Lock()
 
         # Mid-task "go ahead, sir?" confirmations.
         self._confirm_event = threading.Event()
@@ -109,6 +115,42 @@ class TaskQueue:
 
     def _cancel_requested(self) -> bool:
         return self._cancel.is_set()
+
+    # ---- steering ---------------------------------------------------
+
+    def steer(self, text: str) -> bool:
+        """Say something to the job that is running now.
+
+        Not a queued instruction and not a new task: a correction the
+        agent should read before its next move. Returns False when
+        there is nothing running to say it to, so the caller can treat
+        it as a fresh request instead.
+        """
+        text = (text or "").strip()
+        if not text or not self.running():
+            return False
+
+        with self._steer_lock:
+            self._steers.append(text)
+        print(f"[Tasks] steering: {text[:90]}")
+        return True
+
+    def _take_steers(self) -> list[str]:
+        """Drained by the agent. Read once, then they are history - the
+        agent keeps them in its own log after that."""
+        with self._steer_lock:
+            said, self._steers = self._steers, []
+        return said
+
+    def running(self) -> bool:
+        return any(r.status == "running" for r in self._records.values())
+
+    def current(self) -> "TaskRecord | None":
+        for task_id in reversed(self._order):
+            record = self._records.get(task_id)
+            if record is not None and record.status == "running":
+                return record
+        return None
 
     def answer_pending(self, text: str) -> bool:
         """
@@ -268,6 +310,7 @@ class TaskQueue:
 
             record.status = "running"
             self._cancel.clear()
+            self._take_steers()      # nothing carries over from the last job
             self._persist(task_id, "running")
 
             # "without disturbing me" - bring up Alfred's own desktop and
@@ -298,6 +341,7 @@ class TaskQueue:
                     r.goal, get_session_id(),
                     self._cancel_requested, _progress,
                     source=r.source, ask_user=self._ask_user,
+                    steers=self._take_steers,
                 )
 
             try:
@@ -313,6 +357,7 @@ class TaskQueue:
                             s, r.goal, get_session_id(),
                             self._cancel_requested, _progress,
                             source=r.source, ask_user=self._ask_user,
+                            steers=self._take_steers,
                         )
                     )
                     if result.status in ("done", "partial"):

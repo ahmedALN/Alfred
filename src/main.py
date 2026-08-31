@@ -64,7 +64,7 @@ from src.tools.calendar_tool import CalendarTool
 from src.tools.classroom_tool import ClassroomTool
 from src.tools.mail_tool import MailTool
 from src.tools.schedule_tool import ScheduleTool
-from src.tools.task_tool import RunTaskTool, TaskStatusTool
+from src.tools.task_tool import RunTaskTool, SteerTaskTool, TaskStatusTool
 from src.windows.child_session import ChildSessionClient
 from src.windows.isolated_desktop import IsolatedDesktop
 from src.windows.uia_remote import RemoteUia
@@ -92,6 +92,10 @@ def _build_personal_whatsapp(
         chat,
         lambda goal: task_queue.submit(goal, source="voice"),
         screen=ScreenShare(screenshot, channel.send_file) if screenshot else None,
+        steer=task_queue.steer,
+        running=lambda: (
+            task_queue.current().goal if task_queue.current() else ""
+        ),
     )
 
     router = MessageRouter(
@@ -181,7 +185,12 @@ def _build_phone_channel(
     )
 
     talk = Conversation(
-        chat, lambda goal: task_queue.submit(goal, source="voice")
+        chat,
+        lambda goal: task_queue.submit(goal, source="voice"),
+        steer=task_queue.steer,
+        running=lambda: (
+            task_queue.current().goal if task_queue.current() else ""
+        ),
     )
 
     router = MessageRouter(
@@ -380,6 +389,7 @@ async def main() -> None:
         recall_tool,
         forget_tool,
         RunTaskTool(task_queue),
+        SteerTaskTool(task_queue),
         ScheduleTool(schedule),
         MailTool(mail),
         CalendarTool(diary),

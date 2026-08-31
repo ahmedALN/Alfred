@@ -98,6 +98,11 @@ If APP NOTES below name a control, use that name directly - skip the
 exploratory 'tree'. If the name turns out to be gone, THEN read the tree.
 
 Rules:
+- THE USER HAS SINCE SAID, if present, is the person speaking WHILE this job \
+runs. It came after the plan was made, so where the two disagree the person \
+wins. Change what you are doing to match. If their words make the current step \
+pointless, say so with give_up and the reason - the plan is redone around what \
+they said, and that is the right outcome, not a failure.
 - Do the smallest set of actions that makes 'done_when' true, then action=done \
 with the tool result that proves it.
 - NEVER repeat a call with the same args - HISTORY shows what you already did.
@@ -303,11 +308,17 @@ class TaskAgent:
         *,
         source: str = "brain",
         ask_user: "Callable[[str], bool] | None" = None,
+        steers: "Callable[[], list[str]] | None" = None,
     ) -> TaskResult:
         goal = goal.strip()
         started = time.monotonic()
         self._deadline = started + self._max_seconds
         self._cancel_check = cancel_check or (lambda: False)
+        self._steers = steers or (lambda: [])
+        # What the user has said since this job started. Kept for the
+        # whole task, not just the step it arrived during: "not that
+        # one, the other one" has to still be true three steps later.
+        self._said_since: list[str] = []
 
         self._policy = (
             self._policy_voice if source == "voice" else self._policy_brain
@@ -424,12 +435,24 @@ class TaskAgent:
                     f"[replan {replans}] step '{pstep['step']}' not verified: "
                     f"{evidence}"
                 )
+                # A replan is exactly where a mid-task correction has to
+                # land: the old plan was made before the person spoke,
+                # and the rest of it may be answering the wrong question
+                # entirely.
+                said = self._heard()
                 remainder = self._make_plan(
                     goal,
                     extra=(
                         f"Done so far: {result.verified or 'nothing'}. "
                         f"Stuck on: {pstep['step']} - {evidence}. "
-                        "Give the remaining steps only."
+                        + (
+                            "The user has SINCE SAID:\n" + said
+                            + "\nPlan the rest around that - it "
+                            "overrides the original goal where they "
+                            "disagree.\n"
+                            if said else ""
+                        )
+                        + "Give the remaining steps only."
                     ),
                 )
                 plan = plan[:pi] + remainder
@@ -458,6 +481,7 @@ class TaskAgent:
         *,
         source: str = "voice",
         ask_user: "Callable[[str], bool] | None" = None,
+        steers: "Callable[[], list[str]] | None" = None,
     ) -> TaskResult:
         """Run a learned skill's steps directly - no planning call. Params
         are filled from ``request``; the skill's ``verify`` is still checked
@@ -467,6 +491,8 @@ class TaskAgent:
         started = time.monotonic()
         self._deadline = started + self._max_seconds
         self._cancel_check = cancel_check or (lambda: False)
+        self._steers = steers or (lambda: [])
+        self._said_since = []
         self._policy = (
             self._policy_voice if source == "voice" else self._policy_brain
         )
@@ -781,6 +807,27 @@ class TaskAgent:
         self._log("task_reflect", {"goal": result.goal, "line": line}, None)
         return line
 
+    def _heard(self) -> str:
+        """Anything said to this job since it started.
+
+        Drained from the queue's mailbox and then kept, because a
+        correction has to still be true several steps later. "Not
+        that one, the other one" is not advice about one click.
+        """
+        try:
+            fresh = self._steers() or []
+        except Exception:  # noqa: BLE001
+            fresh = []
+
+        for note in fresh:
+            note = str(note).strip()
+            if note and note not in self._said_since:
+                self._said_since.append(note)
+
+        if not self._said_since:
+            return ""
+        return "\n".join(f'- \"{note}\"' for note in self._said_since[-6:])
+
     def _onscreen(self) -> str:
         """What any glance would show. About twenty milliseconds."""
         try:
@@ -864,10 +911,16 @@ class TaskAgent:
             # rest of them. The look is cached for a couple of seconds,
             # so asking again is free and is right more often.
             onscreen = self._onscreen()
+            said = self._heard()
             prompt = (
                 f"{_EXEC_SYSTEM}\n\nOVERALL GOAL: {goal}\n\nPLAN:\n{plan_view}\n\n"
                 f"CURRENT STEP: {pstep['step']}\nDONE WHEN: {pstep['done_when']}\n\n"
-                f"ENVIRONMENT: {self._environment()}\n\n"
+                # Before the plan, the notes and the history, on purpose.
+                # If the person has said something since this job
+                # started, it beats everything decided before they said
+                # it - including the plan.
+                + (f"THE USER HAS SINCE SAID:\n{said}\n\n" if said else "")
+                + f"ENVIRONMENT: {self._environment()}\n\n"
                 # The executor was told the goal, the plan, the tools and
                 # its own history, and nothing whatever about the machine
                 # it was working on. So its opening move was to find out

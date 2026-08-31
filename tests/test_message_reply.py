@@ -182,3 +182,63 @@ def test_the_separator_is_only_taken_when_it_is_there():
     assert _split("Open Steam.") == ("Open Steam.", "")
     assert _split("Open Steam. || Opening Steam.") == \
         ("Open Steam.", "Opening Steam.")
+
+
+# ------------------------------------------- steering from the phone
+
+
+def _steerable(*answers, running="Open Steam and search for Hades."):
+    from src.messaging.reply import Conversation
+
+    jobs, steers = [], []
+    talk = Conversation(
+        _Chat(*answers), jobs.append,
+        steer=lambda text: (steers.append(text), True)[1],
+        running=lambda: running,
+    )
+    return talk, jobs, steers
+
+
+def test_a_correction_reaches_the_running_job():
+    """Rather than starting a second job that fights the first."""
+    talk, jobs, steers = _steerable("STEER: search for Hollow Knight instead")
+
+    said = talk.handle("no not hades, hollow knight")
+
+    assert steers == ["search for Hollow Knight instead"]
+    assert jobs == []
+    assert "Hollow Knight" in said
+
+
+def test_the_model_is_told_what_is_running():
+    """Whether anything is running decides whether steering is even on
+    the table."""
+    talk, _, _ = _steerable("SAY: ok")
+    talk.handle("anything")
+
+    assert "RUNNING NOW: Open Steam" in talk._chat.prompts[0]
+
+
+def test_with_nothing_running_it_is_told_that_too():
+    talk, _, _ = _steerable("SAY: ok", running="")
+    talk.handle("anything")
+
+    assert "STEER is not an option" in talk._chat.prompts[0]
+
+
+def test_a_correction_with_nothing_to_correct_becomes_the_job():
+    """Better to do the thing than explain a distinction nobody cares
+    about."""
+    from src.messaging.reply import Conversation
+
+    jobs = []
+    talk = Conversation(
+        _Chat("STEER: open the 1.21.11 instance"), jobs.append,
+        steer=lambda text: False,        # nothing running
+        running=lambda: "",
+    )
+
+    said = talk.handle("make it the 1.21.11 one")
+
+    assert jobs == ["open the 1.21.11 instance"]
+    assert said
