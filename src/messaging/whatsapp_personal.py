@@ -391,8 +391,8 @@ def _text_of(event: Any) -> str:
             return text
 
     for field in ("imageMessage", "videoMessage", "documentMessage"):
-        part = getattr(message, field, None)
-        if part is not None and getattr(part, "url", ""):
+        if _has(message, field):
+            part = getattr(message, field, None)
             return (getattr(part, "caption", "") or "").strip()
 
     return ""
@@ -409,9 +409,26 @@ def _kind_of(event: Any) -> str:
         ("videoMessage", "video"),
         ("documentMessage", "document"),
     ):
-        part = getattr(message, field, None)
-        # url is what separates a real attachment from an empty
-        # sub-message the protobuf always carries.
-        if part is not None and getattr(part, "url", ""):
+        if _has(message, field):
             return kind
     return ""
+
+
+def _has(message: Any, field: str) -> bool:
+    """Is that sub-message actually present?
+
+    Asked of the protobuf itself rather than guessed at from a field
+    inside it. The first attempt here looked for a truthy "url", which
+    is spelled URL in this schema - so it was always empty, _kind_of
+    always said "no attachment", and every photo went on being dropped
+    in the same silence as before. The tests passed too, because the
+    fake they used was built from the same wrong assumption as the code.
+    """
+    try:
+        return bool(message.HasField(field))
+    except Exception:  # noqa: BLE001
+        part = getattr(message, field, None)
+        return bool(
+            part is not None
+            and (getattr(part, "URL", "") or getattr(part, "directPath", ""))
+        )

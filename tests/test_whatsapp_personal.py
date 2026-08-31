@@ -491,19 +491,21 @@ def test_a_line_someone_else_took_is_left_alone():
 
 
 def _media_event(kind, caption="", url="https://mmg.whatsapp.net/x"):
-    """Shaped like a real one: the sub-message is always present, and
-    only a url tells you something was actually attached."""
-    class Part:
-        def __init__(self, url, caption):
-            self.url = url
-            self.caption = caption
+    """A REAL protobuf, not a hand-made stand-in.
 
-    class Message:
-        conversation = ""
-        extendedTextMessage = None
-        imageMessage = Part(url if kind == "image" else "", caption)
-        videoMessage = Part(url if kind == "video" else "", caption)
-        documentMessage = Part("", "")
+    The first version of this was a class with a lowercase url
+    attribute, written from the same assumption as the code it was
+    testing - so it passed while every photo was silently dropped.
+    A fake built from a guess tests the guess.
+    """
+    from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import (
+        ImageMessage, Message, VideoMessage,
+    )
+
+    if kind == "image":
+        inner = Message(imageMessage=ImageMessage(URL=url, caption=caption))
+    else:
+        inner = Message(videoMessage=VideoMessage(URL=url, caption=caption))
 
     class Source:
         Sender = type("J", (), {"User": "271712549638356"})()
@@ -513,7 +515,7 @@ def _media_event(kind, caption="", url="https://mmg.whatsapp.net/x"):
     class Info:
         MessageSource = Source()
 
-    return type("Ev", (), {"Message": Message(), "Info": Info()})()
+    return type("Ev", (), {"Message": inner, "Info": Info()})()
 
 
 def test_a_photo_is_recognised_as_a_photo():
@@ -523,12 +525,16 @@ def test_a_photo_is_recognised_as_a_photo():
     assert _kind_of(_media_event("video")) == "video"
 
 
-def test_an_empty_sub_message_is_not_an_attachment():
-    """The protobuf always carries imageMessage; only a url means a
-    picture was actually sent."""
+def test_a_message_with_no_attachment_is_not_one():
+    """Asked of the protobuf, which knows, rather than of a field
+    inside it, which was the mistake that dropped every photo."""
+    from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import Message
     from src.messaging.whatsapp_personal import _kind_of
 
-    assert _kind_of(_media_event("image", url="")) == ""
+    words = type("Ev", (), {"Message": Message(conversation="hello")})()
+
+    assert _kind_of(words) == ""
+    assert _kind_of(type("Ev", (), {"Message": Message()})()) == ""
 
 
 def test_a_photo_s_caption_is_its_words():
