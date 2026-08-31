@@ -1372,6 +1372,7 @@ class AlfredLiveSession:
             )
 
         backoff = self._reconnect_backoff_base
+        session_started = time.monotonic()
         consecutive_failures = 0
 
         try:
@@ -1465,18 +1466,27 @@ class AlfredLiveSession:
                     )
                     raise exc
 
+                # How long the session lasted is the whole diagnosis and
+                # it was not being recorded. Twice I read this log and
+                # twice I guessed wrong about the cause, because "it
+                # dropped" and "it dropped after eleven seconds" are
+                # different facts and only one of them was written down.
+                lived = time.monotonic() - session_started
                 print(
-                    f"[Alfred] voice connection dropped ({type(exc).__name__}: "
-                    f"{exc}); reconnecting in {backoff:.0f}s"
+                    f"[Alfred] voice connection dropped after {lived:.0f}s "
+                    f"({type(exc).__name__}: {exc}); "
+                    f"reconnecting in {backoff:.0f}s",
+                    flush=True,
                 )
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60.0)
 
                 try:
                     await self._reopen_session()
+                    session_started = time.monotonic()
                     backoff = self._reconnect_backoff_base
                     consecutive_failures = 0
-                    print("[Alfred] reconnected.")
+                    print("[Alfred] reconnected.", flush=True)
                 except Exception as reconnect_exc:  # noqa: BLE001
                     print(f"[Alfred] reconnect failed: {reconnect_exc}")
 
