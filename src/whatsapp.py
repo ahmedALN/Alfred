@@ -51,7 +51,7 @@ def cmd_pair(argv: list[str]) -> int:
     channel = PersonalWhatsApp(_SESSION, number)
 
     print(f"Linking Alfred to {number}.")
-    print("Asking WhatsApp for a code...\n")
+    print("Connecting, then asking WhatsApp for a code...\n")
 
     try:
         code = channel.pair()
@@ -59,10 +59,8 @@ def cmd_pair(argv: list[str]) -> int:
         print(f"Could not start pairing: {exc}")
         return 2
 
-    print("Enter this in WhatsApp within about a minute - it expires.
-")
-
     print(f"    YOUR CODE:  {code}\n")
+    print("It expires in about a minute, so do it now.\n")
     print("On your phone: WhatsApp -> Settings -> Linked Devices ->")
     print("Link a device -> Link with phone number instead -> type that code.")
     print("\nWaiting for you to enter it (Ctrl+C to give up)...")
