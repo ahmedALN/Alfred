@@ -1,54 +1,11 @@
 [
   {
-    "goal": "How long until my battery runs out?",
-    "ok": true,
-    "learned": true,
-    "secs": 15.7,
-    "steps": 5,
-    "why": "How long until my battery runs out?",
-    "name": "how-long-until-battery"
-  },
-  {
-    "goal": "Is my wifi connected, and to what?",
-    "ok": true,
-    "learned": true,
-    "secs": 12.8,
-    "steps": 2,
-    "why": "Is my wifi connected, and to what?",
-    "name": "is-wifi-connected-what"
-  },
-  {
-    "goal": "When did this PC last restart?",
-    "ok": true,
-    "learned": true,
-    "secs": 28.8,
-    "steps": 1,
-    "why": "When did this PC last restart?",
-    "name": "when-did-pc-last"
-  },
-  {
-    "goal": "Open Task Manager.",
-    "ok": false,
-    "learned": false,
-    "secs": 28.9,
-    "steps": 1,
-    "why": "did not work: no Task Manager window"
-  },
-  {
-    "goal": "Search the web for what time the sun sets in London today.",
-    "ok": true,
-    "learned": true,
-    "secs": 30.7,
-    "steps": 1,
-    "why": "Search the web for what time the sun sets in London today.",
-    "name": "search-web-what-time"
-  },
-  {
     "goal": "Look up who won the last Formula 1 race.",
-    "ok": false,
-    "learned": false,
-    "secs": 22.9,
+    "ok": true,
+    "learned": true,
+    "secs": 36.9,
     "steps": 1,
-    "why": "did not work: (said nothing)"
+    "why": "Look up {p0}.",
+    "name": "look-who-won-last"
   }
 ]

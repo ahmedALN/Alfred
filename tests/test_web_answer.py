@@ -22,8 +22,19 @@ def test_an_advert_is_not_a_result():
     ) is True
 
 
+def test_the_search_engine_talking_about_its_own_adverts_is_not_a_result():
+    """Easy to miss: a normal-looking link to DuckDuckGo's help page
+    about advertising, titled "more info". Alfred read it twice while
+    trying to find out who won a race."""
+    assert _is_advert(
+        "https://duckduckgo.com/duckduckgo-help-pages/company/ads-by-microsoft"
+    ) is True
+    assert _is_advert("https://example.com/x", "more info") is True
+
+
 def test_a_real_page_is():
     assert _is_advert("https://www.bbc.co.uk/sport/formula1/results") is False
+    assert _is_advert("https://bbc.co.uk/f1", "F1 Latest Results") is False
     assert _is_advert("") is False
 
 

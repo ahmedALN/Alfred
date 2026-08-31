@@ -134,7 +134,7 @@ def search(query: str, limit: int = 8) -> list[dict[str, str]]:
         # Adverts come back as the top results and answer nothing.
         # "Who won the last Formula 1 race" led with the official F1
         # store, and the search was reported as a success.
-        if _is_advert(url):
+        if _is_advert(url, _strip(title)):
             continue
         results.append({
             "title": _strip(title),
@@ -146,15 +146,24 @@ def search(query: str, limit: int = 8) -> list[dict[str, str]]:
     return results
 
 
-def _is_advert(url: str) -> bool:
+def _is_advert(url: str, title: str = "") -> bool:
+    """An advert, or the search engine talking about its own adverts.
+
+    Both come back above the real results and neither answers anything.
+    The second one is easy to miss: it is a normal-looking link to
+    DuckDuckGo's help page about advertising, titled "more info", and
+    Alfred read it twice while trying to find out who won a race.
+    """
     low = (url or "").lower()
-    return (
+    if (
         "duckduckgo.com/y.js" in low
         or "ad_domain=" in low
         or "ad_provider=" in low
-        or low.startswith("https://duckduckgo.com/l/?uddg=")
-        and "ad_" in low
-    )
+        or "duckduckgo-help-pages" in low
+    ):
+        return True
+
+    return (title or "").strip().lower() in ("more info", "ad", "advertisement")
 
 
 def fetch(url: str, max_chars: int = 6000) -> dict[str, Any]:
