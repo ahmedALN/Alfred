@@ -512,39 +512,6 @@ async def main() -> None:
     # Walls Alfred has run into before, and what got past them.
     limitations = LimitationStore(_ROOT / "alfred_limitations.sqlite3")
 
-    task_agent = TaskAgent(
-        # Executing is where the tool calls are emitted, and that is a
-        # function-calling job: the local 4B model plans a sensible step
-        # and then fails to call anything, worse the more tools there
-        # are. It gets the same strong chain as planning.
-        chat=providers.plan_chat,
-        plan_chat=providers.plan_chat,
-        fast_chat=providers.fast_chat,
-        # Verifying is a yes/no judgement over one substep, so it stays
-        # on the fast local model - the reason it was split out.
-        verify_chat=providers.chat,
-        registry=registry,
-        policy=Policy(
-            autonomy=settings.brain_autonomy,
-            known_tools=_agent_tools,
-            surface="brain",
-        ),
-        # user-asked tasks: run ordinary steps, ask out loud on dangerous
-        policy_voice=Policy(
-            autonomy=settings.brain_autonomy,
-            known_tools=_agent_tools,
-            surface="voice",
-        ),
-        situation=_situation,
-        learner=learner,  # for post-task reflection lessons
-        app_memory=app_memory,  # per-app control knowledge
-        limitations=limitations,  # what it keeps running into
-        audit=None,  # set below once the audit log exists
-    )
-
-    # --------------------------------------------------------------
-    # Messaging Alfred from a phone. Optional; off unless configured.
-    # --------------------------------------------------------------
     def _screen_png() -> bytes:
         """The screen the person means.
 
@@ -573,6 +540,43 @@ async def main() -> None:
         ImageGrab.grab(all_screens=True).save(buffer, format="PNG")
         return buffer.getvalue()
 
+    task_agent = TaskAgent(
+        # Executing is where the tool calls are emitted, and that is a
+        # function-calling job: the local 4B model plans a sensible step
+        # and then fails to call anything, worse the more tools there
+        # are. It gets the same strong chain as planning.
+        chat=providers.plan_chat,
+        plan_chat=providers.plan_chat,
+        fast_chat=providers.fast_chat,
+        # So a step can be checked against the screen, not only
+        # against a log saying it was attempted.
+        vision=providers.vision,
+        screenshot=_screen_png,
+        # Verifying is a yes/no judgement over one substep, so it stays
+        # on the fast local model - the reason it was split out.
+        verify_chat=providers.chat,
+        registry=registry,
+        policy=Policy(
+            autonomy=settings.brain_autonomy,
+            known_tools=_agent_tools,
+            surface="brain",
+        ),
+        # user-asked tasks: run ordinary steps, ask out loud on dangerous
+        policy_voice=Policy(
+            autonomy=settings.brain_autonomy,
+            known_tools=_agent_tools,
+            surface="voice",
+        ),
+        situation=_situation,
+        learner=learner,  # for post-task reflection lessons
+        app_memory=app_memory,  # per-app control knowledge
+        limitations=limitations,  # what it keeps running into
+        audit=None,  # set below once the audit log exists
+    )
+
+    # --------------------------------------------------------------
+    # Messaging Alfred from a phone. Optional; off unless configured.
+    # --------------------------------------------------------------
     phone = _build_phone_channel(
         settings, task_queue, task_status_tool, providers.plan_chat,
         _screen_png, providers.vision,

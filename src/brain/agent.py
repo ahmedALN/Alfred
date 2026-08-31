@@ -221,6 +221,8 @@ class TaskAgent:
         policy_voice: Policy | None = None,
         plan_chat: ChatProvider | None = None,
         fast_chat: ChatProvider | None = None,
+        vision: Any = None,
+        screenshot: Any = None,
         verify_chat: ChatProvider | None = None,
         max_steps: int = 16,
         max_seconds: float = 240.0,
@@ -242,6 +244,10 @@ class TaskAgent:
         # planner made a learned routine take eleven seconds, ten of
         # them summarising one line of PowerShell output.
         self._fast_chat = fast_chat or self._plan_chat
+        # For checking with its eyes that a thing actually
+        # happened, rather than only that it was attempted.
+        self._vision = vision
+        self._screenshot = screenshot
         # Verification defaults to the FAST model: the deterministic
         # fast-paths + strict per-substep scoping carry most of the load,
         # and a strong-model verify on every step of a multi-step task
@@ -807,6 +813,27 @@ class TaskAgent:
         self._log("task_reflect", {"goal": result.goal, "line": line}, None)
         return line
 
+    def _eyes_disagree(self, pstep: dict[str, str]) -> tuple[bool, str]:
+        """Look at the screen and see whether it contradicts the claim."""
+        if getattr(self, "_vision", None) is None:
+            return False, ""
+        if getattr(self, "_screenshot", None) is None:
+            return False, ""
+
+        from src.brain.looksright import contradicted, worth_looking
+
+        done_when = pstep.get("done_when", "")
+        if not worth_looking(done_when):
+            return False, ""
+
+        try:
+            return contradicted(
+                pstep.get("step", ""), done_when,
+                self._screenshot, self._vision,
+            )
+        except Exception:  # noqa: BLE001
+            return False, ""
+
     def _heard(self) -> str:
         """Anything said to this job since it started.
 
@@ -1107,6 +1134,13 @@ class TaskAgent:
             verdict_line = raw.splitlines()[-1].strip() if raw else ""
 
         if verdict_line.upper().startswith("VERIFIED"):
+            # A log saying a thing was attempted is not a screen showing
+            # it happened. Consulted only when the log already said yes,
+            # because the job here is catching a false success rather
+            # than rescuing a real failure.
+            denied, seen = self._eyes_disagree(pstep)
+            if denied:
+                return False, f"the screen says otherwise - {seen}"
             return True, verdict_line.split(":", 1)[-1].strip()[:200]
         return False, verdict_line.split(":", 1)[-1].strip()[:200] or "no evidence"
 
