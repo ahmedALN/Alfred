@@ -14,6 +14,9 @@ vosk>=0.3.45
 faster-whisper>=1.0
 piper-tts>=1.2
 
+# WhatsApp, so you can talk to Alfred from your phone
+neonize>=0.4.3
+
 # Windows desktop control (Windows-only)
 psutil>=5.9.8
 pyvda>=2023.1.3; sys_platform == "win32"
@@ -21,10 +24,20 @@ pywin32>=306; sys_platform == "win32"
 pywinauto>=0.6.9; sys_platform == "win32"       # UI Automation - click apps by name
 Pillow>=10                                        # screenshot coordinate grid
 
+# Google: mail, calendar, coursework. One sign-in covers all three.
+google-api-python-client>=2.100
+google-auth>=2.30
+google-auth-oauthlib>=1.2
+
+# The interface: a local server and the window that draws it.
+fastapi>=0.110
+uvicorn[standard]>=0.29
+websockets>=12.0
+pywebview>=5.0                                    # WebView2 on Windows
+
 # Dev / test
 pytest>=8.0.0
 
 # External (not pip): .NET 8+ SDK for the native helpers, and Ollama
 # (https://ollama.com) if ALFRED_AI_PROVIDER=ollama. Custom wake-word
 # training also needs: torch, openwakeword[train], piper-sample-generator.
-neonize>=0.4.3

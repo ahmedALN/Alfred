@@ -213,6 +213,12 @@ class Live:
     def level(self) -> float:
         return self._level
 
+    # ------------------------------------------------------------ hello
+
+    def hello(self, line: str, aloud: bool = True) -> None:
+        """Alfred came up, and this is what it said about it."""
+        BUS.publish("hello_said", text=line, aloud=aloud)
+
     # -------------------------------------------------------------- task
 
     @property

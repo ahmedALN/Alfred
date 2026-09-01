@@ -682,15 +682,22 @@ async def main() -> None:
         _UI.sleep = lambda: activation.sleep("interface")
 
     INTERFACE.start()
-    print(f"[UI] interface ready - ask Alfred to open it, or press "
-          f"{settings.interface_hotkey}.")
+    print(f"[UI] interface ready - press {settings.interface_hotkey} to "
+          f"show or hide it.")
+
+    if settings.interface_on_start:
+        from src.ui import opener as _opener
+
+        _opener.open_interface()
+        print("[UI] opened.")
 
     interface_hotkey: HotkeyListener | None = None
     if settings.interface_hotkey:
         from src.ui import opener
 
         interface_hotkey = HotkeyListener(
-            on_press=lambda: opener.open_interface(),
+            # One key, both directions: press it again to put it away.
+            on_press=lambda: opener.toggle_interface(),
             spec=settings.interface_hotkey,
         )
         interface_hotkey.start()

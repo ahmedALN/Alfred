@@ -135,6 +135,65 @@ def _clear_orphans() -> int:
     return killed
 
 
+
+def _find_window():
+    """The window's handle, if it is drawn at all."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import win32gui
+    except ImportError:
+        return None
+    hwnd = win32gui.FindWindow(None, "Alfred")
+    return hwnd or None
+
+
+def is_showing() -> bool:
+    """Drawn AND on screen - hidden is not the same as closed."""
+    hwnd = _find_window()
+    if not hwnd:
+        return False
+    try:
+        import win32gui
+
+        return bool(win32gui.IsWindowVisible(hwnd))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def hide_interface() -> dict:
+    """Put it away without losing it.
+
+    The process stays, the page stays loaded and the socket stays open,
+    so bringing it back is instant. This is what closing the window
+    does too - the hotkey just does it without you reaching for the X.
+    """
+    hwnd = _find_window()
+    if not hwnd:
+        return {"status": "success", "what": "was not open"}
+    try:
+        import win32con
+        import win32gui
+
+        win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "error": str(exc)}
+    return {"status": "success", "what": "hidden"}
+
+
+def toggle_interface() -> dict:
+    """One key for both directions.
+
+    Showing goes through the page, because pywebview raising its own
+    window is the one route that reliably beats Windows' foreground
+    lock. Hiding is done directly, because it needs no permission and
+    must work even if the socket has dropped.
+    """
+    if is_showing():
+        return hide_interface()
+    return open_interface()
+
+
 def close_interface() -> dict:
     """Shut the window process down entirely, not merely hide it."""
     global _process

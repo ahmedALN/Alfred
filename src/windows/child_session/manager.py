@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import ctypes
 import subprocess
+
+from src.windows.quiet import NO_WINDOW
 import threading
 from pathlib import Path
 
@@ -113,6 +115,7 @@ class ChildSessionManager:
                 encoding="utf-8",
                 errors="replace",
                 bufsize=1,
+                creationflags=NO_WINDOW,
             )
 
     def stop(self) -> None:

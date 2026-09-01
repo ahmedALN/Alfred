@@ -8,6 +8,8 @@ import json
 import os
 import sqlite3
 import subprocess
+
+from src.windows.quiet import NO_WINDOW
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -95,8 +97,9 @@ def _fact_count(db_path: Path) -> int | None:
 def _ollama_ps() -> list[str]:
     try:
         out = subprocess.run(
-            ["ollama", "ps"], capture_output=True, text=True, timeout=8
-        ).stdout.strip().splitlines()
+            ["ollama", "ps"], capture_output=True, text=True, timeout=8,
+            creationflags=NO_WINDOW,
+              ).stdout.strip().splitlines()
         return out[1:] if len(out) > 1 else ["(no models loaded)"]
     except Exception:  # noqa: BLE001
         return ["(ollama not reachable)"]

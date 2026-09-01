@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import subprocess
+
+from src.windows.quiet import NO_WINDOW
 import time
 from dataclasses import dataclass
 
@@ -47,6 +49,7 @@ class PowerShellRunner:
                 errors="replace",
                 timeout=timeout,
                 check=False,
+                creationflags=NO_WINDOW,
             )
         except subprocess.TimeoutExpired as exc:
             elapsed = int((time.perf_counter() - started) * 1000)

@@ -59,6 +59,7 @@ class Settings:
     hotkey: str
     # The interface is opt-in: this summons it, nothing else does.
     interface_hotkey: str
+    interface_on_start: bool
     listen_idle_seconds: float
     half_duplex: bool
     voice_passphrase: str
@@ -190,6 +191,9 @@ def load_settings() -> Settings:
         interface_hotkey=os.getenv(
             "ALFRED_INTERFACE_HOTKEY", "ctrl+alt+i"
         ).strip().lower(),
+        interface_on_start=os.getenv(
+            "ALFRED_INTERFACE_ON_START", "true"
+        ).strip().lower() not in ("0", "false", "no", "off"),
         listen_idle_seconds=_get_float("ALFRED_LISTEN_IDLE_SECONDS", 30.0),
         half_duplex=_get_bool("ALFRED_HALF_DUPLEX", True),
         voice_passphrase=os.getenv("ALFRED_VOICE_PASSPHRASE", "").strip().lower(),

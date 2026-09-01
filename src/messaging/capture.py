@@ -16,6 +16,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+
+from src.windows.quiet import NO_WINDOW
 import tempfile
 import time
 from pathlib import Path
@@ -114,4 +116,5 @@ class ScreenShare:
             capture_output=True,
             timeout=seconds + 40,
             check=True,
+            creationflags=NO_WINDOW,
         )

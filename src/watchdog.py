@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import signal
 import subprocess
+
+from src.windows.quiet import NO_WINDOW
 import sys
 import time
 from collections import deque
@@ -60,7 +62,9 @@ def main() -> int:
             return 1
 
         started = time.monotonic()
-        child = subprocess.Popen(cmd, cwd=str(_ROOT))
+        child = subprocess.Popen(cmd, cwd=str(_ROOT),
+        creationflags=NO_WINDOW,
+    )
         code = child.wait()
         ran_for = time.monotonic() - started
 

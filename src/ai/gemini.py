@@ -845,10 +845,25 @@ class AlfredLiveSession:
         if self.session is None:
             return
 
-        # If Alfred is wake-word gated, stay quiet until spoken to.
-        if self._activation is not None and not self._activation.is_listening:
+        from src.voice import greeting as _greeting
+
+        line, aloud = _greeting.greeting()
+
+        # Written down either way, so a machine that came up at four in
+        # the morning still says so somewhere you can read it.
+        LIVE.hello(line, aloud=aloud)
+
+        if not _greeting.enabled():
             print("[Alfred] ready - say the wake word or press the hotkey.")
             return
+
+        if not aloud:
+            print(f"[Alfred] {line} (quiet hours - not saying it out loud)")
+            return
+
+        # Wake-word gating is about the microphone, not the speaker.
+        # Alfred starting with the machine and never making a sound left
+        # no way to tell it was running short of testing it.
 
         situation = ""
         if self._situation_fn is not None:
@@ -866,8 +881,9 @@ class AlfredLiveSession:
                     parts=[
                         types.Part(
                             text=(
-                                "(System: Alfred has just started up "
-                                "and is now listening. Greet the user "
+                                "(System: Alfred has just started up. "
+                                f"Open with something close to: '{line}' "
+                                "Greet the user "
                                 "briefly by name if you know it. If "
                                 "anything below is worth flagging - an "
                                 "unfinished task, something you learned, "

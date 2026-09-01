@@ -401,3 +401,42 @@ def test_the_visualiser_is_never_fed_nonsense():
     assert live.level == 1.0
     live.set_level(-3)
     assert live.level == 0.0
+
+
+# ---------------------------------------------------------------- toggle
+
+
+def test_one_key_puts_it_away_and_brings_it_back(monkeypatch):
+    """Ctrl+Alt+I used to only ever open it.
+
+    Pressing it while the window was already up did nothing you could
+    see, because "show what is already shown" is not a change.
+    """
+    from src.ui import opener
+
+    showing = {"now": True}
+    monkeypatch.setattr(opener, "is_showing", lambda: showing["now"])
+    monkeypatch.setattr(
+        opener, "hide_interface",
+        lambda: (showing.__setitem__("now", False),
+                 {"status": "success", "what": "hidden"})[1],
+    )
+    monkeypatch.setattr(
+        opener, "open_interface",
+        lambda: (showing.__setitem__("now", True),
+                 {"status": "success", "what": "shown"})[1],
+    )
+
+    assert opener.toggle_interface()["what"] == "hidden"
+    assert showing["now"] is False
+    assert opener.toggle_interface()["what"] == "shown"
+    assert showing["now"] is True
+
+
+def test_hiding_a_window_that_is_not_there_is_not_an_error(monkeypatch):
+    from src.ui import opener
+
+    monkeypatch.setattr(opener, "_find_window", lambda: None)
+    out = opener.hide_interface()
+    assert out["status"] == "success"
+    assert out["what"] == "was not open"

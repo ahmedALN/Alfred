@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+
+from src.windows.quiet import NO_WINDOW
 import threading
 from pathlib import Path
 from typing import Any
@@ -80,6 +82,7 @@ class DesktopBridgeClient:
             encoding="utf-8",
             errors="replace",
             bufsize=1,
+            creationflags=NO_WINDOW,
         )
 
         self._stderr_thread = threading.Thread(

@@ -5,6 +5,8 @@ import os
 import shutil
 import shlex
 import subprocess
+
+from src.windows.quiet import NO_WINDOW
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -178,6 +180,7 @@ class AppLauncher:
                     "Get-StartApps | Select-Object Name,AppID | ConvertTo-Json -Compress",
                 ],
                 capture_output=True, text=True, timeout=12,
+                creationflags=NO_WINDOW,
             )
             data = json.loads(proc.stdout or "[]")
             if isinstance(data, dict):
@@ -319,6 +322,7 @@ class AppLauncher:
             subprocess.Popen(
                 ["explorer.exe", f"shell:AppsFolder\\{spec.value}"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=NO_WINDOW,
             )
             return None
 
@@ -334,6 +338,7 @@ class AppLauncher:
             proc = subprocess.Popen(
                 command,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=NO_WINDOW,
             )
             return proc.pid
         except (FileNotFoundError, OSError):

@@ -1,76 +1,89 @@
-.venv/
-__pycache__/
-*.pyc
+# ===================================================================
+#  Alfred - what never leaves this machine
+#
+#  Two kinds of thing are excluded here, and the first kind matters
+#  much more than the second.
+#
+#  Secrets and your life: the API keys, the Google tokens, and every
+#  store Alfred writes. Those stores are not caches - they hold what
+#  Alfred has learned about you, your WhatsApp contacts and message
+#  keys, who has emailed you, and what you have had on screen. They
+#  are the most private files on the machine.
+#
+#  Then the ordinary noise: virtualenvs, build output, caches.
+# ===================================================================
 
+# --- secrets -------------------------------------------------------
 .env
 .env.*
 !.env.example
 
-logs/
-tmp/
-cache/
+gmail_client.json
+gmail_token.json
+*credentials*.json
+*client_secret*.json
+token.json
 
+# The interface's address carries this run's access key.
+.alfred_interface_url
+
+# --- your life: everything Alfred remembers ------------------------
+# Memories, skills, tasks, schedule, world model, activity, undo,
+# audit - and the WhatsApp session, which holds contacts, message
+# keys and the pairing for your account.
+alfred_*.sqlite3
+alfred_*.json
+alfred_*.jsonl
+*.sqlite
+*.sqlite3
+*.db
+*.jsonl
+
+# Anything Alfred has seen or heard
+screenshots/
+recordings/
 *.wav
 *.mp3
 *.pcm
 *.mp4
-
-screenshots/
-recordings/
-
-*.sqlite
-*.sqlite3
-*.db
-
-# Alfred runtime state
-alfred_memory.sqlite3
-alfred_brain_audit.sqlite3
-alfred_brain_audit.jsonl
-*.jsonl
-
-.idea/
-src/windows/native/ChildScreenCapture/child-capture.png
-src/windows/native/ChildScreenCapture/child-desktop.png
-src/windows/native/ChildScreenCapture/child-monitor-*.png
 debug-child-desktop.png
+src/windows/native/ChildScreenCapture/child-*.png
 
+# Its own diaries and measurements
+logs/
+bench-*.json
+teach-*.json
 
-
-
-**/bin/
-**/obj/
-
-
-# .NET build output
-**/bin/
-**/obj/
-
-# Alfred screenshot diagnostics
-debug-child-desktop.png
-src/windows/native/ChildScreenCapture/child-capture.png
-src/windows/native/ChildScreenCapture/child-desktop.png
-src/windows/native/ChildScreenCapture/child-monitor-*.png
-
-# .NET build output
-bin/
-obj/
-
-# Alfred screenshot diagnostics
-debug-child-desktop.png
-src/windows/native/ChildScreenCapture/child-capture.png
-src/windows/native/ChildScreenCapture/child-desktop.png
-src/windows/native/ChildScreenCapture/child-monitor-*.png
-
-# Downloaded models (Vosk, Piper, wake word) - fetched by setup scripts
+# --- downloaded, not authored --------------------------------------
+# Vosk / Piper / wake-word models. setup fetches these; they are
+# hundreds of megabytes and belong to their own projects.
 models/
 
-alfred_usage.json
-alfred_schedule.sqlite3
-gmail_token.json
-gmail_client.json
-alfred_activity.sqlite3
-alfred_world.sqlite3
-alfred_undo.sqlite3
+# --- environments and caches ---------------------------------------
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
 
-# The interface address, with this run's key in it.
-.alfred_interface_url
+# --- .NET build output ---------------------------------------------
+[Bb]in/
+[Oo]bj/
+*.user
+
+# --- editors and tools ---------------------------------------------
+.idea/
+.vscode/
+.claude/
+*.swp
+.DS_Store
+Thumbs.db
+
+# --- scratch -------------------------------------------------------
+tmp/
+cache/
+scratch_*

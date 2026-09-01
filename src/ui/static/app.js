@@ -510,6 +510,11 @@ function handle(event) {
       drawState();
       break;
 
+    case "hello_said":
+      pushChat("alfred", event.text);
+      if (!event.aloud) toast("greeting kept quiet - night hours");
+      break;
+
     case "you_said": pushChat("you", event.text); break;
     case "alfred_said": pushChat("alfred", event.text); break;
 

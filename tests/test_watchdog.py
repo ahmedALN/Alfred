@@ -29,8 +29,14 @@ def _patch(monkeypatch, codes):
     it = iter(codes)
     launches = []
 
-    def popen(cmd, cwd=None):
+    def popen(cmd, cwd=None, **kwargs):
+        # **kwargs, not a fixed list: a fake narrower than the real
+        # thing fails the moment production passes anything new, and
+        # says "unexpected keyword argument" rather than what is wrong.
         launches.append(cmd)
+        assert kwargs.get("creationflags") is not None, (
+            "the watchdog must start Alfred without a console window"
+        )
         return FakeChild(next(it))
 
     monkeypatch.setattr(subprocess, "Popen", popen)

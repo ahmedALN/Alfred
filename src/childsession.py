@@ -19,6 +19,8 @@ import ctypes
 import os
 import socket
 import subprocess
+
+from src.windows.quiet import NO_WINDOW
 import sys
 from dataclasses import dataclass, field
 
@@ -64,6 +66,7 @@ def _ps(command: str, timeout: float = 20.0) -> str:
              "-ExecutionPolicy", "Bypass", "-Command", command],
             capture_output=True, text=True, encoding="utf-8",
             errors="replace", timeout=timeout, check=False,
+            creationflags=NO_WINDOW,
         )
         return (out.stdout or "").strip()
     except Exception:  # noqa: BLE001

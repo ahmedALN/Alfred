@@ -22,15 +22,34 @@ other API keys, no per-token cost.
 
 ## Setup
 
+**→ [SETUP.md](SETUP.md)** walks through it properly. The short version:
+
 ```bash
-python -m pip install -r requirements.txt
-python -m src.setup      # checks deps, pulls models, builds native helpers, writes .env
-python -m src.main
+python -m venv .venv
 ```
 
-`src/setup.py` is safe to re-run. To do it by hand: copy `.env.example` to
-`.env`, add `GEMINI_API_KEY`, set `ALFRED_AI_PROVIDER=ollama`, then
-`dotnet build -c Release` the projects under `src/windows/native/`.
+```bash
+.venv\Scripts\pip install -r requirements.txt
+```
+
+```bash
+.venv\Scripts\python -m src.setup
+```
+
+Put your Gemini key in `.env`, then `.venv\Scripts\python -m src.main`.
+`src/setup.py` is safe to re-run whenever something looks wrong.
+
+## Its interface
+
+Press **Ctrl+Alt+I**. A window opens showing Alfred's logs, what it is
+doing, what it has learned about you, its skills, its scheduled jobs, and
+what it can see of your screen — and lets you correct any of it. A wrong
+memory or a limitation it learned on a bad afternoon can be deleted, so
+it stops being permanent.
+
+It opens with Alfred by default (`ALFRED_INTERFACE_ON_START=false` to
+stop that), and the same key hides it again. Details in
+**[docs/interface.md](docs/interface.md)**.
 
 ## Talking to it
 
@@ -69,14 +88,19 @@ python -m src.apps list              # how to work inside each app  (show / note
 python -m src.childsession probe     # can this PC give Alfred its own desktop?
 python -m src.startup sessions       # what each Windows session costs in RAM  (list / trim)
 python -m src.autostart install      # start at login via the watchdog (uninstall / status)
+python -m src.costs                  # what a month of this costs to run
+python -m src.workspace status       # is Google linked, and what may it do
+python -m src.ui                     # the interface on its own, without Alfred running
 python -m src.watchdog               # run Alfred with crash-restart supervision
 python -m src.voice.setup_wakeword   # download the model for a custom wake phrase
 ```
 
-**Planning model:** multi-step tasks are planned (and re-planned) by a stronger
-model set in `.env` — `ALFRED_AI_PLAN_MODEL` (default
-`nvidia/nemotron-3-super-120b-a12b`, free at build.nvidia.com). If that key is
-missing or down it falls back through Gemini to the local model automatically.
+**Planning model:** multi-step tasks are planned (and re-planned) by
+`ALFRED_AI_PLAN_MODEL` — `gemini-flash-lite-latest` by default, because it
+is the only key you must have and it answers a planner-sized prompt in
+0.6-0.9s where a bigger model takes 2-14. Add a free NVIDIA key from
+build.nvidia.com and the 120B Nemotron becomes the next rung down; the
+local model is always last, because it cannot run out of quota.
 Execution of each step uses the fast local model.
 
 **Its own desktop:** say *"without disturbing me, do X"* and Alfred opens a
