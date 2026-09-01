@@ -1,0 +1,107 @@
+"""The window the interface lives in.
+
+pywebview insists on owning the main thread, and Alfred's main thread
+is an asyncio loop that is busy being Alfred. So the window is its own
+process: Alfred serves the page, and a second process draws it.
+
+That split buys the thing that was asked for - closing only hides. The
+window process stays alive with the page still loaded and the socket
+still open, so the second opening is instant instead of a cold start.
+Asking for it again just shows what is already there.
+
+Nothing is passed to this process but a URL. The token is in it, and
+the window has no other way in, so the interface cannot be opened by
+anything that has not been told the key.
+"""
+
+from __future__ import annotations
+
+import sys
+from typing import Any
+
+TITLE = "Alfred"
+
+
+_window: Any = None
+
+
+class Api:
+    """What the page can ask the window to do.
+
+    Deliberately tiny, and deliberately holding no references.
+
+    pywebview builds its JavaScript bridge by walking this object's
+    attributes. The first version kept the pywebview Window here as
+    self.window, so that walk descended into WinForms and from there
+    into WebView2's COM interfaces - thousands of cross-thread property
+    reads, most of them throwing, and finally "maximum recursion depth
+    exceeded". All of it on the UI thread, which is why the window
+    painted perfectly and then never processed another message: the
+    title bar said Not Responding while the page carried on updating,
+    because WebView2 renders in its own process.
+
+    So the window lives in a module global that the bridge never sees.
+    """
+
+    def show(self) -> bool:
+        if _window is None:
+            return False
+        try:
+            _window.show()
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def hide(self) -> bool:
+        if _window is None:
+            return False
+        try:
+            _window.hide()
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+
+def run(url: str) -> int:
+    """Open the window and stay until the process is killed."""
+    try:
+        import webview
+    except ImportError:
+        print("pywebview is not installed: pip install pywebview")
+        return 2
+
+    global _window
+
+    api = Api()
+    window = webview.create_window(
+        TITLE,
+        url,
+        js_api=api,
+        width=1280,
+        height=820,
+        min_size=(940, 620),
+        background_color="#03060C",
+        # No native frame would look better and cost the ability to
+        # move the window, which matters more on a display you are
+        # meant to glance at beside other things.
+        frameless=False,
+        easy_drag=False,
+    )
+    _window = window
+
+    def closing() -> bool:
+        """Hide rather than quit, so reopening is instant."""
+        try:
+            window.hide()
+        except Exception:  # noqa: BLE001
+            return True   # could not hide, so let it close properly
+        return False
+
+    window.events.closing += closing
+
+    # EdgeChromium is WebView2, which is present on Windows 11 and is a
+    # current Chromium - so the canvas, the backdrop filters and the
+    # web audio all behave as they do in a real browser.
+    webview.start(gui="edgechromium" if sys.platform == "win32" else None,
+                  private_mode=False)
+    return 0

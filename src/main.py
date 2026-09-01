@@ -21,6 +21,7 @@ from src.ai.gemini import AlfredLiveSession
 from src.ai.providers import build_providers
 from src.brain.audit import AuditLog
 from src.brain.deliberation import Deliberator
+from src.tools.interface_tool import InterfaceTool
 from src.brain.orchestrator import BrainLoop
 from src.brain.agent import TaskAgent
 from src.brain.perception import Perception
@@ -229,6 +230,13 @@ def _build_phone_channel(
 async def main() -> None:
     settings = load_settings()
 
+    # Alfred already narrates itself to the terminal in detail, and
+    # that narration is the interface's log panel. Tee it now rather
+    # than at the point the window opens, so the logs contain the boot
+    # - which is the part you most want when something did not start.
+    from src.ui.live import BUS as _UI_BUS, LIVE as _UI, capture_output
+    capture_output()
+
     # One Alfred at a time - two voice sessions = two voices.
     instance_lock = SingleInstance()
     try:
@@ -418,6 +426,7 @@ async def main() -> None:
         CalendarTool(diary),
         ClassroomTool(classroom),
         task_status_tool,
+        InterfaceTool(),
         EpisodesTool(episode_store),
         ResourceModeTool(resource_mode),
         WhatCanYouDoTool(
@@ -609,6 +618,75 @@ async def main() -> None:
     )
 
     # --------------------------------------------------------------
+    # The interface. Served always, drawn only when asked - the window
+    # is a separate process that nothing spawns until you say so.
+    # --------------------------------------------------------------
+    from src.messaging.reply import Conversation
+    from src.ui.server import INTERFACE
+
+    ui_talk = Conversation(
+        providers.plan_chat,
+        lambda goal: task_queue.submit(goal, source="interface"),
+        steer=task_queue.steer,
+        running=lambda: (
+            task_queue.current().goal if task_queue.current() else ""
+        ),
+        eyes=providers.vision,
+        record=lambda role, text: store.add_turn(
+            session.session_key, role, text
+        ),
+    )
+
+    def _ui_said(text: str) -> str:
+        """The text box goes through the same head as everything else.
+
+        Routing it separately would have given the window its own idea
+        of when a sentence is a question and when it is a job - two
+        answers to the same question, drifting apart from the day they
+        were written.
+        """
+        reply = ui_talk.handle(text)
+        _UI_BUS.publish("alfred_said", text=reply)
+        return reply
+
+    _UI.say = _ui_said
+    _UI.screenshot = _screen_png
+    def _ui_windows() -> list[dict[str, str]]:
+        """What is on screen, asked fresh.
+
+        The cached answer is right for a prompt written a second ago
+        and wrong for a person looking at the panel now, so this one
+        always takes a new reading.
+        """
+        from src.brain import onscreen as _onscreen
+
+        seen = _onscreen.look(fresh=True)
+        return [
+            {"app": app, "title": title, "focused": title == seen.focused}
+            for app, title in seen.windows
+        ]
+
+    _UI.windows = _ui_windows
+    _UI.steer = task_queue.steer
+    if wake_gated:
+        _UI.wake = lambda: activation.wake("interface")
+        _UI.sleep = lambda: activation.sleep("interface")
+
+    INTERFACE.start()
+    print(f"[UI] interface ready - ask Alfred to open it, or press "
+          f"{settings.interface_hotkey}.")
+
+    interface_hotkey: HotkeyListener | None = None
+    if settings.interface_hotkey:
+        from src.ui import opener
+
+        interface_hotkey = HotkeyListener(
+            on_press=lambda: opener.open_interface(),
+            spec=settings.interface_hotkey,
+        )
+        interface_hotkey.start()
+
+    # --------------------------------------------------------------
     # Proactive brain: background awareness loop. Optional; disabled
     # via ALFRED_BRAIN_ENABLED=false.
     # --------------------------------------------------------------
@@ -743,6 +821,8 @@ async def main() -> None:
 
         if hotkey_listener is not None:
             hotkey_listener.stop()
+        if interface_hotkey is not None:
+            interface_hotkey.stop()
 
         await session.close()
 

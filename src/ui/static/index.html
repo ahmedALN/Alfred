@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="hud">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Alfred</title>
+<link rel="stylesheet" href="/static/fonts/fonts.css" />
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<!-- The moment it opens. Sweeps once, then gets out of the way. -->
+<div id="boot" class="boot">
+  <svg class="boot-rings" viewBox="0 0 200 200" aria-hidden="true">
+    <circle class="r1" cx="100" cy="100" r="82" />
+    <circle class="r2" cx="100" cy="100" r="64" />
+    <circle class="r3" cx="100" cy="100" r="46" />
+  </svg>
+  <div class="boot-word">ALFRED</div>
+  <div class="boot-line" id="bootLine">waking</div>
+</div>
+
+<div id="app" class="app" hidden>
+
+  <!-- ------------------------------------------------ left rail -->
+  <aside class="rail">
+    <div class="mark" title="Alfred">
+      <svg viewBox="0 0 40 40" aria-hidden="true">
+        <circle cx="20" cy="20" r="16" class="mk-out" />
+        <circle cx="20" cy="20" r="9" class="mk-in" />
+        <circle cx="20" cy="20" r="3" class="mk-dot" />
+      </svg>
+    </div>
+
+    <nav id="nav" class="nav"><!-- built by app.js --></nav>
+
+    <div class="rail-foot">
+      <button id="soundBtn" class="ghost" title="Sound"></button>
+      <div id="pulse" class="pulse" title="Connection"></div>
+    </div>
+  </aside>
+
+  <!-- ---------------------------------------------------- main -->
+  <main class="main">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-name">ALFRED</span>
+        <span class="brand-sub" id="paneName">overview</span>
+      </div>
+
+      <div class="ticker" id="ticker"></div>
+
+      <div class="conn">
+        <span id="connText" class="conn-text">connecting</span>
+        <span id="connDot" class="conn-dot"></span>
+      </div>
+    </header>
+
+    <section class="stage" id="stage">
+
+      <!-- ============================================= HOME -->
+      <div class="pane" data-pane="home">
+        <div class="home-grid">
+          <div class="reactor-wrap panel">
+            <canvas id="reactor" width="520" height="520"></canvas>
+            <div class="reactor-read">
+              <div class="rr-state" id="rrState">idle</div>
+              <div class="rr-sub" id="rrSub">nothing running</div>
+            </div>
+          </div>
+
+          <div class="home-side">
+            <div class="panel stat-panel">
+              <h3 class="phead">at a glance</h3>
+              <div class="stats" id="stats"></div>
+            </div>
+            <div class="panel">
+              <h3 class="phead">on your plate</h3>
+              <div id="homeLife" class="mini-list"></div>
+            </div>
+            <div class="panel grow">
+              <h3 class="phead">latest</h3>
+              <div id="homeLog" class="mini-log"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================= TALK -->
+      <div class="pane" data-pane="talk" hidden>
+        <div class="panel tall">
+          <h3 class="phead">conversation</h3>
+          <div id="chat" class="chat"></div>
+        </div>
+      </div>
+
+      <!-- ============================================= LOGS -->
+      <div class="pane" data-pane="logs" hidden>
+        <div class="panel tall">
+          <h3 class="phead">
+            logs
+            <input id="logFilter" class="filter" placeholder="filter" />
+            <label class="tick"><input type="checkbox" id="logFollow" checked /> follow</label>
+          </h3>
+          <div id="logs" class="logs"></div>
+        </div>
+      </div>
+
+      <!-- =========================================== MEMORY -->
+      <div class="pane" data-pane="memory" hidden>
+        <div class="panel tall">
+          <h3 class="phead">
+            what Alfred believes about you
+            <input id="memFilter" class="filter" placeholder="filter" />
+            <button class="btn small" id="addFactBtn">tell it something</button>
+          </h3>
+          <div id="memory" class="rows"></div>
+        </div>
+      </div>
+
+      <!-- ============================================= LIFE -->
+      <div class="pane" data-pane="life" hidden>
+        <div class="cols">
+          <div class="panel">
+            <h3 class="phead">due</h3>
+            <div id="lifeDue" class="rows"></div>
+          </div>
+          <div class="panel">
+            <h3 class="phead">people</h3>
+            <div id="lifePeople" class="rows"></div>
+          </div>
+          <div class="panel">
+            <h3 class="phead">you are working on</h3>
+            <div id="lifeDoing" class="rows"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================ KNOWS -->
+      <div class="pane" data-pane="knows" hidden>
+        <div class="cols wide-left">
+          <div class="panel">
+            <h3 class="phead">
+              skills
+              <input id="skillFilter" class="filter" placeholder="filter" />
+            </h3>
+            <div id="skills" class="rows"></div>
+          </div>
+          <div class="panel">
+            <h3 class="phead">believes it cannot</h3>
+            <div id="limits" class="rows"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================ TASKS -->
+      <div class="pane" data-pane="tasks" hidden>
+        <div class="panel tall">
+          <h3 class="phead">tasks</h3>
+          <div id="tasks" class="rows"></div>
+        </div>
+      </div>
+
+      <!-- ======================================= AUTOMATIONS -->
+      <div class="pane" data-pane="autos" hidden>
+        <div class="panel tall">
+          <h3 class="phead">automations</h3>
+          <div id="autos" class="rows"></div>
+        </div>
+      </div>
+
+      <!-- =========================================== SCREEN -->
+      <div class="pane" data-pane="screen" hidden>
+        <div class="cols wide-left">
+          <div class="panel">
+            <h3 class="phead">
+              what Alfred sees
+              <button class="btn small" id="shotBtn">look now</button>
+            </h3>
+            <div class="shot-wrap"><img id="shot" alt="" /></div>
+          </div>
+          <div class="panel">
+            <h3 class="phead">windows open</h3>
+            <div id="windows" class="rows"></div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ------------------------------------------------ dock -->
+    <footer class="dock">
+      <button id="micBtn" class="mic" title="Hold to talk"></button>
+      <div class="say-wrap">
+        <input id="say" class="say" placeholder="say something to Alfred" autocomplete="off" />
+        <div class="say-glow"></div>
+      </div>
+      <button id="sendBtn" class="send" title="Send"></button>
+    </footer>
+  </main>
+</div>
+
+<div id="toasts" class="toasts"></div>
+
+<!-- A dialog rather than prompt(), which pywebview does not show. -->
+<div id="modal" class="modal" hidden>
+  <div class="modal-box panel">
+    <h3 class="phead" id="modalTitle">edit</h3>
+    <textarea id="modalInput" rows="4"></textarea>
+    <div class="modal-actions">
+      <button class="btn ghost" id="modalCancel">cancel</button>
+      <button class="btn" id="modalOk">save</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

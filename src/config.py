@@ -57,6 +57,8 @@ class Settings:
     wake_model: str
     wake_threshold: float
     hotkey: str
+    # The interface is opt-in: this summons it, nothing else does.
+    interface_hotkey: str
     listen_idle_seconds: float
     half_duplex: bool
     voice_passphrase: str
@@ -185,6 +187,9 @@ def load_settings() -> Settings:
         wake_model=os.getenv("ALFRED_WAKE_MODEL", "").strip(),
         wake_threshold=_get_float("ALFRED_WAKE_THRESHOLD", 0.5),
         hotkey=os.getenv("ALFRED_HOTKEY", "ctrl+alt+k").strip().lower(),
+        interface_hotkey=os.getenv(
+            "ALFRED_INTERFACE_HOTKEY", "ctrl+alt+i"
+        ).strip().lower(),
         listen_idle_seconds=_get_float("ALFRED_LISTEN_IDLE_SECONDS", 30.0),
         half_duplex=_get_bool("ALFRED_HALF_DUPLEX", True),
         voice_passphrase=os.getenv("ALFRED_VOICE_PASSPHRASE", "").strip().lower(),
