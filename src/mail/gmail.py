@@ -73,7 +73,9 @@ class Gmail:
             userId="me",
             id=message_id,
             format="full" if body else "metadata",
-            metadataHeaders=["From", "To", "Subject", "Date"],
+            metadataHeaders=[
+                "From", "To", "Subject", "Date", "List-Unsubscribe",
+            ],
         ).execute()
 
         headers = {
@@ -89,6 +91,7 @@ class Gmail:
             "when": _when(msg.get("internalDate")),
             "unread": "UNREAD" in (msg.get("labelIds") or []),
             "snippet": msg.get("snippet", ""),
+            "bulk": _is_bulk(headers, msg.get("labelIds") or []),
         }
         if body:
             out["body"] = _body(msg.get("payload", {}))
@@ -155,6 +158,33 @@ class Gmail:
 
 # ------------------------------------------------------------- helpers
 
+
+
+# Gmail's own sorting, which is better at this than anything written
+# here would be, plus the header every legitimate bulk sender is obliged
+# to set.
+_BULK_LABELS = {
+    "CATEGORY_PROMOTIONS",
+    "CATEGORY_UPDATES",
+    "CATEGORY_SOCIAL",
+    "CATEGORY_FORUMS",
+}
+
+
+def _is_bulk(headers: dict, labels: list) -> bool:
+    """Is this a shop talking, or a person?
+
+    Alfred's picture of "who is in your life" was built from whoever
+    had sent unread mail, so it came out as Uber Eats, Revolut, Amazon
+    and UNiDAYS - and those are the names it would have used when it
+    spoke to you unprompted.
+
+    A person does not put List-Unsubscribe on their mail, and Gmail has
+    already sorted the rest into Promotions and Updates.
+    """
+    if "list-unsubscribe" in headers:
+        return True
+    return bool(_BULK_LABELS.intersection(labels))
 
 def _when(internal: Any) -> str:
     try:

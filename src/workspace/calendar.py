@@ -27,7 +27,7 @@ class Calendar:
         self, days: int = 1, now: datetime | None = None, limit: int = 20
     ) -> list[dict[str, Any]]:
         """What is on between now and ``days`` from now."""
-        now = now or datetime.now().astimezone()
+        now = _aware(now or datetime.now())
         until = now + timedelta(days=max(1, days))
 
         found = self._api().events().list(
@@ -51,8 +51,8 @@ class Calendar:
         """Is that window clear, and if not, what is in the way?"""
         busy = self._api().events().list(
             calendarId="primary",
-            timeMin=start.astimezone().isoformat(),
-            timeMax=end.astimezone().isoformat(),
+            timeMin=_aware(start).isoformat(),
+            timeMax=_aware(end).isoformat(),
             singleEvents=True,
             orderBy="startTime",
             maxResults=_MAX,
@@ -105,12 +105,32 @@ class Calendar:
 # ------------------------------------------------------------- helpers
 
 
+
+def _aware(moment: datetime) -> datetime:
+    """A time Google will accept.
+
+    The Calendar API wants RFC3339 with an offset and answers 400 to
+    anything without one. Every caller here reaches for datetime.now(),
+    which is naive, so the read side had never once worked: agenda
+    returned a Bad Request, next_up sits on top of agenda, and the
+    picture of your life therefore had no appointments in it and no
+    error to explain why.
+
+    A naive time means local time. Say so, rather than sending it.
+    """
+    return moment if moment.tzinfo else moment.astimezone()
+
+
 def _tidy(event: dict[str, Any]) -> dict[str, Any]:
     start = event.get("start") or {}
     return {
         "id": event.get("id", ""),
         "title": event.get("summary", "(untitled)"),
         "starts": _readable(start),
+        # The pretty one is for saying out loud. This one is for
+        # working with: "Tue 08 Sep (all day)" cannot be parsed back
+        # into a date, and everything downstream was trying to.
+        "starts_iso": start.get("dateTime") or start.get("date") or "",
         "all_day": "date" in start and "dateTime" not in start,
         "where": event.get("location", ""),
         "with": [

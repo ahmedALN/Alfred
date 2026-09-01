@@ -282,11 +282,13 @@ def _from_calendar(world: World, calendar: Any, now: datetime) -> dict[str, int]
         return {}
     n = 0
     for event in calendar.agenda(days=14, now=now):
-        if event.get("all_day"):
-            continue
+        # All-day events used to be skipped outright, which quietly
+        # threw away birthdays and deadlines - exactly the things worth
+        # mentioning the day before.
         world.note(Matter(
             kind="due", name=event["title"], detail=event.get("where", ""),
-            due=_parse(event.get("starts", "")), source="calendar",
+            due=_parse(event.get("starts_iso") or event.get("starts", "")),
+            source="calendar",
         ), now)
         n += 1
         for who in event.get("with", []):
@@ -304,7 +306,11 @@ def _from_mail(world: World, mail: Any, now: datetime) -> dict[str, int]:
         return {}
     n = 0
     for message in mail.unread(limit=15):
-        who = _name_of(message.get("from", ""))
+        # A shop is not somebody who is waiting on you.
+        sender = message.get("from", "")
+        if message.get("bulk") or not _is_a_person(sender):
+            continue
+        who = _name_of(sender)
         if not who:
             continue
         world.note(Matter(
@@ -333,6 +339,19 @@ def _from_activity(world: World, activity: Any, now: datetime) -> dict[str, int]
 
 
 def _parse(text: str) -> datetime | None:
+    """A date out of whatever the source called a date."""
+    text = (text or "").strip()
+    if not text:
+        return None
+
+    # Google's own format, which is what should be arriving now: a full
+    # timestamp, or a bare "2026-09-08" for something lasting all day.
+    try:
+        at = datetime.fromisoformat(text)
+        return at.replace(tzinfo=None) if at.tzinfo else at
+    except Exception:  # noqa: BLE001
+        pass
+
     for shape in ("%a %d %b %H:%M", "%d %b %H:%M"):
         try:
             at = datetime.strptime(text, shape)
@@ -344,6 +363,51 @@ def _parse(text: str) -> datetime | None:
     except Exception:  # noqa: BLE001
         return None
 
+
+
+# Addresses nobody is sitting behind.
+_NOT_A_PERSON = {
+    "noreply", "no-reply", "donotreply", "do-not-reply", "notifications",
+    "notification", "info", "support", "hello", "team", "news", "updates",
+    "alerts", "alert", "billing", "accounts", "account", "contact", "admin",
+    "service", "services", "help", "care", "marketing", "mailer", "post",
+    "newsletter", "orders", "receipts", "no_reply",
+}
+
+
+def _is_a_person(sender: str) -> bool:
+    """Would you say this name out loud as somebody who wants you?
+
+    Gmail's categories and List-Unsubscribe catch most of it, but the
+    senders that set neither were still arriving as people: an NHS
+    prescription service and a student discount card were, briefly, two
+    of the closest relationships Alfred believed you had.
+
+    The rule is deliberately shy. It rejects only on loud evidence -
+    a role address, digits in the name, shouting - because a person
+    wrongly dropped here never comes back on their own, while a shop
+    wrongly kept is merely noise.
+    """
+    sender = (sender or "").strip()
+
+    address = sender.split("<", 1)[1].rstrip(">") if "<" in sender else sender
+    local = address.split("@", 1)[0].strip().lower()
+    if local in _NOT_A_PERSON:
+        return False
+
+    name = sender.split("<", 1)[0].strip().strip('"') if "<" in sender else ""
+    if not name:
+        return True
+
+    # A date, an order number, a reference: not something you are called.
+    if any(ch.isdigit() for ch in name):
+        return False
+
+    letters = [ch for ch in name if ch.isalpha()]
+    if len(letters) > 6 and sum(ch.isupper() for ch in letters) > len(letters) * 0.6:
+        return False
+
+    return True
 
 def _name_of(address: str) -> str:
     """"Sam Green <sam@x.com>" -> "Sam Green". A person, not an inbox."""
