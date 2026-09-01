@@ -18,13 +18,28 @@ let enabled = true;
 let ducked = false;
 
 function audio() {
-  if (ctx) return ctx;
+  if (ctx) {
+    // An audio context built before the viewer has touched anything
+    // may be created suspended, depending on the host's autoplay
+    // policy - and a suspended context makes no sound while
+    // reporting no error at all. Nudge it whenever we are asked.
+    if (ctx.state === "suspended") ctx.resume().catch(() => {});
+    return ctx;
+  }
   const Ctx = window.AudioContext || window.webkitAudioContext;
   if (!Ctx) return null;
   ctx = new Ctx();
   master = ctx.createGain();
   master.gain.value = 0.30;
   master.connect(ctx.destination);
+
+  // And the first real gesture is the moment the policy relents.
+  const wake = () => {
+    if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
+  };
+  ["pointerdown", "keydown"].forEach((e) =>
+    window.addEventListener(e, wake, { passive: true })
+  );
   return ctx;
 }
 

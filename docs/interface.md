@@ -14,6 +14,10 @@ It is **optional**. Nothing opens it but you.
 | a WhatsApp message saying the same | from your phone |
 | `python -m src.ui` | standalone, without Alfred running at all |
 
+The address, with this run's key in it, is written to
+`.alfred_interface_url` (gitignored) if you would rather open it in an
+ordinary browser.
+
 Closing the window **hides** it rather than quitting, so the second
 opening is instant. Asking again when it is already open brings it to
 the front instead of drawing a second one.
@@ -97,6 +101,10 @@ The port is 8756, loopback only.
 still works — it reads the store files directly, which is exactly what
 you want just after a crash. Only talking, the microphone and the
 screen need a live Alfred.
+
+**No sound.** The speaker icon at the bottom of the rail toggles it,
+and the choice is remembered. Effects also go quiet on their own while
+Alfred is speaking.
 
 **A stale window from a previous run.** The token dies with the Alfred
 that made it, so a window left over from a crashed run can never
