@@ -58,8 +58,36 @@ def cmd_link(_argv: list[str]) -> int:
         return 2
 
     print(f"\nLinked to {address}.")
-    print("Take it back any time at myaccount.google.com/permissions.")
+
+    # Google does not always grant everything it is asked for, and a
+    # permission it withheld is a feature that will quietly not work
+    # rather than anything anybody sees fail.
+    short = account.missing()
+    if short:
+        print("\nGoogle did NOT grant:")
+        for scope in short:
+            print("   " + scope.rsplit("/", 1)[-1] + _costs(scope))
+        print(
+            "\nTo fix: Cloud console -> OAuth consent screen -> Data Access"
+            "\n-> Add or remove scopes, add those, then run link again."
+            "\nEverything else works in the meantime."
+        )
+
+    print("\nTake it back any time at myaccount.google.com/permissions.")
     return 0
+
+
+def _costs(scope: str) -> str:
+    """What is actually lost without it, in plain words."""
+    return {
+        "classroom.coursework.me.readonly": "   - no assignment deadlines",
+        "classroom.courses.readonly": "   - no course list",
+        "classroom.announcements.readonly": "   - no class announcements",
+        "classroom.student-submissions.me.readonly":
+            "   - cannot tell what you have handed in",
+        "calendar.events": "   - no calendar at all",
+        "gmail.modify": "   - no mail at all",
+    }.get(scope.rsplit("/", 1)[-1], "")
 
 
 def cmd_status(_argv: list[str]) -> int:
@@ -68,11 +96,10 @@ def cmd_status(_argv: list[str]) -> int:
         print("No Google account linked. Run: python -m src.workspace link")
         return 0
 
+    # Not a reason to stop. A sign-in missing one permission is a sign-in
+    # that works for everything else, and saying "run link again" while
+    # refusing to say what still works was needlessly bleak.
     short = account.missing()
-    if short:
-        print("Linked, but the sign-in predates some of what Alfred now")
-        print(f"needs ({len(short)} permission(s)). Run link again.")
-        return 1
 
     try:
         address = account.address(refresh=True)
@@ -81,9 +108,26 @@ def cmd_status(_argv: list[str]) -> int:
         return 1
 
     print(f"Linked to {address}.\n")
-    print("  Gmail       read, search, archive, draft     not send")
-    print("  Calendar    read, add events                 not delete")
-    print("  Classroom   courses, coursework, due dates   read only")
+
+    held = set(account.granted())
+
+    def line(name: str, scope: str, does: str) -> None:
+        ok = any(s.endswith(scope) for s in held)
+        print(f"  {'yes' if ok else 'NO ':3}  {name:11} {does}")
+
+    line("Gmail", "gmail.modify", "read, search, archive, draft - not send")
+    line("Calendar", "calendar.events", "read, add events - not delete")
+    line("Classroom", "classroom.courses.readonly", "which courses")
+    line("", "classroom.coursework.me.readonly", "assignment deadlines")
+    line("", "classroom.student-submissions.me.readonly", "what you handed in")
+    line("", "classroom.announcements.readonly", "class announcements")
+
+    if short:
+        print(
+            f"\n{len(short)} permission(s) were not granted. Add them in the"
+            "\nCloud console under OAuth consent screen -> Data Access, then"
+            "\nrun link again. Everything marked yes works now."
+        )
     return 0
 
 

@@ -26,6 +26,7 @@ one made about mail, and it is the honest description of it.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,45 @@ SCOPES = GMAIL + CALENDAR + CLASSROOM
 
 class GoogleError(RuntimeError):
     pass
+
+
+# What each permission buys, so a refusal can be explained in terms of
+# the thing that stopped working rather than a URL.
+_BUYS = {
+    "gmail.modify": "read your mail",
+    "calendar.events": "see or add calendar events",
+    "classroom.courses.readonly": "see your courses",
+    "classroom.coursework.me.readonly": "see assignment deadlines",
+    "classroom.student-submissions.me.readonly": "see what you handed in",
+    "classroom.announcements.readonly": "see class announcements",
+}
+
+
+def explain_denied(exc: BaseException, held: list[str]) -> str:
+    """Turn a permission refusal into a sentence about what is missing.
+
+    Alfred no longer refuses to start when a permission is absent - a
+    sign-in missing one of six works for the other five. The cost is
+    that the edge is met later, as a 403 nobody can read, so this is
+    where it gets named.
+    """
+    text = str(exc)
+    if "403" not in text and "insufficient" not in text.lower():
+        return text
+
+    absent = [s for s in SCOPES if s not in set(held)]
+    if not absent:
+        return text
+
+    lost = [
+        _BUYS[s.rsplit("/", 1)[-1]]
+        for s in absent if s.rsplit("/", 1)[-1] in _BUYS
+    ]
+    return (
+        "Google refused that: this sign-in cannot "
+        + (", ".join(lost) if lost else "do that")
+        + ". Tell the user to run: python -m src.workspace link"
+    )
 
 
 class GoogleAccount:
@@ -84,6 +124,14 @@ class GoogleAccount:
                 "the Google setup it needs."
             )
 
+        # Google does not always grant everything it is asked for, and
+        # the library treats ANY difference as fatal - so a consent where
+        # five permissions out of six came back was thrown away whole,
+        # and the sign-in failed with a warning about scopes having
+        # changed. Five out of six is a working mailbox and calendar.
+        # Take what was given and say what was not.
+        os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
+
         flow = InstalledAppFlow.from_client_secrets_file(
             str(self._secrets), self._scopes
         )
@@ -106,6 +154,19 @@ class GoogleAccount:
         self._creds = None
         self._services.clear()
         return True
+
+    def granted(self) -> list[str]:
+        """What the account actually gave, which is not always what was
+        asked for."""
+        if not self._token.exists():
+            return []
+        try:
+            from google.oauth2.credentials import Credentials
+
+            creds = Credentials.from_authorized_user_file(str(self._token))
+            return list(creds.scopes or [])
+        except Exception:  # noqa: BLE001
+            return []
 
     def missing(self) -> list[str]:
         """Permissions asked for now that the stored sign-in never had.
@@ -136,18 +197,12 @@ class GoogleAccount:
                 "no Google account linked yet - run: python -m src.workspace link"
             )
 
-        short = self.missing()
-        if short:
-            raise GoogleError(
-                "the Google sign-in predates "
-                + str(len(short))
-                + " of the permissions Alfred now needs - run: "
-                "python -m src.workspace link"
-            )
-
         if self._creds is None:
+            # Built from what was actually granted, not what was asked
+            # for. Insisting on the full list turns a partly-granted
+            # account into no account at all.
             self._creds = Credentials.from_authorized_user_file(
-                str(self._token), self._scopes
+                str(self._token), self.granted() or self._scopes
             )
 
         if not self._creds.valid:

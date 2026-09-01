@@ -3,7 +3,7 @@
     "goal": "Open Notepad.",
     "ok": true,
     "status": "done",
-    "secs": 4.7,
+    "secs": 33.2,
     "steps": 1,
     "failed_steps": 0,
     "detail": "*the quick brown fox jumps over the - Notepad",
@@ -16,9 +16,9 @@
     "goal": "Type the words quick brown fox into Notepad.",
     "ok": true,
     "status": "done",
-    "secs": 8.8,
+    "secs": 91.0,
     "steps": 4,
-    "failed_steps": 1,
+    "failed_steps": 2,
     "detail": "the quick brown fox jumps over the lazy dog 0123456789helloh",
     "tags": [
       "in-app"
@@ -30,9 +30,19 @@
           "action": "type",
           "window": "Notepad",
           "text": "quick brown fox",
-          "into": "1"
+          "into": "editor"
         },
-        "error": "no control matches ref=1 name=None - run 'tree' first, or the control may not be on screen yet"
+        "error": "no control matches ref=None name='editor' - run 'tree' first, or the control may not be on screen yet"
+      },
+      {
+        "tool": "ui_control",
+        "args": {
+          "action": "type",
+          "window": "Notepad",
+          "text": "quick brown fox",
+          "into": "editor"
+        },
+        "error": "no control matches ref=None name='editor' - run 'tree' first, or the control may not be on screen yet"
       }
     ]
   },
@@ -40,10 +50,10 @@
     "goal": "Check whether Steam is running.",
     "ok": true,
     "status": "done",
-    "secs": 4.1,
+    "secs": 29.6,
     "steps": 1,
     "failed_steps": 0,
-    "detail": "Yes, Steam is currently running.",
+    "detail": "Yes, Steam is running.",
     "tags": [
       "query"
     ],
@@ -53,10 +63,10 @@
     "goal": "What version of Windows is this?",
     "ok": true,
     "status": "done",
-    "secs": 6.0,
+    "secs": 23.3,
     "steps": 1,
     "failed_steps": 0,
-    "detail": "It's Microsoft Windows 11 Pro.",
+    "detail": "Windows 11 Pro.",
     "tags": [
       "query"
     ],
@@ -66,10 +76,10 @@
     "goal": "How much free space is on the C drive?",
     "ok": true,
     "status": "done",
-    "secs": 14.8,
+    "secs": 32.3,
     "steps": 1,
     "failed_steps": 0,
-    "detail": "You have 153.7 GB of free space on the C drive.",
+    "detail": "You have 138.1 GB of free space on the C drive.",
     "tags": [
       "query"
     ],
@@ -79,105 +89,41 @@
     "goal": "Open Steam and search the store for Hades.",
     "ok": true,
     "status": "done",
-    "secs": 52.6,
-    "steps": 5,
-    "failed_steps": 1,
+    "secs": 42.9,
+    "steps": 3,
+    "failed_steps": 0,
     "detail": "Steam",
     "tags": [
       "in-app",
       "slow"
     ],
-    "failures": [
-      {
-        "tool": "open_app",
-        "args": {
-          "target": "current"
-        },
-        "error": "'app' must be a non-empty string - the name of the program to open, e.g. {\"app\": \"Notepad\"}. 'target' only says which desktop to o"
-      }
-    ]
+    "failures": []
   },
   {
     "goal": "In MultiMC, select the 1.21.11 instance.",
     "ok": true,
     "status": "done",
-    "secs": 185.7,
-    "steps": 14,
-    "failed_steps": 5,
+    "secs": 98.8,
+    "steps": 6,
+    "failed_steps": 0,
     "detail": "MultiMC",
     "tags": [
       "in-app",
       "unnamed-controls"
     ],
-    "failures": [
-      {
-        "tool": "powershell",
-        "args": {
-          "command": "dir \"C:\\Users\\ahmed\\.multimc\" /s /b | findstr \"1.21.11\""
-        },
-        "error": "Get-ChildItem : A positional parameter cannot be found that accepts argument '/b'.\nAt line:1 char:1\n+ dir \"C:\\Users\\ahmed\\.multimc"
-      },
-      {
-        "tool": "powershell",
-        "args": {
-          "command": "dir \"C:\\Users\\ahmed\\.multimc\" /s | findstr \"1.21.11\""
-        },
-        "error": "dir : Cannot find path 'C:\\Users\\ahmed\\.multimc' because it does not exist.\nAt line:1 char:1\n+ dir \"C:\\Users\\ahmed\\.multimc\" /s | "
-      },
-      {
-        "tool": "powershell",
-        "args": {
-          "command": "Get-ChildItem \"C:\\Users\\ahmed\\.multimc\" -Recurse | Select-St"
-        },
-        "error": "Command timed out after 30.0s."
-      },
-      {
-        "tool": "powershell",
-        "args": {},
-        "error": "{'refused': 'empty command'}"
-      },
-      {
-        "tool": "powershell",
-        "args": {
-          "command": "Get-ChildItem \"C:\\Users\\ahmed\\.multimc\" -Recurse -File | Sel"
-        },
-        "error": "Command timed out after 30.0s."
-      }
-    ]
+    "failures": []
   },
   {
     "goal": "Close Notepad without saving.",
-    "ok": true,
+    "ok": false,
     "status": "done",
-    "secs": 42.4,
-    "steps": 4,
-    "failed_steps": 3,
-    "detail": "gone",
+    "secs": 37.9,
+    "steps": 2,
+    "failed_steps": 0,
+    "detail": "still open: *the quick brown fox jumps over the - No",
     "tags": [
       "cleanup"
     ],
-    "failures": [
-      {
-        "tool": "powershell",
-        "args": {
-          "command": "[console] Close-Process -Id (Get-WmiObject Win32_Process | W"
-        },
-        "error": "At line:1 char:11\n+ [console] Close-Process -Id (Get-WmiObject Win32_Process | Where-Obje ...\n+           ~~~~~~~~~~~~~\nUnexpected"
-      },
-      {
-        "tool": "powershell",
-        "args": {
-          "command": "Stop-Process -Id (Get-WmiObject Win32_Process | Where-Object"
-        },
-        "error": "error"
-      },
-      {
-        "tool": "powershell",
-        "args": {
-          "command": "Stop-Process -Name notepad"
-        },
-        "error": "Stop-Process : Cannot find a process with the name \"notepad\". Verify the process name and call the cmdlet again.\nAt line:1 char:1\n"
-      }
-    ]
+    "failures": []
   }
 ]

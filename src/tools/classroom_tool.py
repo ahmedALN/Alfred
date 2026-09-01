@@ -51,9 +51,22 @@ class ClassroomTool(AlfredTool):
         try:
             return self._do(action, arguments)
         except GoogleError as exc:
-            return {"status": "error", "error": str(exc)}
+            return {"status": "error", "error": self._why(exc)}
         except Exception as exc:  # noqa: BLE001
-            return {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+            return {"status": "error", "error": self._why(exc)}
+
+    def _why(self, exc: BaseException) -> str:
+        """A refusal named as the thing that will not work."""
+        from src.workspace.account import explain_denied
+
+        account = getattr(
+            getattr(self, "_mail", None)
+            or getattr(self, "_calendar", None)
+            or getattr(self, "_classroom", None),
+            "_account", None,
+        )
+        held = account.granted() if account is not None else []
+        return explain_denied(exc, held)
 
     def _do(self, action: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if action == "due":

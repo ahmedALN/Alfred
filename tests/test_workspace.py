@@ -200,17 +200,34 @@ def test_a_full_sign_in_is_missing_nothing(tmp_path):
     assert _account(tmp_path, SCOPES).missing() == []
 
 
-def test_it_says_to_sign_in_again_rather_than_failing_obscurely(tmp_path):
-    from src.workspace.account import GoogleError
-
+def test_a_partly_granted_sign_in_still_works_for_what_it_has(tmp_path):
+    """Google does not always grant everything it is asked for. Five
+    permissions out of six is a working mailbox and calendar, and
+    refusing to start over the sixth threw the whole thing away - which
+    is exactly what happened on the real consent screen."""
     account = _account(tmp_path, GMAIL)
 
-    try:
-        account.service("calendar", "v3")
-    except GoogleError as exc:
-        assert "link" in str(exc)
-    else:
-        raise AssertionError("should have refused")
+    # Not refused up front any more. The edge is met later, named.
+    assert account.granted() == GMAIL
+
+
+def test_a_refusal_is_named_as_the_thing_that_will_not_work(tmp_path):
+    """The cost of starting anyway is a 403 nobody can read, so this is
+    where it gets explained."""
+    from src.workspace.account import explain_denied
+
+    said = explain_denied(
+        Exception("403 insufficient authentication scopes"), GMAIL
+    )
+
+    assert "calendar" in said
+    assert "src.workspace link" in said
+
+
+def test_an_unrelated_failure_is_not_blamed_on_permissions(tmp_path):
+    from src.workspace.account import explain_denied
+
+    assert explain_denied(Exception("connection reset"), GMAIL) ==         "connection reset"
 
 
 def test_nothing_linked_at_all_is_a_different_message(tmp_path):

@@ -137,7 +137,26 @@ do this part for you and shouldn't be able to.
   Both `gmail_client.json` and the token Alfred later writes are
   gitignored. Neither ever leaves the machine.
 
-**4. Link it**
+**4. Add the permissions to the consent screen**
+
+This step is easy to miss and its failure is confusing. Under **OAuth
+consent screen → Data Access → Add or remove scopes**, add:
+
+```
+https://www.googleapis.com/auth/gmail.modify
+https://www.googleapis.com/auth/calendar.events
+https://www.googleapis.com/auth/classroom.courses.readonly
+https://www.googleapis.com/auth/classroom.coursework.me.readonly
+https://www.googleapis.com/auth/classroom.student-submissions.me.readonly
+https://www.googleapis.com/auth/classroom.announcements.readonly
+```
+
+Skip it and Google grants only some of them, silently. Alfred takes what
+it is given and tells you which are missing and what each one costs, so
+this is recoverable rather than fatal — but you will get less than you
+asked for and no error saying so.
+
+**5. Link it**
 
 ```bash
 python -m src.workspace link
