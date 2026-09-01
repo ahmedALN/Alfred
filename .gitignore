@@ -71,3 +71,6 @@ gmail_client.json
 alfred_activity.sqlite3
 alfred_world.sqlite3
 alfred_undo.sqlite3
+
+# The interface address, with this run's key in it.
+.alfred_interface_url

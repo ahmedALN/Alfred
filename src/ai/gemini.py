@@ -4,6 +4,7 @@ import asyncio
 import os
 import queue
 import threading
+import array
 import time
 import uuid
 from typing import Any
@@ -16,6 +17,7 @@ from src.config import load_settings
 from src.memory.learner import MemoryLearner
 from src.memory.store import MemoryStore
 from src.tools.registry import ToolRegistry
+from src.ui.live import LIVE
 
 
 _CONNECTION_ERROR_HINTS = (
@@ -179,6 +181,7 @@ class AlfredLiveSession:
         self._mic_loop: asyncio.AbstractEventLoop | None = None
 
         self._audio_output: sd.RawOutputStream | None = None
+        self._level_sent = 0.0
 
         self._speaker_queue: queue.Queue[
             bytes | None
@@ -642,6 +645,26 @@ class AlfredLiveSession:
             audio_data
         )
 
+
+    def _show_level(self, chunk: bytes) -> None:
+        """Feed the interface's visualiser, cheaply.
+
+        Every chunk would be sixty messages a second down a websocket
+        to draw a thing that moves smoothly at fifteen, so this is
+        throttled - and it reads one sample in sixteen, because a peak
+        good enough to draw a bar does not need every one of them.
+        """
+        now = time.monotonic()
+        if now - self._level_sent < 0.066:
+            return
+        self._level_sent = now
+        try:
+            samples = array.array("h", chunk)
+            peak = max(abs(s) for s in samples[::16]) / 32768.0
+        except Exception:  # noqa: BLE001
+            return
+        LIVE.set_level(min(1.0, peak * 2.2))
+
     def _alfred_is_speaking(self) -> bool:
         """True while Alfred's own audio is playing (or just finished)."""
 
@@ -888,6 +911,11 @@ class AlfredLiveSession:
             if not running:
                 return
 
+            # The interface wants to know he is talking even when it is
+            # not our turn - it is what stops its own sounds playing
+            # over the top of him.
+            LIVE.set_speaking(self._alfred_is_speaking())
+
             # Conversation window: only stream to the model while
             # Alfred is actually listening (woken by "Hey Alfred" or
             # the hotkey). Outside that, drop the audio.
@@ -901,6 +929,8 @@ class AlfredLiveSession:
             # the mic on a speaker setup) back into the model.
             if self._half_duplex and self._alfred_is_speaking():
                 continue
+
+            self._show_level(chunk)
 
             await self.session.send_realtime_input(
                 audio=types.Blob(

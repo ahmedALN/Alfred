@@ -13,6 +13,7 @@ from src.brain.skills import align, apply_params
 from src.brain.types import Proposal, ProposalKind, Verdict
 from src.tools.registry import ToolRegistry
 from src.tools.results import summarize_result, tool_succeeded
+from src.ui.live import LIVE
 
 _PLAN_SYSTEM = """You are Alfred's task planner on a Windows PC. Turn the goal \
 into the SHORTEST ordered plan a tool-using agent can execute.
@@ -1380,6 +1381,12 @@ class TaskAgent:
             {"index": index, "tool": tool, "args": args, "ok": ok,
              "result": summary},
             session_id,
+        )
+
+        # Said in the interface as it happens, in the words a person
+        # would use, rather than as the tool call it was.
+        LIVE.task_step(
+            f"{tool}: {'done' if ok else 'failed'}", summary[:120]
         )
 
         return Step(index, thought, tool, args, "auto", outcome, ok)

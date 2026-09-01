@@ -9,6 +9,7 @@ from typing import Any, Awaitable, Callable
 from src.brain.agent import TaskAgent, TaskResult
 from src.brain.isolation import strip_isolation_phrase, wants_isolation
 from src.brain.skills import SkillLibrary, stumbled
+from src.ui.live import LIVE
 
 SpeakFn = Callable[[str], Awaitable[None]]
 
@@ -312,6 +313,7 @@ class TaskQueue:
             self._cancel.clear()
             self._take_steers()      # nothing carries over from the last job
             self._persist(task_id, "running")
+            LIVE.task_started(task_id, record.goal)
 
             # "without disturbing me" - bring up Alfred's own desktop and
             # work there. If it cannot be brought up we say so and carry
@@ -388,12 +390,14 @@ class TaskQueue:
                 await _safe_speak(
                     speak, f"(System: proactive) That task failed: {exc}"
                 )
+                LIVE.task_ended(task_id, "error", str(exc))
                 continue
 
             record.status = result.status
             record.summary = result.summary
             record.skipped_confirmations = result.skipped_confirmations
             self._persist(task_id, result.status, result.summary)
+            LIVE.task_ended(task_id, result.status, result.summary)
             self._record_episode(record, result)
             self._learn_app_knowledge(result)
 

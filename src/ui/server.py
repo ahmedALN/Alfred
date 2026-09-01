@@ -33,6 +33,7 @@ from typing import Any
 from src.ui import edits, state
 from src.ui.live import BUS, LIVE
 
+_ROOT = Path(__file__).resolve().parent.parent.parent
 _STATIC = Path(__file__).resolve().parent / "static"
 
 # Loopback only. Never bind this to 0.0.0.0.
@@ -308,7 +309,26 @@ class Interface:
             target=run, name="alfred-interface", daemon=True
         )
         self._thread.start()
+        self._write_url()
         return self.url
+
+    def _write_url(self) -> None:
+        """Leave the address somewhere you can find it.
+
+        The key is minted per run and otherwise lives only inside this
+        process, which makes the window unopenable by anything else -
+        including you, from an ordinary browser.
+
+        This is safe against the threat the token exists for. That
+        threat is a web page you happen to have open, and a web page
+        cannot read your files. Anything that CAN read this file is
+        already running as you, and could have read .env instead.
+        """
+        try:
+            path = _ROOT / ".alfred_interface_url"
+            path.write_text(self.url + chr(10), encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            pass
 
     def stop(self) -> None:
         if self._server is not None:

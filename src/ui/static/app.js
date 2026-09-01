@@ -494,6 +494,16 @@ function handle(event) {
 
     case "level": app.reactor.hear(event.level); break;
 
+    // The wake word and the hotkey open the mic too. The button used to
+    // track only its own clicks and so drifted out of step with Alfred.
+    case "listening":
+      app.listening = event.listening;
+      $("micBtn").classList.toggle("live", app.listening);
+      $("micBtn").innerHTML = icon(app.listening ? "mic" : "mic-off");
+      if (app.listening) SOUND.listen();
+      drawState();
+      break;
+
     case "speaking":
       app.alfred.speaking = event.speaking;
       SOUND.duck(event.speaking);

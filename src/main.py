@@ -517,6 +517,10 @@ async def main() -> None:
         # No point running wake detection while Alfred is already
         # active - and it stops Alfred re-triggering itself.
         def _on_listen_change(listening: bool) -> None:
+            # The window shows whether Alfred is really listening, not
+            # whether its own button was pressed - the wake word and the
+            # hotkey open the mic too, and the button knew nothing of it.
+            _UI_BUS.publish("listening", listening=listening)
             if wake_listener is None:
                 return
             wake_listener.pause() if listening else wake_listener.resume()
@@ -603,10 +607,15 @@ async def main() -> None:
     )
 
     async def announce(text: str) -> None:
-        """Say it in the room, and send it to the phone."""
+        """Say it in the room, send it to the phone, show it in the window."""
+        said = text.replace("(System: proactive)", "").strip()
         if phone is not None:
             # The spoken form carries a marker for the voice model.
-            phone.notify(text.replace("(System: proactive)", "").strip())
+            phone.notify(said)
+        # Otherwise the interface's conversation only ever held what was
+        # typed into the interface, which made it look like Alfred had
+        # said nothing all day.
+        _UI_BUS.publish("alfred_said", text=said)
         await session.inject_system_prompt(text)
 
     session.add_background_task(

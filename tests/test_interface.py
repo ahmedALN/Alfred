@@ -332,3 +332,72 @@ def test_clearing_stale_windows_does_not_kill_the_terminal(monkeypatch):
     assert shell.killed is False        # the terminal it was started from
     assert editor.killed is False       # a standalone window, serving itself
     assert elsewhere.killed is False    # not even pointed at this machine
+
+
+# ------------------------------------------------------------- the wiring
+
+
+def test_every_live_hook_has_something_that_calls_it():
+    """The window was built reactive and wired to nothing.
+
+    set_level, set_speaking and the three task hooks all existed, all
+    published to the bus, and had exactly zero callers - so the reactor
+    sat on "idle" for ever, sound never ducked under Alfred's voice,
+    and the task panel never moved. Everything looked finished.
+
+    This reads the source rather than the behaviour on purpose: the
+    defect was an absence, and absences do not show up in a test of the
+    thing that is present.
+    """
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parent.parent / "src"
+    source = "\n".join(
+        path.read_text(encoding="utf-8", errors="ignore")
+        for path in root.rglob("*.py")
+        if "ui" not in path.parts[len(root.parts) - 1:]
+    )
+
+    for hook in ("set_level", "set_speaking",
+                 "task_started", "task_step", "task_ended"):
+        assert f".{hook}(" in source, (
+            f"LIVE.{hook} is published to the interface but nothing in "
+            f"Alfred ever calls it, so that part of the window is dead"
+        )
+
+
+def test_speaking_is_only_announced_when_it_changes():
+    """Called every audio chunk, so it must not publish every chunk."""
+    from src.ui.live import BUS, Live
+
+    live = Live()
+    before = len(BUS.history(999))
+
+    live.set_speaking(True)
+    live.set_speaking(True)
+    live.set_speaking(True)
+    live.set_speaking(False)
+
+    kinds = [e["kind"] for e in BUS.history(999)[before:]]
+    assert kinds == ["speaking", "speaking"]
+
+
+def test_a_task_that_dies_still_clears_the_running_state():
+    """An exception used to leave the window saying "working" for ever."""
+    from src.ui.live import Live
+
+    live = Live()
+    live.task_started("t1", "open notepad")
+    assert live.current_task["goal"] == "open notepad"
+    live.task_ended("t1", "error", "it blew up")
+    assert live.current_task is None
+
+
+def test_the_visualiser_is_never_fed_nonsense():
+    from src.ui.live import Live
+
+    live = Live()
+    live.set_level(4.2)
+    assert live.level == 1.0
+    live.set_level(-3)
+    assert live.level == 0.0
