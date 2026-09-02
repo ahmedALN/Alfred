@@ -98,7 +98,7 @@ def _build_personal_whatsapp(
 
     talk = Conversation(
         chat,
-        lambda goal: task_queue.submit(goal, source="voice"),
+        lambda goal: task_queue.submit(goal, source="whatsapp"),
         screen=ScreenShare(screenshot, channel.send_file) if screenshot else None,
         steer=task_queue.steer,
         running=lambda: (
@@ -111,7 +111,7 @@ def _build_personal_whatsapp(
     router = MessageRouter(
         channel,
         list(settings.whatsapp_allowed),
-        lambda text: task_queue.submit(text, source="voice"),
+        lambda text: task_queue.submit(text, source="whatsapp"),
         status=_status_reporter(status_tool),
         converse=talk.handle,
     )
@@ -198,7 +198,7 @@ def _build_phone_channel(
 
     talk = Conversation(
         chat,
-        lambda goal: task_queue.submit(goal, source="voice"),
+        lambda goal: task_queue.submit(goal, source="whatsapp"),
         steer=task_queue.steer,
         running=lambda: (
             task_queue.current().goal if task_queue.current() else ""
@@ -208,7 +208,7 @@ def _build_phone_channel(
     router = MessageRouter(
         channel,
         list(settings.whatsapp_allowed),
-        lambda text: task_queue.submit(text, source="voice"),
+        lambda text: task_queue.submit(text, source="whatsapp"),
         status=_status_reporter(status_tool),
         converse=talk.handle,
     )
@@ -606,16 +606,29 @@ async def main() -> None:
         ),
     )
 
-    async def announce(text: str) -> None:
-        """Say it in the room, send it to the phone, show it in the window."""
+    async def announce(text: str, source: str = "") -> None:
+        """Answer wherever the question was asked.
+
+        This used to do all three every time, so asking Alfred
+        something from your phone made it read the answer aloud in an
+        empty room - and if you were in the room, twice over.
+
+        A job that came from WhatsApp is answered on WhatsApp. Voice
+        and the proactive brain still speak, because that is the point
+        of them.
+        """
         said = text.replace("(System: proactive)", "").strip()
+
         if phone is not None:
-            # The spoken form carries a marker for the voice model.
             phone.notify(said)
-        # Otherwise the interface's conversation only ever held what was
-        # typed into the interface, which made it look like Alfred had
-        # said nothing all day.
+
+        # The window is a display, not a room; showing it is never
+        # an interruption.
         _UI_BUS.publish("alfred_said", text=said)
+
+        if source in ("whatsapp", "interface"):
+            return
+
         await session.inject_system_prompt(text)
 
     session.add_background_task(

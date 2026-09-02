@@ -11,7 +11,10 @@ from src.brain.isolation import strip_isolation_phrase, wants_isolation
 from src.brain.skills import SkillLibrary, stumbled
 from src.ui.live import LIVE
 
-SpeakFn = Callable[[str], Awaitable[None]]
+# The second argument is where the job came from - 'voice',
+# 'whatsapp', 'interface'. An answer to a message typed on a phone
+# should not be read out to an empty room.
+SpeakFn = Callable[..., Awaitable[None]]
 
 
 def _current_loop() -> asyncio.AbstractEventLoop | None:
@@ -296,9 +299,9 @@ class TaskQueue:
         self._loop = loop
         self._speak_fn = speak
 
-        def _progress(text: str) -> None:
+        def _progress(text: str, source: str = "") -> None:
             asyncio.run_coroutine_threadsafe(
-                _safe_speak(speak, f"(System: proactive) {text}"), loop
+                _safe_speak(speak, f"(System: proactive) {text}", source), loop
             )
 
         while True:
@@ -329,13 +332,15 @@ class TaskQueue:
                         self._router.use_isolated()
                     _progress(
                         f"Working on my own desktop (session {sid}) so this "
-                        "stays out of your way."
+                        "stays out of your way.",
+                        record.source,
                     )
                 else:
                     await _safe_speak(
                         speak,
                         "(System: proactive) I couldn't open my own desktop, "
                         "so this will happen on your screen.",
+                        record.source,
                     )
 
             def _plan_run(r=record):
@@ -388,7 +393,8 @@ class TaskQueue:
                 record.summary = f"Task crashed: {exc}"
                 self._persist(task_id, "error", record.summary)
                 await _safe_speak(
-                    speak, f"(System: proactive) That task failed: {exc}"
+                    speak, f"(System: proactive) That task failed: {exc}",
+                    record.source,
                 )
                 LIVE.task_ended(task_id, "error", str(exc))
                 continue
@@ -419,7 +425,7 @@ class TaskQueue:
                 except Exception as exc:  # noqa: BLE001
                     print(f"[Tasks] isolated cleanup failed: {exc}")
 
-            await _safe_speak(speak, _announce(result))
+            await _safe_speak(speak, _announce(result), record.source)
 
             # Post-mortem: one cheap call that may bank a lesson for next
             # time. Fire-and-forget so it never delays the next job.
@@ -514,9 +520,13 @@ class TaskQueue:
     # ----------------------------------------------------------------
 
 
-async def _safe_speak(speak: SpeakFn, text: str) -> None:
+async def _safe_speak(speak: SpeakFn, text: str, source: str = "") -> None:
     try:
-        await speak(text)
+        try:
+            await speak(text, source)
+        except TypeError:
+            # An announcer that predates sources still works.
+            await speak(text)
     except Exception as exc:  # noqa: BLE001
         print(f"[Tasks] could not announce result: {exc}")
 

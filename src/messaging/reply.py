@@ -134,6 +134,19 @@ class Conversation:
         if not text:
             return ""
 
+        # Decided here rather than by the model, because the model got
+        # it wrong repeatedly and then imitated its own wrong answers.
+        want = wants_picture(text)
+        if want and self._screen is not None:
+            # For a clip the original words go through too, so "10s"
+            # survives to be read as ten seconds.
+            answer = self._show(f"clip {text}" if want == "clip" else "picture")
+            self._history.append(f"Them: {text}")
+            if answer:
+                self._history.append(f"You: {answer}")
+            self._keep(text, answer)
+            return answer[:_MAX_REPLY]
+
         try:
             raw = self._chat.generate(
                 self._prompt(text), system=_SYSTEM, temperature=0.3,
@@ -146,7 +159,12 @@ class Conversation:
 
         kind, body = _read(raw)
 
-        if kind == "steer":
+        if kind == "unclear" or not body:
+            # It thought out loud instead of answering. Ask again
+            # rather than forward the thinking or act on it.
+            print(f"[Message] unreadable answer, not forwarding: {raw[:120]!r}")
+            answer = "Sorry - say that again?"
+        elif kind == "steer":
             answer = self._change(body or text)
         elif kind == "show":
             answer = self._show(body)
@@ -263,6 +281,54 @@ class Conversation:
         return self._screen.picture()
 
 
+
+# Words that can only mean "send me the screen itself".
+_PICTURE_WORDS = (
+    "screenshot", "screen shot", "screengrab", "screen grab",
+    "print screen", "printscreen",
+)
+_SEND_WORDS = ("send", "show", "give", "share", "let me see", "can i see")
+_SCREEN_WORDS = ("screen", "desktop", "my pc", "my computer")
+_RECORD_WORDS = ("record", "recording", "clip", "video of")
+
+
+def wants_picture(text: str) -> str:
+    """"" | "picture" | "clip" - decided without asking a model.
+
+    Alfred spent half an hour telling somebody "Here is your
+    screenshot" and sending nothing. The model was choosing SAY over
+    SHOW, and once one of those answers was in the history it copied
+    itself: every later reply promised a picture that never came.
+
+    A request this unambiguous should never have depended on a model
+    picking the right label. It is also two seconds faster.
+    """
+    said = (text or "").strip().lower()
+    if not said:
+        return ""
+
+    recording = any(w in said for w in _RECORD_WORDS)
+    named = any(w in said for w in _PICTURE_WORDS)
+
+    if named:
+        return "clip" if recording else "picture"
+
+    on_screen = any(w in said for w in _SCREEN_WORDS)
+
+    # "record my screen for 10 seconds" - asking to record it is asking
+    # for it, whether or not you also said "send".
+    if recording and on_screen:
+        return "clip"
+
+    # "send me the screen", "show me my desktop" - a send word and a
+    # screen word together. "what is on my screen" has no send word and
+    # stays a question for the task agent to answer in words.
+    if any(w in said for w in _SEND_WORDS) and on_screen:
+        return "picture"
+
+    return ""
+
+
 def _seconds(want: str) -> int:
     from src.messaging.capture import DEFAULT_SECONDS
 
@@ -281,28 +347,94 @@ def _split(body: str) -> tuple[str, str]:
     return job.strip(), (said.strip() if sep else "")
 
 
-def _read(raw: str) -> tuple[str, str]:
-    """Pull the decision out of the model's line.
+_MARKERS = (("STEER:", "steer"), ("SHOW:", "show"), ("DO:", "do"), ("SAY:", "say"))
 
-    Anything unrecognised is treated as talk. That is the safe way
-    round: the cost of mistaking a job for conversation is one more
-    message; the cost of the reverse is Alfred loose on the desktop.
+# How much may sit in front of a marker and still count as wrapping.
+# "Answer: SAY: hi" is a wrapper. A marker forty words into a paragraph
+# is the model talking ABOUT markers, not using one.
+_WRAPPER_SLACK = 24
+
+
+def _trim(body: str) -> str:
+    """Cut at the next marker.
+
+    A body that runs on into another marker is reasoning about the
+    format rather than an answer in it.
     """
-    line = (raw or "").strip()
-    if not line:
+    upper = body.upper()
+    cut = len(body)
+    for marker, _ in _MARKERS:
+        at = upper.find(marker)
+        if at != -1:
+            cut = min(cut, at)
+    # Models bold the marker as often as not, which leaves the closing
+    # asterisks sitting at the front of the answer.
+    return body[:cut].strip().strip("*\"'` ").strip()
+
+
+def _read(raw: str) -> tuple[str, str]:
+    """Pull the decision out of the model's answer.
+
+    The contract is one line beginning with a marker. Small models do
+    not always keep to it - they think out loud first, and sometimes
+    mention the markers while doing so.
+
+    That thinking is not a reply. It went out to WhatsApp verbatim:
+
+        Right - " For screenshot request, we should use SHOW: picture.
+        But we also need to bring Claude to foreground before taking
+
+    because the marker was found anywhere in the text and everything
+    after it became the body. Worse, when the marker was DO: that
+    reasoning was submitted as the task goal, so Alfred set off to do
+    a paragraph about itself.
+
+    So: an anchored marker first, a wrapped one second, and if neither
+    is there the answer is "unclear" - never the raw text. Silence is
+    recoverable; forwarding the model's inner monologue is not.
+    """
+    text = (raw or "").strip()
+    if not text:
         return "say", ""
 
-    # Small models like to wrap things. Find the marker anywhere.
-    for marker, kind in (
-        ("STEER:", "steer"), ("SHOW:", "show"), ("DO:", "do"), ("SAY:", "say"),
-    ):
-        at = line.upper().find(marker)
-        if at == -1:
-            continue
-        body = line[at + len(marker):].strip()
-        # Models sometimes echo the marker back before answering.
-        while body.upper().startswith(marker):
-            body = body[len(marker):].strip()
-        return kind, body.splitlines()[0].strip() if body else ""
+    # 1. What was actually asked for: a marker starting a line.
+    for line in text.splitlines():
+        stripped = line.strip().lstrip("\"'*-# ").strip()
+        for marker, kind in _MARKERS:
+            if stripped.upper().startswith(marker):
+                body = stripped[len(marker):].strip()
+                while body.upper().startswith(marker):
+                    body = body[len(marker):].strip()
+                return kind, _trim(body)
 
-    return "say", line.splitlines()[0].strip()
+    # 2. A marker with only a label in front of it.
+    for line in text.splitlines():
+        upper = line.upper()
+        for marker, kind in _MARKERS:
+            at = upper.find(marker)
+            if at != -1 and at <= _WRAPPER_SLACK:
+                return kind, _trim(line[at + len(marker):].strip())
+
+    # 3. No marker anywhere usable. Unmarked text is normally just
+    #    talk, and treating it as such is the safe way round: a
+    #    greeting mistaken for a job types into Notepad, while a job
+    #    mistaken for a greeting costs one more message.
+    #
+    #    The exception is text that discusses the format itself. Both
+    #    of the answers that leaked to a phone named the markers while
+    #    reasoning about which to use, and a real reply never does.
+    if _is_reasoning(text):
+        return "unclear", ""
+
+    return "say", text.splitlines()[0].strip()
+
+
+def _is_reasoning(text: str) -> bool:
+    """Is this the model working out what to say, rather than saying it?"""
+    upper = text.upper()
+    # Anchored and wrapped markers were already taken, so one still
+    # sitting in here is being talked about rather than used.
+    if any(marker in upper for marker, _ in _MARKERS):
+        return True
+    return "THE INSTRUCTION" in upper
+

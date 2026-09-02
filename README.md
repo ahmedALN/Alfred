@@ -213,3 +213,7 @@ python -m pytest -q
 ```
 
 Some tests need the built `DesktopBridge.exe` (they exercise the real bridge).
+
+## Licence
+
+MIT — see [LICENSE](LICENSE). Do what you like with it.
