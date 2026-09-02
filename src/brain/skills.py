@@ -296,6 +296,9 @@ class SkillLibrary:
         if not trace or len(trace) > _MAX_STEPS:
             return None
 
+        if not is_a_request(goal):
+            return None
+
         goal_l = goal.lower()
         slots: dict[str, str] = {}        # literal text -> slot name
         template = goal
@@ -546,6 +549,49 @@ class SkillLibrary:
             return self._embedder.embed(text)
         except Exception:  # noqa: BLE001
             return None
+
+
+# A request is a sentence somebody said. The longest real one in the
+# library is 87 characters; this is generous by half again.
+_LONGEST_REQUEST = 160
+_MOST_WORDS = 25
+
+# Thinking, rather than asking. A reasoning model emits its working in
+# plain prose with no tags to strip, and one of those got as far as
+# being saved as a routine called `screenshot-request-we-should`, whose
+# template was four hundred characters of the model deciding which
+# reply format to use.
+_THINKING = re.compile(
+    r"\bwe (?:should|need to|could)\b|\bhowever\b|\bbut we\b|"
+    r"\bthe format expects\b|\bthe user (?:wants|asked)\b|"
+    r"\bDO:|\bSHOW:|\blet me\b|\bfirst,? I\b",
+    re.I,
+)
+
+
+def is_a_request(goal: str) -> bool:
+    """Could a person have said this?
+
+    Distillation takes the goal as the template to match future
+    requests against, so a goal that is not a request produces a
+    routine nothing will ever match - it just sits in the library
+    making the list longer and the confidence numbers worse.
+    """
+
+    text = (goal or "").strip()
+
+    if not text or len(text) > _LONGEST_REQUEST:
+        return False
+
+    if len(text.split()) > _MOST_WORDS:
+        return False
+
+    # Somebody speaking says one thing. Several sentences with
+    # newlines between them is a note to self.
+    if "\n" in text:
+        return False
+
+    return not _THINKING.search(text)
 
 
 def _fingerprint(skill: dict[str, Any]) -> tuple[tuple[str, tuple[str, ...]], ...]:

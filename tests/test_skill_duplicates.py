@@ -221,3 +221,64 @@ def test_pruning_a_clean_library_does_nothing(library):
 def test_pruning_an_empty_library_does_not_fall_over(library):
     lib, _store = library
     assert lib.prune_duplicates() == []
+
+
+# ====================================================================
+# A routine is learned from a request, not from thinking out loud
+# ====================================================================
+
+
+def test_thinking_out_loud_is_not_a_request():
+    """`screenshot-request-we-should` was really in the library.
+
+    Its template was four hundred characters of a reasoning model
+    working out which reply format to use - "we should use SHOW:
+    picture. But we also need to..." - saved as the request to match
+    future requests against. Nothing would ever match it; it just made
+    the list longer and the confidence numbers worse.
+    """
+    from src.brain.skills import is_a_request
+
+    assert not is_a_request(
+        " For screenshot request, we should use SHOW: picture. But we "
+        "also need to bring Claude to foreground before taking a "
+        "screenshot. The format expects one line."
+    )
+    assert not is_a_request("Let me think. First I will open the app.")
+
+
+@pytest.mark.parametrize("goal", [
+    "Open Notepad.",
+    'Open Steam and launch "Sons of the Forest" directly from the desktop file.',
+    "Learn a routine for launching Steam before launching a game from the desktop.",
+    "play a {p0} song on Spotify",
+    "What is in my Stremio continue watching list?",
+    "Open Stremio and open Breaking Bad from my continue watching list.",
+    "How much free space is on the C drive?",
+])
+def test_a_real_request_is_still_learned_from(goal):
+    from src.brain.skills import is_a_request
+
+    assert is_a_request(goal)
+
+
+@pytest.mark.parametrize("goal", [
+    "",
+    "   ",
+    "x" * 200,
+    "one thing\nand then another",
+])
+def test_nothing_shaped_like_a_note_to_self_is_learned_from(goal):
+    from src.brain.skills import is_a_request
+
+    assert not is_a_request(goal)
+
+
+def test_distilling_refuses_a_goal_nobody_said(library):
+    lib, _store = library
+
+    assert lib.distill(
+        " We should use SHOW: picture. But we also need to bring Claude "
+        "to the foreground first. However the format expects one line.",
+        [("ui_control", {"action": "click", "name": "Play"})],
+    ) is None
