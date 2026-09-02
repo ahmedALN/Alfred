@@ -4,6 +4,7 @@ import concurrent.futures
 import re
 import time
 from collections.abc import Callable
+from typing import Any
 
 from src.ai.providers.base import (
     ChatProvider,
@@ -105,40 +106,40 @@ class FallbackChatProvider(ChatProvider):
         temperature: float = 0.4,
         max_tokens: int | None = None,
     ) -> str:
+        """The first usable answer from the chain.
+
+        A rung that is merely slow is not abandoned - it is RACED. When
+        it has not answered within `patience` the next rung is started
+        alongside it, and whichever finishes first wins.
+
+        Abandoning it was measurably worse than waiting. On this machine
+        gemini-flash-lite answers a planner-sized prompt in 1.4s at the
+        median and took 31.8s on the first call after a pause. That one
+        cold call blew the 12s patience, so its work was thrown away,
+        twelve seconds were spent on nothing, the next rung was asked
+        from scratch at nine seconds a call, and the fastest rung was
+        put on a cooldown so the rest of the task ran without it. That
+        is why "what version of Windows is this?" cost 68 seconds and
+        read in the log as four separate failovers.
+
+        Racing costs at most one extra request in flight and can never
+        be slower than moving on, because the rung that would have
+        answered is still running while the next one starts.
+        """
+
         now = self._monotonic()
         errors: list[str] = []
-        tried = False
+        racing: dict[int, Any] = {}          # index -> future
+        started: dict[int, Any] = {}         # index -> provider
 
-        for i, provider in enumerate(self._providers):
-            if self._cooldown_until.get(i, 0.0) > now:
-                continue  # still cooling down from a recent failure
+        ready = [
+            i for i in range(len(self._providers))
+            if self._cooldown_until.get(i, 0.0) <= now
+        ]
 
-            tried = True
-            try:
-                out = self._ask(
-                    provider, prompt, system, temperature, max_tokens,
-                    # The last rung is the safety net. Hurrying it along
-                    # would leave nowhere to fall.
-                    patience=None if provider is self._providers[-1]
-                    else self._patience,
-                )
-                if out and out.strip():
-                    if i != self._active:
-                        self._note_move(i, provider)
-                        self._active = i
-                    return out
-                errors.append(f"{provider.name}: empty response")
-                self._cooldown_until[i] = now + 60.0
-            except Exception as exc:  # noqa: BLE001
-                errors.append(f"{provider.name}: {exc}")
-                self._cooldown_until[i] = now + _rest_for(
-                    exc, self._retry_after, self._patience
-                )
-                self._record_failover(provider.name)
-
-        if not tried:
-            # Everything is cooling down - clear the cooldowns and try the
-            # last provider (usually the always-available local model).
+        if not ready:
+            # Everything is cooling down. Clear it and use the last rung,
+            # which is normally the local model and cannot run out.
             self._cooldown_until.clear()
             try:
                 return self._providers[-1].generate(
@@ -146,11 +147,111 @@ class FallbackChatProvider(ChatProvider):
                     max_tokens=max_tokens,
                 )
             except Exception as exc:  # noqa: BLE001
-                errors.append(f"{self._providers[-1].name}: {exc}")
+                raise ProviderError(
+                    f"every plan provider failed - {self._providers[-1].name}: {exc}"
+                ) from exc
+
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=len(ready))
+
+        try:
+            for position, index in enumerate(ready):
+                provider = self._providers[index]
+                started[index] = provider
+                racing[index] = pool.submit(
+                    provider.generate, prompt, system=system,
+                    temperature=temperature, max_tokens=max_tokens,
+                )
+
+                # The last rung in the race is the safety net: there is
+                # nothing left to start alongside it, so wait properly.
+                last = position == len(ready) - 1
+                answer = self._settle(
+                    racing, started, errors, now,
+                    patience=None if last else self._patience,
+                    must_answer=last,
+                )
+
+                if answer is not None:
+                    index, text = answer
+                    if index != self._active:
+                        self._note_move(index, self._providers[index])
+                        self._active = index
+                    return text
+        finally:
+            # Nothing is cancelled - an HTTP request in flight cannot be
+            # - but nothing is waited on either.
+            pool.shutdown(wait=False)
 
         raise ProviderError(
             "every plan provider failed - " + " | ".join(errors)
         )
+
+    def _settle(
+        self,
+        racing: dict[int, Any],
+        started: dict[int, Any],
+        errors: list[str],
+        now: float,
+        *,
+        patience: float | None,
+        must_answer: bool,
+    ) -> tuple[int, str] | None:
+        """Wait on everything in flight; return the first real answer.
+
+        Rungs that fail are recorded and put on a cooldown as before.
+        A rung that is simply still thinking when patience runs out is
+        left running and stays eligible - being out-raced is not a
+        failure and must not bench a model.
+        """
+
+        deadline = None if patience is None else time.monotonic() + patience
+
+        while racing:
+            timeout = None if deadline is None else deadline - time.monotonic()
+
+            if timeout is not None and timeout <= 0:
+                return None          # still thinking; start the next rung
+
+            done, _pending = concurrent.futures.wait(
+                list(racing.values()),
+                timeout=timeout,
+                return_when=concurrent.futures.FIRST_COMPLETED,
+            )
+
+            if not done:
+                if must_answer:
+                    continue
+                return None
+
+            # Prefer the earliest rung among those that finished: the
+            # chain is in preference order, and if the good one and the
+            # spare both landed in the same instant, the good one wins.
+            for index in sorted(racing):
+                future = racing[index]
+
+                if future not in done:
+                    continue
+
+                del racing[index]
+                provider = started[index]
+
+                try:
+                    out = future.result()
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"{provider.name}: {exc}")
+                    self._cooldown_until[index] = now + _rest_for(
+                        exc, self._retry_after, self._patience
+                    )
+                    self._record_failover(provider.name)
+                    continue
+
+                if out and out.strip():
+                    return index, out
+
+                errors.append(f"{provider.name}: empty response")
+                self._cooldown_until[index] = now + 60.0
+
+        return None
 
     def _ask(self, provider, prompt, system, temperature, max_tokens,
              patience: float | None):

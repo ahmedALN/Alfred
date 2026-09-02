@@ -56,8 +56,19 @@ def test_a_primary_having_a_bad_minute_is_moved_past():
     assert time.time() - started < 1.5      # did not sit through the 2s
 
 
-def test_the_slow_one_is_not_asked_again_straight_away():
-    """Waiting for it once is a cost worth paying. Twice is not."""
+def test_the_slow_one_keeps_being_offered_the_work():
+    """Being out-raced is not a failure, and must not bench a model.
+
+    This used to assert the opposite - one slow call and the rung sat
+    out. Measured on the real chain, that was the expensive half of the
+    problem: gemini-flash-lite answers a planner prompt in 1.4s at the
+    median and took 31.8s once, cold. Benching it for that meant the
+    whole of the next task ran nine seconds a call on the rung below,
+    when the very next call to the fast one came back in 1.02s.
+
+    It costs one extra request in flight and nothing in latency,
+    because the spare is racing it either way.
+    """
     slow = _Provider("slow", delay=2.0)
     spare = _Provider("spare", "from the spare")
     chain = _chain(slow, spare)
@@ -65,7 +76,35 @@ def test_the_slow_one_is_not_asked_again_straight_away():
     chain.generate("one")
     chain.generate("two")
 
-    assert slow.calls == 1
+    assert slow.calls == 2
+    assert spare.calls == 2
+
+
+def test_a_rung_that_actually_failed_does_sit_out():
+    """The distinction being drawn: slow is not the same as broken."""
+    broken = _Provider("broken", fail=True)
+    spare = _Provider("spare", "from the spare")
+    chain = _chain(broken, spare)
+
+    chain.generate("one")
+    chain.generate("two")
+
+    assert broken.calls == 1
+
+
+def test_the_slow_one_still_wins_if_it_gets_there_first():
+    """The whole point of racing: its work is not thrown away.
+
+    The spare is started alongside after patience runs out, but the
+    slow rung is earlier in the chain and finishes sooner, so its
+    answer is the one used.
+    """
+    slow = _Provider("slow", "from the good one", delay=0.3)
+    slower_spare = _Provider("spare", "from the spare", delay=1.0)
+
+    assert _chain(slow, slower_spare, patience=0.05).generate("hi") == (
+        "from the good one"
+    )
 
 
 def test_the_last_rung_is_never_hurried():
