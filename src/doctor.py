@@ -685,6 +685,57 @@ def check_desktop() -> Section:
     except Exception as exc:  # noqa: BLE001
         section.add("accessibility layer", BAD, str(exc)[:100])
 
+    # Counting windows is not reading one. Spotify was listed here as a
+    # window all evening while every attempt to read it came back empty,
+    # so Alfred told the user it was not responding and offered to map
+    # an app with 1,511 named controls.
+    import time as _time
+
+    from src.tools.ui_control import UIControlTool
+
+    tool = UIControlTool()
+    read: list[str] = []
+
+    for name in ("Explorer", "Notepad", "Spotify", "Steam", "Discord", "Claude"):
+        try:
+            started = _time.time()
+            tree = tool.execute({"action": "tree", "window": name, "limit": 200})
+        except Exception:  # noqa: BLE001
+            continue
+
+        controls = tree.get("controls") or []
+
+        if tree.get("status") == "success" and controls:
+            named = sum(1 for c in controls if (c.get("name") or "").strip())
+            read.append(
+                f"{name} {len(controls)} controls "
+                f"({named} named) in {_time.time() - started:.1f}s"
+            )
+
+    section.add(
+        "it can read inside a real window",
+        OK if read else WARN,
+        "; ".join(read[:3]) if read else
+        "none of the usual apps were open to try - open one and re-run",
+        "a window that lists but will not read is the Chromium "
+        "accessibility tree being asleep; ui_control wakes it now",
+    )
+
+    speaker = ""
+    try:
+        from src.voice.speakers import chosen_output, describe
+
+        speaker = describe(chosen_output(samplerate=24000))
+    except Exception as exc:  # noqa: BLE001
+        speaker = f"could not be worked out: {exc}"
+
+    section.add(
+        "which speaker Alfred talks out of",
+        OK if speaker and "could not" not in speaker else WARN,
+        speaker,
+        "python -m src.voice.speakers test  -  to hear which one",
+    )
+
     task = os.popen(  # noqa: S605
         'schtasks /query /tn "AlfredChildAgent" 2>nul'
     ).read()
