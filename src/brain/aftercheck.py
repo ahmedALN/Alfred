@@ -84,7 +84,12 @@ def _check_open_app(
         # name, so there is nothing honest to check.
         return None
 
-    time.sleep(settle)
+    # A launch that produced a real window has already shown itself.
+    # Confirm it is still there, but do not make every ordinary "open
+    # Notepad" wait a second and a half to be told what its own window
+    # already said. The wait is for the case with nothing to show.
+    if not (result.get("hwnd") or result.get("window_title")):
+        time.sleep(settle)
 
     if _pid_alive(pid if isinstance(pid, int) else None):
         return Aftercheck(True, f"{name} still running", f"pid {pid} is alive")
