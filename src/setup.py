@@ -15,6 +15,8 @@ import time
 import urllib.request
 from pathlib import Path
 
+from src.windows.quiet import NO_WINDOW
+
 _ROOT = Path(__file__).resolve().parent.parent
 _ENV = _ROOT / ".env"
 _ENV_EXAMPLE = _ROOT / ".env.example"
@@ -56,6 +58,10 @@ def check_python_deps() -> None:
     if missing:
         print(f"{_TODO} Python packages missing: {', '.join(missing)}")
         if _ask("    Install them now?"):
+            # Deliberately NOT hidden: this is the interactive setup and
+            # pip's progress is the thing somebody is sitting there
+            # watching. Everywhere else, a console is a black rectangle
+            # painted over what you were reading.
             subprocess.run(
                 [sys.executable, "-m", "pip", "install", "-r",
                  str(_ROOT / "requirements.txt")],
@@ -84,7 +90,7 @@ def check_ollama() -> None:
         print(f"{_TODO} missing models: {', '.join(want)}")
         if _ask("    Pull them now (a few GB)?"):
             for m in want:
-                subprocess.run(["ollama", "pull", m])
+                subprocess.run(["ollama", "pull", m], creationflags=NO_WINDOW)
     else:
         print(f"{_OK} local models present")
 
@@ -121,6 +127,8 @@ def build_native() -> None:
             print(f"{_WARN} {name}: {proj} missing")
             continue
         print(f"     building {name} ...")
+        # Also deliberately visible - a .NET build takes long enough
+        # that silence reads as a hang.
         r = subprocess.run(
             ["dotnet", "build", str(proj), "-c", "Release", "-v", "q", "-nologo"],
             capture_output=True, text=True,
@@ -138,8 +146,7 @@ def _stop_native_helpers() -> None:
     for name in ("ChildInputAgent.exe", "ChildSessionProbe.exe"):
         subprocess.run(
             ["taskkill", "/F", "/IM", name],
-            capture_output=True, text=True,
-        )
+            capture_output=True, text=True, creationflags=NO_WINDOW)
     time.sleep(0.8)
 
 
@@ -173,11 +180,11 @@ def ensure_env() -> None:
 
 def offer_extras() -> None:
     if _ask("\nStart Alfred automatically at login?", default=False):
-        subprocess.run([sys.executable, "-m", "src.autostart", "install"])
+        subprocess.run([sys.executable, "-m", "src.autostart", "install"], creationflags=NO_WINDOW)
 
     if _ask('Record samples now to train a custom "Hey Alfred" wake word?',
             default=False):
-        subprocess.run([sys.executable, "-m", "src.voice.train_wakeword", "record"])
+        subprocess.run([sys.executable, "-m", "src.voice.train_wakeword", "record"], creationflags=NO_WINDOW)
 
 
 def sync_env() -> int:

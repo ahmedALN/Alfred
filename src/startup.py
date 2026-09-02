@@ -21,6 +21,8 @@ import json
 import subprocess
 import sys
 
+from src.windows.quiet import NO_WINDOW
+
 # Things Alfred's session genuinely needs, or that are unsafe to close.
 _ESSENTIAL = {
     "childinputagent",   # Alfred's own agent - the whole point
@@ -40,8 +42,7 @@ def _ps(command: str, timeout: float = 60.0) -> str:
             ["powershell.exe", "-NoProfile", "-NonInteractive",
              "-ExecutionPolicy", "Bypass", "-Command", command],
             capture_output=True, text=True, encoding="utf-8",
-            errors="replace", timeout=timeout, check=False,
-        )
+            errors="replace", timeout=timeout, check=False, creationflags=NO_WINDOW)
         return (out.stdout or "").strip()
     except Exception:  # noqa: BLE001
         return ""

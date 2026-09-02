@@ -133,7 +133,9 @@ class LocalVoiceSession:
                 pcm = np.frombuffer(
                     wf.readframes(wf.getnframes()), dtype=np.int16
                 )
-            sd.play(pcm, rate)
+            from src.voice.speakers import chosen_output
+
+            sd.play(pcm, rate, device=chosen_output(samplerate=rate))
             sd.wait()
         except Exception as exc:  # noqa: BLE001
             print(f"[LocalVoice] playback failed: {exc}")

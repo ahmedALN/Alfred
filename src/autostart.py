@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from src.windows.quiet import NO_WINDOW
+
 TASK_NAME = "AlfredAssistant"
 SHORTCUT_NAME = "Alfred.vbs"
 
@@ -103,7 +105,7 @@ def _install_task() -> dict[str, object]:
         "/F",
     ]
 
-    proc = subprocess.run(args, capture_output=True, text=True)
+    proc = subprocess.run(args, capture_output=True, text=True, creationflags=NO_WINDOW)
 
     if proc.returncode != 0:
         return {
@@ -126,8 +128,7 @@ def uninstall() -> dict[str, object]:
     proc = subprocess.run(
         ["schtasks", "/Delete", "/TN", TASK_NAME, "/F"],
         capture_output=True,
-        text=True,
-    )
+        text=True, creationflags=NO_WINDOW)
     if proc.returncode == 0:
         removed.append("scheduled task")
 
@@ -145,8 +146,7 @@ def status() -> dict[str, object]:
     proc = subprocess.run(
         ["schtasks", "/Query", "/TN", TASK_NAME],
         capture_output=True,
-        text=True,
-    )
+        text=True, creationflags=NO_WINDOW)
     by_task = proc.returncode == 0
     by_folder = _shortcut().exists()
 

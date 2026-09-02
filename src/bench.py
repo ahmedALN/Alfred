@@ -45,6 +45,8 @@ import sys
 import time
 from pathlib import Path
 
+from src.windows.quiet import NO_WINDOW
+
 _ROOT = Path(__file__).resolve().parent.parent
 
 # Everything that writes, writes here.
@@ -524,8 +526,7 @@ def reset() -> None:
     for image in ("notepad.exe", "Notepad.exe"):
         subprocess.run(
             ["taskkill", "/IM", image, "/F"],
-            capture_output=True, timeout=20,
-        )
+            capture_output=True, timeout=20, creationflags=NO_WINDOW)
 
 
 def run(goals: list[dict]) -> list[dict]:

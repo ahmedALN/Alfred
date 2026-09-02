@@ -613,10 +613,24 @@ class AlfredLiveSession:
             print("[Speaker] quiet mode - Alfred will not speak aloud.")
             return
 
+        # Which speaker, said out loud once so a wrong one is
+        # diagnosable rather than mysterious. sounddevice's own default
+        # is MME's, which is fixed at enumeration and is not the device
+        # Windows is set to - this machine has twenty output endpoints
+        # and Alfred was coming out of the monitor.
+        from src.voice.speakers import chosen_output, describe
+
+        device = chosen_output(
+            samplerate=self.OUTPUT_SAMPLE_RATE,
+            channels=self.OUTPUT_CHANNELS,
+        )
+        print(f"[Speaker] out through: {describe(device)}")
+
         self._audio_output = sd.RawOutputStream(
             samplerate=self.OUTPUT_SAMPLE_RATE,
             channels=self.OUTPUT_CHANNELS,
             dtype="int16",
+            device=device,
         )
 
         self._audio_output.start()

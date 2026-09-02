@@ -28,6 +28,8 @@ import sys
 import time
 from pathlib import Path
 
+from src.windows.quiet import NO_WINDOW
+
 _ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -308,7 +310,7 @@ def setup(before) -> None:
     if before[0] == "open":
         import subprocess
 
-        subprocess.Popen([before[1]])
+        subprocess.Popen([before[1]], creationflags=NO_WINDOW)
         time.sleep(3)
 
 
