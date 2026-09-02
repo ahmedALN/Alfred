@@ -428,6 +428,20 @@ class AppLauncher:
                 return w
         return None
 
+    def _expected_exe(self, spec: LaunchSpec) -> str:
+        """The executable a spec really starts, or "" if unknowable.
+
+        Store apps and URIs go through the shell, which starts
+        something else entirely, so there is nothing to check and
+        saying so is better than guessing wrong.
+        """
+        if spec.kind == "exe":
+            return spec.value
+        if spec.kind == "shortcut":
+            target, _args = shortcut_target(spec.value)
+            return target if target.lower().endswith(".exe") else ""
+        return ""
+
     def _wait_for_window(
         self,
         pid: int | None,
@@ -566,12 +580,39 @@ class AppLauncher:
         )
 
         if window is None:
-            # It very likely started; we just couldn't attach a window
-            # (splash screen, slow start, background app). Not an error.
+            # No window. That used to be reported as "Launched; window
+            # not confirmed yet" - a success - which is how Alfred came
+            # to say it had opened a game that had already exited.
+            #
+            # There is a fact available here: is the thing still
+            # running? An app that is merely slow is alive with no
+            # window yet; one that needed a launcher, or a file that
+            # was missing, is gone within a second or two.
+            exe = self._expected_exe(spec)
+            alive = pid if _pid_alive(pid) else (
+                running_image(exe) if exe else None
+            )
+
+            if exe and alive is None:
+                return AppLaunchResult(
+                    app=requested, executable=spec.value, target=target,
+                    launched=False, moved_to_target=False, pid=None,
+                    hwnd=None, desktop=None, window_title=None,
+                    method=spec.kind, status="failed",
+                    note=(
+                        f"Started '{Path(exe).name}' and it exited "
+                        "immediately without opening a window. Something "
+                        "it needs is missing - often a launcher (Steam, "
+                        "Epic) that has to be running first, or a file "
+                        "it could not find."
+                    ),
+                )
+
             return AppLaunchResult(
                 app=requested, executable=spec.value, target=target,
-                launched=True, moved_to_target=False, pid=pid, hwnd=None,
-                desktop=None, window_title=None, method=spec.kind,
+                launched=True, moved_to_target=False, pid=alive or pid,
+                hwnd=None, desktop=None, window_title=None,
+                method=spec.kind,
                 note="Launched; window not confirmed yet.",
             )
 
@@ -604,6 +645,56 @@ _SYSTEM_EXES = {
     "powershell.exe", "cmd.exe", "regedit.exe", "control.exe",
     "snippingtool.exe", "write.exe", "charmap.exe", "wt.exe",
 }
+
+
+def _pid_alive(pid: int | None) -> bool:
+    if not pid:
+        return False
+    try:
+        return psutil.Process(pid).is_running()
+    except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError):
+        return False
+
+
+def shortcut_target(path: str | Path) -> tuple[str, str]:
+    """What a .lnk or .url actually points at: (target, arguments).
+
+    Shortcuts are launched by handing them to the shell, which returns
+    no pid - so without reading the target there is nothing to check
+    afterwards, and "Launched" got reported for apps that had already
+    exited. It is also the only way to tell that a game is really a
+    Steam URL wearing a shortcut's name.
+    """
+    p = Path(path)
+    try:
+        if p.suffix.lower() == ".url":
+            for line in p.read_text(
+                encoding="utf-8", errors="replace"
+            ).splitlines():
+                if line.lower().startswith("url="):
+                    return line.split("=", 1)[1].strip(), ""
+            return "", ""
+
+        import win32com.client  # noqa: PLC0415 - COM is slow to import
+
+        link = win32com.client.Dispatch("WScript.Shell").CreateShortCut(str(p))
+        return str(link.Targetpath or ""), str(link.Arguments or "")
+    except Exception:  # noqa: BLE001 - a shortcut we cannot read is not fatal
+        return "", ""
+
+
+def running_image(exe: str) -> int | None:
+    """The pid of a live process running this executable, if any."""
+    name = Path(exe).name.lower()
+    if not name:
+        return None
+    for proc in psutil.process_iter(["name", "pid"]):
+        try:
+            if (proc.info.get("name") or "").lower() == name:
+                return int(proc.info["pid"])
+        except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError):
+            continue
+    return None
 
 
 def _shortcut_name(stem: str) -> str:

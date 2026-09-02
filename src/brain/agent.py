@@ -166,6 +166,25 @@ description of this one run.
 If there is no useful lesson, reply with exactly 'none'."""
 
 
+def _opened_already(app: str, line: str) -> bool:
+    """Does this history line show THIS app being opened successfully?
+
+    It used to ask whether the app's name appeared anywhere in the
+    line - results included. A successful launch reports where it
+    launched from, so a game under D:\\SteamLibrary\\steamapps\\ was
+    proof that "Steam" was already open, and Alfred quietly declined
+    to start the launcher the game was waiting for. Every app whose
+    name turns up inside a path or a message had the same problem.
+
+    Only the call's own arguments say what was opened, and only a
+    whole word matches: "steam" is not "steamapps".
+    """
+    if "open_app(" not in line or "-> ok:" not in line:
+        return False
+    call = line.split("-> ", 1)[0]
+    return re.search(rf"\b{re.escape(app)}\b", call, re.I) is not None
+
+
 @dataclass
 class Step:
     index: int
@@ -458,6 +477,17 @@ class TaskAgent:
         dead_streak = 0  # consecutive steps that made zero progress
         heard_at_plan = len(self._said_since)
         steer_replans = 0
+        # Steps whose failure was answered by doing one thing first,
+        # and the lesson that is worth keeping if it turns out to work.
+        repairs = 0
+        repaired: set[str] = set()
+        pending_fix: dict[str, Any] = {}
+        # Set when looking at the world contradicted a tool result, and
+        # cleared by the next action that actually works. While it is
+        # set, "an earlier step probably already covered this" is not
+        # available: the world was checked and the thing was not there,
+        # and nothing has happened since to change that.
+        world_refuted = False
 
         while pi < len(plan):
             if self._cancel_check():
@@ -540,7 +570,7 @@ class TaskAgent:
 
             if progressed_here:
                 ok, evidence = self._verify(pstep, history, sub_hist, sub_steps)
-            elif not calls and any(
+            elif not calls and not world_refuted and any(
                 "-> ok:" in h for h in history[:hist_before]
             ):
                 # Zero tool calls this step but earlier work exists - could
@@ -549,6 +579,33 @@ class TaskAgent:
                 ok, evidence = self._verify(pstep, history, sub_hist, sub_steps)
             else:
                 ok, evidence = False, "no successful tool action for this step"
+            # The verifier reads the log, and the log records what the
+            # tools SAID. Where there is a fact to be had instead - the
+            # app is running, the file is on disk - go and look at it.
+            if ok:
+                trouble = self._aftercheck(sub_steps)
+                if trouble is not None:
+                    ok = False
+                    world_refuted = True
+                    evidence = str(trouble)
+                    # The line that said it worked is now known to be
+                    # wrong. Correct the record, or the already-open
+                    # guard reads it as proof the app is up and refuses
+                    # to try again - which is the one thing that has to
+                    # happen next.
+                    for i in range(len(history) - 1, -1, -1):
+                        if "-> ok:" in history[i]:
+                            history[i] = history[i].replace(
+                                "-> ok:", "-> ok, but it did not last:", 1
+                            )
+                            break
+                    history.append(f"[looked] {evidence}")
+                    self._log(
+                        "task_aftercheck",
+                        {"step": pstep["step"], "found": evidence},
+                        session_id,
+                    )
+
             self._log(
                 "task_verify",
                 {"step": pstep["step"], "verified": ok, "evidence": evidence},
@@ -558,8 +615,41 @@ class TaskAgent:
             if ok:
                 result.verified.append(pstep["step"])
                 dead_streak = 0
+                world_refuted = False
+                # It worked, and it worked because of something done
+                # first. That is worth knowing next time.
+                fixed_by = pending_fix.pop(pstep["step"], None)
+                if fixed_by is not None and fixed_by.lesson:
+                    self._keep_lesson(fixed_by.lesson, session_id)
                 pi += 1
                 continue
+
+            # Most failures do not want a different plan, they want one
+            # thing doing first. Try that before rewriting everything:
+            # it is cheaper, it is often certain, and a replan that
+            # drops the goal is how "open the game" became a web search.
+            if repairs < 2 and pstep["step"] not in repaired:
+                fix = self._repair_for(sub_steps, evidence)
+                if fix is not None:
+                    repairs += 1
+                    repaired.add(pstep["step"])
+                    pending_fix[pstep["step"]] = fix
+                    history.append(f"[first] {fix.step} - {fix.why}")
+                    self._log(
+                        "task_repair",
+                        {"step": pstep["step"], "first": fix.step,
+                         "why": fix.why, "certain": fix.certain},
+                        session_id,
+                    )
+                    plan = (
+                        plan[:pi]
+                        + [{"step": fix.step,
+                            "done_when": f"{fix.tool} returns success"}]
+                        + plan[pi:]
+                    )
+                    result.plan = [p["step"] for p in plan]
+                    self._planned_ever.update(result.plan)
+                    continue
 
             # Count toward the give-up streak only when the step genuinely
             # tried (made tool calls) and still got nowhere - not when the
@@ -1171,8 +1261,7 @@ class TaskAgent:
             if dtool == "open_app":
                 app = str(dargs.get("app") or dargs.get("name") or "").lower()
                 if app and any(
-                    f"open_app(" in h and app in h.lower() and "-> ok:" in h
-                    for h in history
+                    _opened_already(app, h) for h in history
                 ):
                     history.append(
                         f"[system] {app} is already open (see HISTORY) - "
@@ -1245,6 +1334,63 @@ class TaskAgent:
         "value", "text", "control", "window", "which", "line", "there",
     }
 
+    def _aftercheck(self, sub_steps: "list[Step]") -> Any:
+        """The world's opinion of a step that has just claimed success.
+
+        Only the most recent checkable action is looked at, and only a
+        check with positive evidence AGAINST the claim counts. Silence
+        means "nothing to check here", never "it failed".
+        """
+        from src.brain import aftercheck as _after
+
+        for st in reversed(sub_steps):
+            if not st.ok or not st.tool:
+                continue
+            found = _after.check(st.tool, st.args, st.result)
+            if found is None:
+                continue
+            return None if found.ok else found
+        return None
+
+    def _repair_for(self, sub_steps: "list[Step]", evidence: str) -> Any:
+        """One thing to do first that would make this step work."""
+        from src.brain import repair as _repair
+
+        for st in reversed(sub_steps):
+            if st.tool != "open_app":
+                continue
+            res = st.result if isinstance(st.result, dict) else {}
+            app = str(
+                res.get("app") or st.args.get("app") or st.args.get("name") or ""
+            )
+            if not app:
+                continue
+            note = " ".join(
+                x for x in (str(res.get("note") or ""),
+                            str(res.get("error") or ""), evidence) if x
+            )
+            try:
+                return _repair.prerequisite(
+                    app,
+                    executable=str(res.get("executable") or ""),
+                    note=note,
+                    chat=self._fast_chat,
+                )
+            except Exception:  # noqa: BLE001
+                return None
+        return None
+
+    def _keep_lesson(self, lesson: str, session_id: str | None) -> None:
+        if self._learner is None or not lesson:
+            return
+        try:
+            self._learner.remember(
+                lesson, category="how-to", source="task"
+            )
+            self._log("task_learned", {"lesson": lesson}, session_id)
+        except Exception:  # noqa: BLE001
+            pass
+
     def _verify(
         self,
         pstep: dict[str, str],
@@ -1283,7 +1429,15 @@ class TaskAgent:
             return False, f"it was refused: {refusal}"
 
         # --- deterministic fast-paths (never say "no", only "yes") ------
-        probe = self._deterministic_verify(done_when, scope)
+        #
+        # Always against THIS step's own log, even when the scope has
+        # been widened for the model to look for prior coverage. The
+        # overlap check counts signal words, and a done_when as ordinary
+        # as "open_app returns success" is satisfied by ANY successful
+        # open_app - so widening it let the launch of Steam stand as
+        # proof that the game it was launched for had opened.
+        narrow = sub_hist if sub_hist is not None else history
+        probe = self._deterministic_verify(done_when, narrow)
         if probe is not None:
             return True, probe
 
