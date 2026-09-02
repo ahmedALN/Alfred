@@ -13,7 +13,7 @@ one. Two different strengths of promise, and the tests say which is
 which.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime
 
 from src.tools.calendar_tool import CalendarTool
 from src.tools.classroom_tool import ClassroomTool
@@ -241,3 +241,48 @@ def test_nothing_linked_at_all_is_a_different_message(tmp_path):
         assert "no Google account linked" in str(exc)
     else:
         raise AssertionError("should have refused")
+
+
+# ====================================================================
+# Deadlines arrive in UTC and are read in yours
+# ====================================================================
+
+
+def test_a_classroom_deadline_is_read_as_utc():
+    """Classroom sends UTC. This used to build a naive datetime from it
+    and compare that against a naive local `now`, so "overdue" flipped
+    an hour early or late everywhere but the meridian in winter."""
+
+    from src.workspace.classroom import _due_at
+
+    when = _due_at({
+        "dueDate": {"year": 2026, "month": 9, "day": 30},
+        "dueTime": {"hours": 23, "minutes": 59},
+    })
+
+    assert when is not None
+    assert when.tzinfo is not None
+    assert when.astimezone(UTC).hour == 23
+    assert when.astimezone(UTC).minute == 59
+
+
+def test_a_deadline_with_no_time_is_the_end_of_that_day():
+
+    from src.workspace.classroom import _due_at
+
+    when = _due_at({"dueDate": {"year": 2026, "month": 9, "day": 30}})
+
+    assert when.astimezone(UTC).hour == 23
+
+
+def test_no_date_means_no_deadline():
+    from src.workspace.classroom import _due_at
+
+    assert _due_at({}) is None
+    assert _due_at({"dueDate": {}}) is None
+
+
+def test_a_nonsense_date_is_no_deadline_rather_than_a_crash():
+    from src.workspace.classroom import _due_at
+
+    assert _due_at({"dueDate": {"year": 2026, "month": 13, "day": 40}}) is None

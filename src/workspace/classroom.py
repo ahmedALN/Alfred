@@ -8,7 +8,7 @@ half; the other half should be a person's own doing.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 _MAX = 50
@@ -49,7 +49,9 @@ class Classroom:
         Sorted by when it is due rather than by course, because that is
         the order it has to be done in.
         """
-        now = now or datetime.now()
+        # Aware, because _due_at returns an aware time and Python
+        # refuses to compare the two.
+        now = now or datetime.now(UTC).astimezone()
         horizon = now + timedelta(days=max(1, days))
         out: list[dict[str, Any]] = []
 
@@ -119,16 +121,30 @@ class Classroom:
 
 def _due_at(piece: dict[str, Any]) -> datetime | None:
     """Classroom splits a deadline across two fields, and the time half
-    is optional. No date at all means no deadline."""
+    is optional. No date at all means no deadline.
+
+    The deadline Classroom sends is UTC, and this used to build a naive
+    datetime from it and then compare that against a naive
+    `datetime.now()`, which is local. The two agree only on a machine
+    sitting on the meridian in winter: everywhere else "overdue" flipped
+    an hour early or an hour late, and a deadline of 23:59 was shown as
+    23:59 in a timezone it was never expressed in. The calendar had the
+    same bug in a louder form - it answered 400 to every read for days,
+    which at least said something was wrong.
+    """
     date = piece.get("dueDate") or {}
     if not date.get("year"):
         return None
 
     at = piece.get("dueTime") or {}
     try:
-        return datetime(
+        utc = datetime(
             int(date["year"]), int(date["month"]), int(date["day"]),
             int(at.get("hours", 23)), int(at.get("minutes", 59)),
+            tzinfo=UTC,
         )
     except Exception:  # noqa: BLE001
         return None
+
+    # Shown to somebody standing in their own timezone.
+    return utc.astimezone()
