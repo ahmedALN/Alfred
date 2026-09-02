@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import re
 
+from src.brain.shellsafe import normalise
 from src.brain.types import Decision, Proposal, ProposalKind, Verdict
-
 
 # ====================================================================
 # Guardrails
@@ -25,12 +25,19 @@ CATASTROPHIC_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\bdiskpart\b", re.I),
     re.compile(r"\bcipher\s+/w", re.I),
     re.compile(r"\bsdelete\b", re.I),
-    # Deleting the OS / whole user profile roots
+    # Deleting the OS / whole user profile roots.
+    #
+    # Deliberately order-independent. This was one ordered pattern that
+    # wanted the switch before the path, and `-Path` is positional - so
+    # `Remove-Item C:\Windows -Recurse -Force`, which is how anybody
+    # would actually type it, scored merely "dangerous" while
+    # `Remove-Item -Recurse C:\Windows` scored catastrophic. The same
+    # command, twice, with two different verdicts.
     re.compile(
-        r"remove-item\b.*(-recurse|\brd\b|\brmdir\b).*"
-        r"(c:\\windows|c:\\program files|%systemroot%|\$env:systemroot|"
-        r"c:\\users\b\s*$|c:\\\s*$)",
-        re.I,
+        r"(?is)^(?=.*remove-item\b)(?=.*(?:-recurse|\brd\b|\brmdir\b))"
+        r"(?=.*(?:c:\\windows|c:\\program files|%systemroot%|"
+        r"\$env:systemroot|\$env:windir|c:\\users\s*[\\\"']?\s*$|"
+        r"c:\\users\\?\s*(?:$|[-\"'])|c:\\\s*$))",
     ),
     re.compile(r"\b(rd|rmdir)\b.*/s.*(c:\\windows|c:\\users\b|c:\\\s*$)", re.I),
     re.compile(r"get-childitem\s+c:\\?\s+.*remove-item", re.I),
@@ -40,6 +47,23 @@ CATASTROPHIC_PATTERNS: list[re.Pattern[str]] = [
     # Turning off tamper protection / wholesale AV removal
     re.compile(r"set-mppreference.*-disabletamperprotection", re.I),
     re.compile(r"uninstall-windowsfeature\b.*defender", re.I),
+    # Destroying the ways back. Deleting shadow copies or backups is
+    # not a thing an assistant ever has a reason to do, and it is the
+    # first move of every piece of ransomware that has ever run on
+    # Windows.
+    re.compile(r"\bvssadmin\b.*\bdelete\b.*\bshadow", re.I),
+    re.compile(r"\bwbadmin\b.*\bdelete\b", re.I),
+    re.compile(r"get-wmiobject\b.*win32_shadowcopy.*\bdelete\b", re.I),
+    re.compile(r"remove-computerrestorepoint\b|disable-computerrestore\b", re.I),
+    re.compile(r"\bbcdedit\b.*recoveryenabled\s+no", re.I),
+    # Emptying a user's whole profile through the .NET API rather than
+    # a cmdlet - Remove-Item's patterns above never see this spelling.
+    re.compile(
+        r"\[(?:system\.)?io\.directory\]::delete\s*\(\s*[\"']?"
+        r"(?:c:\\windows|c:\\program files|c:\\users\\?[\"']|"
+        r"\$env:userprofile[\"']?\s*\))",
+        re.I,
+    ),
 ]
 
 DANGEROUS_PATTERNS: list[re.Pattern[str]] = [
@@ -82,6 +106,56 @@ DANGEROUS_PATTERNS: list[re.Pattern[str]] = [
     ),
     re.compile(r"\brobocopy\b.*/(mov|move|mir|purge)", re.I),
     re.compile(r"\b(move|xcopy)\b.*/[esy]", re.I),
+    # ---------------------------------------------------------------
+    # Added after probing the gate. Each of these came back "ordinary"
+    # and each one does the thing the gate exists to stop.
+    # ---------------------------------------------------------------
+    # A wildcard is a recursion you did not have to type.
+    # `Remove-Item -Path C:\Users\me\Documents\* -Force` empties a
+    # folder as thoroughly as -Recurse does.
+    re.compile(r"remove-item\b[^|;\n]*[\\/]\*", re.I),
+    re.compile(r"remove-item\b[^|;\n]*\*\.\w+", re.I),
+    # Base64 hides the command from every pattern above. shellsafe
+    # decodes it and the decoded text is judged too, but a command
+    # that arrives encoded at all is not one to run without asking.
+    re.compile(r"-e(?:c|nc?o?d?e?d?c?o?m?m?a?n?d?)\s+[A-Za-z0-9+/=]{16,}", re.I),
+    re.compile(r"frombase64string\b", re.I),
+    # Deleting or overwriting through .NET, which no cmdlet pattern
+    # sees.
+    re.compile(r"\[(?:system\.)?io\.(?:file|directory)\]::(delete|move)", re.I),
+    re.compile(r"\[(?:system\.)?io\.file\]::writeall(text|bytes|lines)", re.I),
+    # Persistence by writing the profile that every future shell runs.
+    re.compile(r"(set|add|out|clear)-(content|file|item)\b[^|;\n]*\$profile", re.I),
+    re.compile(r"\$profile[^|;\n]*(-value|>>|>)", re.I),
+    re.compile(
+        r"hkcu:?\\+software\\+microsoft\\+windows\\+currentversion\\+run",
+        re.I,
+    ),
+    re.compile(r"[\\/]start\s*menu[\\/]programs[\\/]startup", re.I),
+    # Sending something out. The gate cared a lot about what came in
+    # and nothing about what left.
+    re.compile(
+        r"(invoke-restmethod|invoke-webrequest)\b[^|;\n]*"
+        r"-method\s+(post|put|patch)",
+        re.I,
+    ),
+    re.compile(r"(invoke-restmethod|invoke-webrequest)\b[^|;\n]*-(body|infile)\b", re.I),
+    re.compile(r"\buploadfile\b|\buploadstring\b", re.I),
+    re.compile(r"send-mailmessage\b", re.I),
+    # Taking ownership / rewriting permissions on somebody else's files.
+    re.compile(r"\btakeown\b|\bicacls\b[^|;\n]*/(grant|deny|setowner|reset)", re.I),
+    re.compile(r"set-acl\b", re.I),
+    # Creating a process the long way round.
+    re.compile(r"\bwmic\b[^|;\n]*process[^|;\n]*call[^|;\n]*create", re.I),
+    re.compile(r"invoke-cimmethod\b[^|;\n]*win32_process", re.I),
+    re.compile(r"\bnew-scheduledtask\b|\bset-scheduledtask\b", re.I),
+    # Reaching another machine, or letting one reach this one.
+    re.compile(r"\bnet\s+use\b", re.I),
+    re.compile(r"enable-psremoting\b|new-pssession\b|invoke-command\b.*-computername", re.I),
+    # Add-Type with a P/Invoke signature is native code, compiled here,
+    # to do something no cmdlet would.
+    re.compile(r"add-type\b[^\n]*dllimport", re.I),
+    re.compile(r"reflection\.assembly\]::load", re.I),
 ]
 
 # Read-only cmdlets the brain may run unattended (whole pipeline must
@@ -116,20 +190,49 @@ FORBIDDEN_PATTERNS = CATASTROPHIC_PATTERNS
 
 
 def classify_command(command: str) -> str:
-    """Return 'catastrophic', 'dangerous', or 'ordinary' for a shell command."""
+    """Return 'catastrophic', 'dangerous', or 'ordinary' for a shell command.
+
+    Judged on what the command says once PowerShell has read it -
+    aliases expanded, backticks gone, split strings rejoined, any
+    -EncodedCommand payload decoded, any wrapped shell unwrapped - as
+    well as on the literal text. The worse of the two verdicts wins, so
+    normalising can only ever raise the tier, never lower it.
+    """
+
+    if not command:
+        return "ordinary"
+
+    texts = [command]
+
+    flattened = normalise(command)
+
+    if flattened and flattened != command:
+        texts.append(flattened)
 
     for pattern in CATASTROPHIC_PATTERNS:
-        if pattern.search(command):
+        if any(pattern.search(text) for text in texts):
             return "catastrophic"
 
     for pattern in DANGEROUS_PATTERNS:
-        if pattern.search(command):
+        if any(pattern.search(text) for text in texts):
             return "dangerous"
 
     return "ordinary"
 
 
 def _pipeline_is_readonly(command: str) -> bool:
+    # Judged on the expanded text, so `gci | sls` is recognised as the
+    # read it is and `gci | ri` is recognised as the write it is.
+    # A command that grew extra lines under normalisation was carrying
+    # something - an encoded payload, a wrapped shell - and is never
+    # waved through unattended whatever the payload turned out to say.
+    flattened = normalise(command)
+
+    if "\n" in flattened.strip():
+        return False
+
+    command = flattened or command
+
     if re.search(r"[;&`{}]|\$\(|>|<|\bfunction\b|=", command):
         return False
 
