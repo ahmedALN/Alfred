@@ -84,6 +84,49 @@ def clean_title(title: str) -> str:
     return text
 
 
+def _wait_for_focus(win, timeout: float = 2.0) -> bool:
+    """Wait until the window really has the keyboard, or give up.
+
+    send_keys types into whatever has focus AT THE MOMENT EACH KEY
+    GOES, so starting before the switch has finished does not lose the
+    first few characters cleanly - it interleaves them with the ones
+    that arrive after. Asked to type "hello from the stress test",
+    Notepad received:
+
+        hellohellohello ooom     rrress eest
+        hello mmmm     rrress test 12345
+        hello from the stress test 12345      <- and by now, settled
+        hello from the stress test 12345
+
+    A fixed 0.2s sleep was standing in for this. It is enough when the
+    machine is quiet and it is not when anything else is going on,
+    which is exactly when Alfred is being used.
+    """
+
+    try:
+        import ctypes
+
+        wanted = int(win.handle)
+    except Exception:  # noqa: BLE001
+        return False
+
+    deadline = time.monotonic() + timeout
+
+    while time.monotonic() < deadline:
+        try:
+            if int(ctypes.windll.user32.GetForegroundWindow()) == wanted:
+                # It has the keyboard. A breath for the caret to land
+                # inside the control that will receive the text.
+                time.sleep(0.12)
+                return True
+        except Exception:  # noqa: BLE001
+            return False
+
+        time.sleep(0.05)
+
+    return False
+
+
 def _process_name(pid: int) -> str:
     """The program behind a window, without its extension.
 
@@ -415,10 +458,22 @@ class UiaSession:
         return None
 
     def focus(self, win) -> None:
+        """Bring a window to the front, and wait until it is there.
+
+        The 0.35s sleep this used to end on was a guess at how long
+        Windows takes to switch, and a guess is only right when the
+        machine is quiet. Waiting for the actual foreground handle
+        costs less when it is fast and does not lose characters when
+        it is slow.
+        """
         for _ in range(2):
             try:
                 win.set_focus()
-                time.sleep(0.35)
+
+                if _wait_for_focus(win):
+                    return
+
+                time.sleep(0.2)
                 return
             except Exception:  # noqa: BLE001
                 time.sleep(0.3)
@@ -915,6 +970,7 @@ class UiaSession:
                 pass
         if self._last_window is not None:
             self._raise_owner(self._last_window)
+            _wait_for_focus(self._last_window)
 
         from pywinauto.keyboard import send_keys
 

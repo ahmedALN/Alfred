@@ -177,3 +177,72 @@ def test_a_window_that_is_genuinely_absent_is_left_alone(monkeypatch):
 ])
 def test_which_errors_read_as_our_fault(text, ours):
     assert bool(_OUR_FAULT.search(text)) is ours
+
+
+# ====================================================================
+# Typing into a window that has not finished coming to the front
+# ====================================================================
+
+
+def test_it_waits_for_the_window_to_actually_have_the_keyboard(monkeypatch):
+    """send_keys types into whatever has focus AT THE MOMENT EACH KEY
+    GOES, so starting before the switch has finished does not lose the
+    first few characters cleanly - it interleaves them. Notepad
+    received "hellohellohello ooom     rrress eest" for "hello from the
+    stress test"."""
+    import src.windows.uia as uia
+
+    foreground = [111]
+    monkeypatch.setattr(uia, "time", uia.time)
+
+    class _User32:
+        @staticmethod
+        def GetForegroundWindow():
+            # Third look is the charm, as a real switch would be.
+            foreground[0] = 222 if len(seen) >= 2 else 111
+            seen.append(1)
+            return foreground[0]
+
+    seen: list[int] = []
+
+    class _Ctypes:
+        windll = type("w", (), {"user32": _User32})
+
+    monkeypatch.setitem(__import__("sys").modules, "ctypes", _Ctypes)
+
+    win = type("W", (), {"handle": 222})()
+
+    assert uia._wait_for_focus(win, timeout=2.0) is True
+    assert len(seen) >= 3, "it did not wait for the switch"
+
+
+def test_it_gives_up_rather_than_hanging(monkeypatch):
+    """A window that never takes focus must not stall the whole task."""
+    import src.windows.uia as uia
+
+    class _User32:
+        @staticmethod
+        def GetForegroundWindow():
+            return 999
+
+    class _Ctypes:
+        windll = type("w", (), {"user32": _User32})
+
+    monkeypatch.setitem(__import__("sys").modules, "ctypes", _Ctypes)
+
+    win = type("W", (), {"handle": 222})()
+
+    started = __import__("time").monotonic()
+    assert uia._wait_for_focus(win, timeout=0.3) is False
+    assert __import__("time").monotonic() - started < 2.0
+
+
+def test_a_window_with_no_handle_is_not_waited_on():
+    import src.windows.uia as uia
+
+    class _NoHandle:
+        @property
+        def handle(self):
+            raise RuntimeError("gone")
+
+    assert uia._wait_for_focus(_NoHandle()) is False
