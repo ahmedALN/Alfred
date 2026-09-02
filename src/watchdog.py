@@ -25,7 +25,9 @@ _ROOT = Path(__file__).resolve().parent.parent
 _MAX_RESTARTS_PER_HOUR = 6
 _BACKOFF_START = 5.0
 _BACKOFF_MAX = 120.0
-_MIN_HEALTHY_RUN = 60.0  # ran at least this long -> reset backoff
+_MIN_HEALTHY_RUN = 60.0
+# How long to sit out after too many failures in an hour.
+_COOL_OFF = 30 * 60.0  # ran at least this long -> reset backoff
 
 
 def _python() -> str:
@@ -55,16 +57,26 @@ def main() -> int:
             restarts.popleft()
 
         if len(restarts) >= _MAX_RESTARTS_PER_HOUR:
+            # Wait, rather than stop for good. Six failures in an hour
+            # does mean something is wrong, and hammering it helps
+            # nobody - but an assistant that gives up permanently stays
+            # dead until the machine is rebooted, and the usual cause
+            # is an outage somewhere else that will pass. Sitting out
+            # the half hour costs nothing and recovers on its own.
             print(
                 f"[watchdog] {len(restarts)} restarts in the last hour - "
-                "something is wrong. Stopping. Check logs/alfred.log."
+                f"something is wrong. Waiting {_COOL_OFF / 60:.0f} minutes "
+                "before trying again. Check logs/alfred.log."
             )
-            return 1
+            time.sleep(_COOL_OFF)
+            restarts.clear()
+            backoff = _BACKOFF_START
+            continue
 
         started = time.monotonic()
-        child = subprocess.Popen(cmd, cwd=str(_ROOT),
-        creationflags=NO_WINDOW,
-    )
+        child = subprocess.Popen(
+            cmd, cwd=str(_ROOT), creationflags=NO_WINDOW,
+        )
         code = child.wait()
         ran_for = time.monotonic() - started
 

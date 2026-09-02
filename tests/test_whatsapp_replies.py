@@ -240,3 +240,23 @@ def test_ordinary_requests_are_not_mistaken_for_prohibitions():
                  "no not that one", "what is the weather"):
         assert not forbids(said), said
         assert not is_stop(said), said
+
+
+def test_a_fact_to_keep_is_not_a_routine_to_build():
+    """"remember that I hate coriander" became a task reading
+
+        Learn a routine for remembering that the user hates coriander.
+
+    A routine is a sequence of actions. A dislike is not one. The rule
+    teaching Alfred that "learn how to x" means build a skill was too
+    greedy about the word "remember", and swallowed the plainest way
+    there is to tell it something about yourself.
+    """
+    from src.brain.agent import _PLAN_SYSTEM
+    from src.messaging.reply import _SYSTEM
+
+    for prompt in (_SYSTEM, _PLAN_SYSTEM):
+        assert "Remember THAT x" in prompt
+        assert "coriander" in prompt          # the example, spelled out
+        # And the skill rule is explicitly about HOW TO, not remember.
+        assert "Learn HOW TO x" in prompt

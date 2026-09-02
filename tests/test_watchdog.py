@@ -56,10 +56,22 @@ def test_crash_then_clean_exit(monkeypatch):
     assert len(launches) == 2  # restarted once, then clean
 
 
-def test_gives_up_after_too_many_restarts(monkeypatch):
-    launches = _patch(monkeypatch, [1] * 20)
-    assert watchdog.main() == 1
-    assert len(launches) == watchdog._MAX_RESTARTS_PER_HOUR
+def test_it_stops_hammering_but_does_not_give_up_for_good(monkeypatch):
+    """Six failures in an hour means something is wrong.
+
+    It used to return at that point, which left Alfred dead until the
+    machine was rebooted - and the usual cause is an outage somewhere
+    else that passes on its own. It sits out half an hour instead, so
+    it stops hammering and still recovers without anybody noticing.
+    """
+    slept: list[float] = []
+    launches = _patch(monkeypatch, [1] * watchdog._MAX_RESTARTS_PER_HOUR + [0])
+    monkeypatch.setattr(watchdog.time, "sleep", slept.append)
+
+    assert watchdog.main() == 0     # recovered on the run after the wait
+
+    assert len(launches) == watchdog._MAX_RESTARTS_PER_HOUR + 1
+    assert watchdog._COOL_OFF in slept, "it should sit out the cool-off"
 
 
 def test_lock_conflict_code_3_waits_and_retries(monkeypatch):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import logging
 from pathlib import Path
 
@@ -920,4 +921,33 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # os._exit rather than falling off the end, and it matters.
+    #
+    # Alfred died once and stayed up: a transient Gemini outage ended
+    # main(), but the WhatsApp library runs a NON-daemon thread, so the
+    # interpreter could not finish exiting. The result was a corpse that
+    # looked healthy - the interface still served pages, the port still
+    # answered, the taskbar icon was still there - while the brain had
+    # not ticked for twenty-four minutes and every request came back
+    # "cannot schedule new futures after shutdown". The watchdog saw a
+    # live process and did nothing, because from the outside there was
+    # nothing to see.
+    #
+    # A process that has stopped being Alfred should stop being a
+    # process. Then the watchdog restarts it, which is its whole job.
+    _code = 0
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
+    except SystemExit as exc:
+        _code = int(exc.code or 0)
+    except BaseException:                      # noqa: BLE001
+        import traceback
+
+        traceback.print_exc()
+        _code = 1
+    finally:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(_code)

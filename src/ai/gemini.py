@@ -55,6 +55,14 @@ def _is_connection_error(exc: BaseException) -> bool:
     if isinstance(exc, (ConnectionError, OSError, asyncio.TimeoutError)):
         return True
 
+    # Raised by our own _receive when the session is gone. It is the
+    # consequence of a failed reconnect, not a fault - and being
+    # classified as a fault is what killed Alfred outright: a transient
+    # "service unavailable" from Gemini left the session closed, the
+    # next read raised this, and it propagated out of main().
+    if "not connected" in f"{exc}".lower():
+        return True
+
     name = type(exc).__name__.lower()
     module = (type(exc).__module__ or "").lower()
     text = f"{exc}".lower()
@@ -1572,7 +1580,29 @@ class AlfredLiveSession:
                     consecutive_failures = 0
                     print("[Alfred] reconnected.", flush=True)
                 except Exception as reconnect_exc:  # noqa: BLE001
+                    # Do not fall through: the loop would spawn voice
+                    # tasks on a session that is not there, and the
+                    # RuntimeError from that used to end the process.
+                    # Keep trying here instead, backing off, until it
+                    # works or the failure cap is reached.
                     print(f"[Alfred] reconnect failed: {reconnect_exc}")
+                    while consecutive_failures <= 10:
+                        consecutive_failures += 1
+                        await asyncio.sleep(backoff)
+                        backoff = min(backoff * 2, 60.0)
+                        try:
+                            await self._reopen_session()
+                            session_started = time.monotonic()
+                            backoff = self._reconnect_backoff_base
+                            consecutive_failures = 0
+                            print("[Alfred] reconnected.", flush=True)
+                            break
+                        except Exception as again:  # noqa: BLE001
+                            print(
+                                f"[Alfred] still cannot reconnect "
+                                f"({consecutive_failures}/10): {again}",
+                                flush=True,
+                            )
 
         finally:
             for task in background:
