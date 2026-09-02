@@ -1,42 +1,57 @@
-# Core AI / voice
-google-genai>=0.3.0
-sounddevice>=0.4.6
-numpy>=1.24
-python-dotenv>=1.0.1
+# Alfred's dependencies.
+#
+# Every line here used to be a bare `>=`, which meant a fresh clone
+# installed whatever those projects had released that morning. That is
+# not a theoretical risk for this program: `gemini-2.5-flash` and
+# `text-embedding-004` both started answering 404 mid-project, and the
+# google-genai surface moved with them.
+#
+# So: a floor that says what Alfred needs, and a ceiling at the next
+# major version, which is where a library is allowed to break you. The
+# versions in the comments are the ones this was last known green on -
+# `pip freeze` if you need to reproduce a run exactly.
 
-# Wake word: openWakeWord ("hey jarvis" + custom .onnx),
-# Vosk (custom phrase, no training)
-openwakeword>=0.6.0
-onnxruntime>=1.16
-vosk>=0.3.45
+# --- Core AI / voice ---------------------------------------------
+google-genai>=0.3.0,<3            # tested: 2.20.0
+sounddevice>=0.4.6,<1             # tested: 0.5.6
+numpy>=1.24,<3                    # tested: 2.5.2
+python-dotenv>=1.0.1,<2           # tested: 1.2.3
 
-# Local voice fallback when the Gemini quota is hit
-faster-whisper>=1.0
-piper-tts>=1.2
+# --- Wake word ----------------------------------------------------
+# openWakeWord ("hey jarvis" + a custom .onnx); Vosk for a custom
+# phrase with no training.
+openwakeword>=0.6.0,<1            # tested: 0.6.0
+onnxruntime>=1.16,<2              # tested: 1.29.0
+vosk>=0.3.45,<1                   # tested: 0.3.45
 
-# WhatsApp, so you can talk to Alfred from your phone
-neonize>=0.4.3
+# --- Local voice, for when the Gemini quota is hit ----------------
+faster-whisper>=1.0,<2            # tested: 1.2.1
+piper-tts>=1.2,<2                 # tested: 1.7.0
 
-# Windows desktop control (Windows-only)
-psutil>=5.9.8
-pyvda>=2023.1.3; sys_platform == "win32"
-pywin32>=306; sys_platform == "win32"
-pywinauto>=0.6.9; sys_platform == "win32"       # UI Automation - click apps by name
-Pillow>=10                                        # screenshot coordinate grid
+# --- WhatsApp, so you can talk to Alfred from your phone ----------
+neonize>=0.4.3,<1                 # tested: 0.4.3.post0
 
-# Google: mail, calendar, coursework. One sign-in covers all three.
-google-api-python-client>=2.100
-google-auth>=2.30
-google-auth-oauthlib>=1.2
+# --- Windows desktop control (Windows-only) ----------------------
+psutil>=5.9.8,<8                  # tested: 7.2.2
+pyvda>=0.6,<1; sys_platform == "win32"          # tested: 0.6.0
+pywin32>=306,<400; sys_platform == "win32"      # tested: 312
+pywinauto>=0.6.9,<1; sys_platform == "win32"    # tested: 0.6.9  (UI Automation)
+Pillow>=10,<14                    # tested: 12.3.0  (screenshot coordinate grid)
 
-# The interface: a local server and the window that draws it.
-fastapi>=0.110
-uvicorn[standard]>=0.29
-websockets>=12.0
-pywebview>=5.0                                    # WebView2 on Windows
+# --- Google: mail, calendar, coursework. One sign-in covers all ---
+google-api-python-client>=2.100,<3    # tested: 2.199.0
+google-auth>=2.30,<3                  # tested: 2.57.0
+google-auth-oauthlib>=1.2,<2          # tested: 1.4.1
 
-# Dev / test
-pytest>=8.0.0
+# --- The interface: a local server and the window that draws it ---
+fastapi>=0.110,<1                 # tested: 0.141.1
+uvicorn[standard]>=0.29,<1        # tested: 0.52.4
+websockets>=12.0,<17              # tested: 16.1.1
+pywebview>=5.0,<7                 # tested: 6.2.1  (WebView2 on Windows)
+
+# --- Dev / test ---------------------------------------------------
+pytest>=8.0.0,<10                 # tested: 9.1.1
+ruff>=0.14,<1                     # tested: 0.16.5  (CI pins the exact one)
 
 # External (not pip): .NET 8+ SDK for the native helpers, and Ollama
 # (https://ollama.com) if ALFRED_AI_PROVIDER=ollama. Custom wake-word

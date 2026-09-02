@@ -1,0 +1,127 @@
+# Alfred - project configuration
+#
+# There was none of this. The 1,225-test suite ran only when somebody
+# remembered to run it, ruff had no idea which rules this project had
+# agreed to, and every dependency was pinned with `>=` against APIs that
+# have already moved twice under it - `gemini-2.5-flash` and
+# `text-embedding-004` both started answering 404 mid-project. A fresh
+# clone in three months was a coin toss.
+
+[project]
+name = "alfred"
+version = "0.1.0"
+description = "A voice-driven AI that lives on your Windows PC"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+[project.urls]
+Homepage = "https://github.com/ahmedALN/Alfred"
+
+# --------------------------------------------------------------------
+# Tests
+# --------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Strict about the things that quietly rot: a marker nobody registered,
+# a config key nobody reads. Deliberately no -q here - `pytest -q` is
+# what people type, and a -q in addopts turns that into -qq, which
+# swallows the "N passed" line that is the whole point of running it.
+addopts = "--strict-markers --strict-config"
+filterwarnings = [
+    "error::DeprecationWarning:src.*",
+    # pywinauto announces its COM threading mode on import.
+    "ignore::UserWarning:pywinauto.*",
+]
+markers = [
+    "windows: needs a real Windows desktop or a built .NET helper",
+    "slow: takes more than a second",
+]
+
+# --------------------------------------------------------------------
+# Lint
+# --------------------------------------------------------------------
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+extend-exclude = [".venv", "models", "src/windows/native"]
+
+[tool.ruff.lint]
+select = [
+    "F",     # pyflakes - real errors
+    "E", "W",# pycodestyle
+    "I",     # import order
+    "UP",    # pyupgrade
+    "B",     # bugbear
+    "SIM",   # simplify
+    "RUF",
+    "S",     # bandit - this program runs shell commands for a living
+    "DTZ",   # naive datetimes; one of them cost the calendar every read
+    # Swallowing an exception is often right in an always-on program -
+    # a background loop must not die because one collector threw. It is
+    # right when it is deliberate, which is what the `# noqa: BLE001`
+    # comments all over this codebase say. Selecting the rule is what
+    # makes those comments mean something rather than decoration.
+    "BLE",
+]
+ignore = [
+    "E501",   # long lines: the prose comments in here are the point
+    "S101",   # assert - the test suite is built on it
+    "S603", "S607",  # subprocess: launching Windows programs is the job
+    "B008",
+    "SIM105",
+
+    # ---------------------------------------------------------------
+    # Deliberate, not overlooked. Each of these is a pattern this
+    # program chose, and the reason is written down here rather than
+    # repeated a hundred times as a bare suppression.
+    # ---------------------------------------------------------------
+
+    # An always-on assistant must not die because one collector threw.
+    # `safe_collect`, the supervised background loops and the tool
+    # wrappers all swallow deliberately, and there are 107 of them; a
+    # noqa on every one would say less than this paragraph does. The
+    # blind-except rule (BLE001) stays ON, and every one of those is
+    # annotated individually, so a NEW swallow is still a decision
+    # somebody has to make.
+    "S110",   # try-except-pass
+    "S112",   # try-except-continue
+
+    # main.py and a few others import after setting up logging and the
+    # environment on purpose - the import order IS the wiring order.
+    "E402",
+
+    # A naive datetime means local time, and this program says so out
+    # loud (see `_aware` in src/workspace/calendar.py). What it must
+    # never do is build one and send it to an API - that is DTZ001,
+    # which stays on for src/ and is clean there. These three are the
+    # local-clock reads, which are correct.
+    "DTZ005",  # datetime.now()
+    "DTZ007",  # strptime without %z
+    "DTZ011",  # date.today()
+
+    # A name that reads badly in one font is not a bug in a file whose
+    # regexes are about the characters themselves.
+    "RUF001",
+
+    # urlopen against an address this program built. The URLs come from
+    # config, not from a web page.
+    "S310",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests reach into internals on purpose, name fixtures loosely, and
+# build fixed datetimes to test against - a fixture clock has no
+# timezone to get wrong.
+#   E702  - a fixture table reads better as one row per line
+#   B017  - "this raises at all" is sometimes the whole assertion
+#   RUF012/E741/RUF059 - throwaway names in throwaway fakes
+"tests/*" = [
+    "S", "B011", "RUF001", "DTZ", "E702", "B017", "RUF012", "E741", "RUF059",
+]
+# The policy module is a wall of deliberately-crafted regexes.
+"src/brain/policy.py" = ["RUF001", "E501"]
+"src/brain/shellsafe.py" = ["RUF001", "E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]

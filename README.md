@@ -3,9 +3,10 @@
 A voice-driven AI that lives on your Windows PC. It starts with the machine and
 stays resident: you wake it with a phrase, talk to it, and it acts on the
 computer — opens apps, runs commands, drives its own desktop. A background
-"brain" watches the system and speaks up when something needs attention. It
-remembers things between sessions, and it can take on multi-step jobs and report
-back.
+"brain" watches the machine *and you* — what is overdue, how long you have been
+in one window, whether the mailbox link has lapsed — and speaks up when
+something needs attention. It remembers things between sessions, and it can take
+on multi-step jobs and report back.
 
 Voice uses the Gemini Live API. Everything else (reasoning, memory, screen
 understanding) runs locally through [Ollama](https://ollama.com) by default — no
@@ -105,10 +106,11 @@ the cause.
 ## Everyday commands
 
 ```bash
+python -m src.doctor                 # is everything in working order? (--quiet for problems only)
 python -m src.status                 # running? memory, brain + Gemini usage today
 python -m src.memory_cli list        # what it remembers  (search / forget / edit / dedupe / export)
 python -m src.knowledge seed         # load the built-in Windows playbook into memory (do this once)
-python -m src.skills list            # learned routines  (show / forget / disable / enable)
+python -m src.skills list            # learned routines  (show / forget / disable / enable / dedupe)
 python -m src.episodes recent        # what it actually did lately  (search / prune)
 python -m src.apps list              # how to work inside each app  (show / note / forget)
 python -m src.childsession probe     # can this PC give Alfred its own desktop?
@@ -203,6 +205,11 @@ policy gate:
 *background* brain does on its own; the catastrophic/dangerous gates apply
 regardless.
 
+A command is judged on what it means rather than on how it is spelled: aliases
+are expanded, backticks stripped, split strings rejoined, any `-EncodedCommand`
+payload decoded and a wrapped shell unwrapped, so `gci ... | ri -Force` and
+`powershell -enc <base64>` are read as the deletes they are.
+
 ## Troubleshooting
 
 - **Two voices / Alfred talks to itself** — you had two instances running (now
@@ -232,6 +239,25 @@ src/
   main.py            wires it all together
 ```
 
+## Checking it over
+
+```bash
+python -m src.doctor
+```
+
+Seven sections, each looking at the real thing rather than at a setting:
+whether every reading a collector produces reaches something that can act
+on it, whether the command gate still refuses a base64 payload, whether the
+calls that were once refused over an argument's name now get through,
+whether the stores open, which model will actually answer, and whether the
+native helpers are built. `--quiet` prints only what is wrong; the exit code
+is 0 when nothing is, so it can be run from a scheduled task and believed.
+
+Several of those checks exist because the answer was *no* and nothing said
+so — three collectors ran every ninety seconds for days with nothing
+downstream reading them, and the gate called seven destructive one-liners
+ordinary.
+
 ## Tests
 
 ```bash
@@ -239,6 +265,8 @@ python -m pytest -q
 ```
 
 Some tests need the built `DesktopBridge.exe` (they exercise the real bridge).
+Everything else runs anywhere, and runs on every push — see
+[.github/workflows/tests.yml](.github/workflows/tests.yml).
 
 ## Licence
 

@@ -1,0 +1,77 @@
+# The 1,228-test suite ran only when somebody remembered to run it.
+#
+# For anyone deciding whether to trust this on their own machine, the
+# suite is the most useful thing in the repository - and a suite whose
+# last known state is "green on the author's laptop, some time ago" is
+# not evidence. This runs it on a clean Windows runner on every push.
+#
+# Windows, because Alfred is a Windows program: pywin32, pywinauto and
+# the virtual-desktop bindings do not install anywhere else, and a suite
+# that passes on Linux would be testing a different program.
+
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor stated in pyproject, and the version this is
+        # developed on. A break on either is worth knowing about.
+        python-version: ["3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Tests
+        # No API keys and no .NET helpers on the runner. Every test that
+        # needs a real desktop skips itself; the rest - the policy gate,
+        # the planner, memory, skills, the argument layer - are the ones
+        # that matter to somebody deciding whether to run this.
+        env:
+          GEMINI_API_KEY: test-key-not-used
+          ALFRED_WATCH_ME: "false"
+        run: python -m pytest -q
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install ruff
+        run: pip install ruff==0.16.5
+
+      - name: Lint
+        run: ruff check .
