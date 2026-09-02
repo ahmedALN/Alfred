@@ -174,8 +174,12 @@ class FallbackChatProvider(ChatProvider):
                 if answer is not None:
                     index, text = answer
                     if index != self._active:
-                        self._note_move(index, self._providers[index])
-                        self._active = index
+                        self._note_move(
+                            index, self._providers[index],
+                            # Somebody actually broke, as opposed to
+                            # simply being overtaken.
+                            after_failure=bool(errors),
+                        )
                     return text
         finally:
             # Nothing is cancelled - an HTTP request in flight cannot be
@@ -292,15 +296,25 @@ class FallbackChatProvider(ChatProvider):
         """
         return self._active > 0
 
-    def _note_move(self, i: int, provider) -> None:
+    def _note_move(self, i: int, provider, *, after_failure: bool) -> None:
+        """Say which rung answered, and be honest about why.
+
+        This used to print "falling back to X - expect worse plans"
+        whenever the answering rung changed. Once rungs race, that is
+        wrong most of the time: a lower rung answering usually means it
+        got there first, not that anything failed, and a log that cries
+        failure at every overtake is a log nobody reads.
+        """
         was = self._active
         self._active = i
         where = f"{provider.name}:{getattr(provider, 'model', '?')}"
 
-        if i > was:
+        if i <= was:
+            print(f"[Plan] back on {where}.")
+        elif after_failure:
             print(f"[Plan] falling back to {where} - expect worse plans.")
         else:
-            print(f"[Plan] back on {where}.")
+            print(f"[Plan] {where} answered first.")
 
     def _record_failover(self, name: str) -> None:
         try:
