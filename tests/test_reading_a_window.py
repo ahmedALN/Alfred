@@ -246,3 +246,59 @@ def test_a_window_with_no_handle_is_not_waited_on():
             raise RuntimeError("gone")
 
     assert uia._wait_for_focus(_NoHandle()) is False
+
+
+# ====================================================================
+# Offering to map an app that needs no mapping
+# ====================================================================
+
+
+class _Ui:
+    def __init__(self, blanks, named):
+        self._blanks = blanks
+        self._controls = list(range(named))
+
+    def unnamed(self, window, pid, limit=60):
+        return window, list(range(self._blanks))
+
+
+class _Memory:
+    @staticmethod
+    def landmarks(_window):
+        return None
+
+
+def _offer(blanks, named):
+    from src.tools.ui_control import UIControlTool
+
+    tool = UIControlTool.__new__(UIControlTool)
+    tool._memory = _Memory()
+
+    return tool._offer_mapping(_Ui(blanks, named), "An App", None)
+
+
+def test_an_app_with_plenty_of_names_is_not_offered_for_mapping():
+    """Spotify has 1,511 named controls, including a search box called
+    "What do you want to play?", and was offered for mapping over
+    eleven unnamed ones - after which Alfred told the user it could not
+    play a song without mapping the app first."""
+    assert _offer(blanks=11, named=1511) == {}
+
+
+def test_an_app_that_really_cannot_be_driven_by_name_is_offered():
+    """MultiMC's Launch panel: 23 unnamed Custom controls against a
+    handful with names. That is an app you genuinely cannot use by
+    name."""
+    offer = _offer(blanks=23, named=6)
+
+    assert offer.get("needs_user") == "offer_mapping"
+    assert "23 controls with no names" in offer["question"]
+
+
+def test_a_couple_of_unnamed_controls_is_never_worth_asking_about():
+    assert _offer(blanks=3, named=0) == {}
+
+
+def test_a_window_nothing_could_be_read_from_is_still_offered():
+    """Nothing named at all is the case mapping exists for."""
+    assert _offer(blanks=12, named=0).get("needs_user") == "offer_mapping"

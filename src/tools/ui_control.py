@@ -391,6 +391,25 @@ class UIControlTool(AlfredTool):
         if len(blanks) < 4:
             return {}              # not worth asking about
 
+        # Against how many it CAN name.
+        #
+        # A bare count of four was enough to ask, and Spotify - with
+        # 1,511 named controls including a search box called "What do
+        # you want to play?" - was offered for mapping over eleven
+        # unnamed ones. Alfred then told the user it could not play a
+        # song without mapping the app first, which was not true and
+        # not the problem.
+        #
+        # Mapping is worth interrupting somebody for when the names are
+        # missing, not when a handful of decorative controls happen to
+        # lack them. MultiMC's Launch panel is 23 unnamed against a
+        # handful named - that is an app you genuinely cannot drive by
+        # name. Spotify is not.
+        named = len(getattr(ui, "_controls", []) or [])
+
+        if named and len(blanks) < named:
+            return {}
+
         return {
             "needs_user": "offer_mapping",
             "window": title or window,
