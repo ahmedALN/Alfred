@@ -24,6 +24,12 @@ _MATCH_THRESHOLD = 0.62
 _MIN_CONFIDENCE = 0.5
 _MAX_STEPS = 8
 
+# How alike two requests have to read before the routines behind them
+# count as the same routine. Jaccard over keywords: "check whether steam
+# is running" and "is steam running" share steam/running out of
+# check/whether/steam/running, which is 0.5.
+_SAME_REQUEST = 0.5
+
 # Arg keys that carry free-form user content (as opposed to structural
 # things like action names, control names, hotkeys). Only these become
 # parameter slots when distilling a skill.
@@ -355,7 +361,136 @@ class SkillLibrary:
         }
 
     def save(self, skill: dict[str, Any]) -> None:
+        """Keep it - unless it is a routine already known under another name.
+
+        Thirty-nine skills were learned and four of them were ever used
+        twice. Some of that is the library being young; some of it is
+        that the same routine was banked repeatedly under different
+        names, because the name comes from the words of the request and
+        two people can ask for one thing two ways.
+        `check-whether-steam-is` and `is-steam-running` were the same
+        three tool calls, and `how-long-has-pc` was in there twice
+        outright. Every duplicate splits the evidence: two rows at one
+        success each, where one row at two would have been trusted.
+        """
+
+        twin = self.duplicate_of(skill)
+
+        if twin is not None:
+            # The one that has actually worked keeps its record; the new
+            # request's wording is folded into its keywords so the next
+            # phrasing finds it too.
+            merged = dict(twin)
+            merged["keywords"] = sorted(
+                set(twin.get("keywords") or []) | set(skill.get("keywords") or [])
+            )
+
+            # A routine confirmed by a second independent run is not
+            # unproven any more.
+            if not skill.get("unconfirmed"):
+                merged["unconfirmed"] = False
+
+            self._store.upsert(merged)
+            self._store.record_use(
+                merged["id"],
+                ok=True,
+                confidence=min(0.99, float(twin.get("confidence") or 0.0) + 0.12),
+            )
+            return
+
         self._store.upsert(skill)
+
+    def duplicate_of(self, skill: dict[str, Any]) -> dict[str, Any] | None:
+        """An existing skill that does the same thing, if there is one.
+
+        Same tool sequence and same argument shape, ignoring the values
+        that were turned into slots - two routines that differ only in
+        which artist to play are the same routine.
+        """
+
+        fingerprint = _fingerprint(skill)
+
+        if not fingerprint:
+            return None
+
+        for existing in self._store.all(include_disabled=True):
+            if existing.get("id") == skill.get("id"):
+                continue
+
+            if _fingerprint(existing) != fingerprint:
+                continue
+
+            # Same steps AND recognisably the same request. Two routines
+            # that both happen to be one `open_app` call are not the
+            # same routine.
+            here = set(skill.get("keywords") or [])
+            there = set(existing.get("keywords") or [])
+
+            if not here or not there:
+                continue
+
+            if len(here & there) / len(here | there) >= _SAME_REQUEST:
+                return existing
+
+        return None
+
+    def find_duplicates(self) -> list[tuple[str, str]]:
+        """The (duplicate, original) pairs, without changing anything."""
+
+        return self._fold(apply=False)
+
+    def prune_duplicates(self) -> list[tuple[str, str]]:
+        """Fold every duplicate already in the store into its twin.
+
+        Returns the (dropped, kept) pairs. Run from
+        `python -m src.skills dedupe`.
+        """
+
+        return self._fold(apply=True)
+
+    def _fold(self, *, apply: bool) -> list[tuple[str, str]]:
+        folded: list[tuple[str, str]] = []
+        seen: list[dict[str, Any]] = []
+
+        # Best-established first, so the row with the successes is the
+        # one that survives.
+        ordered = sorted(
+            self._store.all(include_disabled=True),
+            key=lambda s: (s.get("success") or 0, s.get("confidence") or 0.0),
+            reverse=True,
+        )
+
+        for skill in ordered:
+            fingerprint = _fingerprint(skill)
+            here = set(skill.get("keywords") or [])
+
+            twin = None
+
+            for kept in seen:
+                there = set(kept.get("keywords") or [])
+
+                if (
+                    fingerprint
+                    and here
+                    and there
+                    and _fingerprint(kept) == fingerprint
+                    and len(here & there) / len(here | there) >= _SAME_REQUEST
+                ):
+                    twin = kept
+                    break
+
+            if twin is None:
+                seen.append(skill)
+                continue
+
+            if apply:
+                twin["keywords"] = sorted(set(twin.get("keywords") or []) | here)
+                self._store.upsert(twin)
+                self._store.delete(skill["id"])
+
+            folded.append((skill["name"], twin["name"]))
+
+        return folded
 
     # ---- feedback ------------------------------------------------
 
@@ -411,6 +546,35 @@ class SkillLibrary:
             return self._embedder.embed(text)
         except Exception:  # noqa: BLE001
             return None
+
+
+def _fingerprint(skill: dict[str, Any]) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """What a routine does, with the slot values taken out.
+
+    `play a {p0} song on Spotify` and `play a {p0} song on Spotify` are
+    the same routine whichever artist each was learned from, so the
+    values are dropped and only the tools and the argument names are
+    kept.
+    """
+
+    steps = skill.get("steps") or []
+    out: list[tuple[str, tuple[str, ...]]] = []
+
+    for step in steps:
+        if not isinstance(step, dict):
+            return ()
+
+        tool = str(step.get("tool") or "")
+
+        if not tool:
+            return ()
+
+        args = step.get("args")
+        names = tuple(sorted(args)) if isinstance(args, dict) else ()
+
+        out.append((tool, names))
+
+    return tuple(out)
 
 
 def _cos(a: list[float], b: list[float]) -> float:

@@ -6,6 +6,7 @@ python -m src.skills  -  inspect Alfred's learned skill library.
     forget <id>         delete a skill permanently
     disable <id>        keep it but stop matching it
     enable <id>         re-enable a disabled skill
+    dedupe [--dry]      fold routines that do the same thing into one
 """
 
 from __future__ import annotations
@@ -96,6 +97,50 @@ def cmd_enable(args: list[str]) -> int:
     return _set_disabled(args, False)
 
 
+def cmd_dedupe(args: list[str]) -> int:
+    """Two rows at one success each are worth less than one row at two.
+
+    A skill is named from the words of the request, so the same routine
+    banked from two phrasings becomes two skills - and neither ever
+    gathers the evidence that would let it be trusted.
+    `check-whether-steam-is` and `is-steam-running` were the same three
+    calls. This finds routines that run the same tools with the same
+    argument shape for a recognisably similar request, and keeps the one
+    that has actually worked.
+    """
+    from src.brain.skills import SkillLibrary
+
+    store = _store()
+    library = SkillLibrary(store)
+
+    if "--dry" in args or "-n" in args:
+        pairs = library.find_duplicates()
+        store.close()
+
+        if not pairs:
+            print("nothing to fold - every routine is distinct")
+            return 0
+
+        for dropped, kept in pairs:
+            print(f"  would fold  {dropped}  ->  {kept}")
+
+        print(f"\n{len(pairs)} duplicate routine(s); run without --dry to fold")
+        return 0
+
+    folded = library.prune_duplicates()
+    store.close()
+
+    if not folded:
+        print("nothing to fold - every routine is distinct")
+        return 0
+
+    for dropped, kept in folded:
+        print(f"  {dropped}  ->  {kept}")
+
+    print(f"\nfolded {len(folded)} duplicate routine(s)")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if not argv:
         print(__doc__)
@@ -105,6 +150,7 @@ def main(argv: list[str]) -> int:
     handler = {
         "list": cmd_list, "show": cmd_show, "forget": cmd_forget,
         "disable": cmd_disable, "enable": cmd_enable,
+        "dedupe": cmd_dedupe,
     }.get(cmd)
 
     if handler is None:
