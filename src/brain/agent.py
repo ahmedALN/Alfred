@@ -1706,7 +1706,7 @@ class TaskAgent:
         if not useful:
             return ""
 
-        # Room enough for the answer to be in there.
+        # Room enough for the answer to be in there, wherever it is.
         #
         # Every step used to get 400 characters. "What is on my
         # Desktop?" runs one Get-ChildItem over thirty-three items,
@@ -1716,15 +1716,32 @@ class TaskAgent:
         # at all: Alfred had the answer in its hand and read out the
         # first tenth of it.
         #
-        # The last step is the one that was asked about, so it gets the
-        # room; anything before it is context.
-        budget = 3000
-        earlier = min(len(useful) - 1, 3)
-        for_last = budget - earlier * 500
+        # Giving the room to the LAST step then broke the other shape.
+        # "What playlists do I have in Spotify?" read the tree (step 1,
+        # thousands of characters, every playlist named in it), then
+        # clicked something (step 3, a one-line confirmation) - and the
+        # budget went to the click. Alfred replied "I don't have access
+        # to your Spotify playlists; only the UI controls were
+        # returned", which was true of what it had been shown and not
+        # of what it had found.
+        #
+        # So the room goes where the content is: proportional to how
+        # much each step actually returned, with a floor so a short
+        # result is never cut to nothing.
+        budget = 3600
+        floor = 300
+
+        sizes = [len(_short(s.result, 100_000)) for s in useful]
+        spare = max(0, budget - floor * len(useful))
+        total = sum(sizes) or 1
+
+        allowances = [
+            floor + int(spare * size / total) for size in sizes
+        ]
 
         trace = "\n".join(
-            f"- {s.tool}: {_short(s.result, for_last if s is useful[-1] else 500)}"
-            for s in useful
+            f"- {s.tool}: {_short(s.result, room)}"
+            for s, room in zip(useful, allowances, strict=False)
         )
         # A question that asks WHAT wants the things, not the count of
         # them. "One short sentence" turned "what is on my Desktop?"

@@ -471,3 +471,80 @@ def test_an_empty_result_means_none_only_when_something_was_asked():
 
     assert _was_a_question("Are there any .txt files on my Desktop?")
     assert not _was_a_question("In Steam, search the store for Hollow Knight.")
+
+
+# ====================================================================
+# The answer is not always in the last step
+# ====================================================================
+
+
+def test_the_room_goes_where_the_content_is():
+    """Both shapes of this were real.
+
+    "What is on my Desktop?" ran ONE big Get-ChildItem and every step
+    got 400 characters, so the model saw a listing cut off partway
+    through the Bs and said it could not answer.
+
+    Giving the room to the last step fixed that and broke the other
+    way: "What playlists do I have in Spotify?" read the tree first
+    (thousands of characters, every playlist named), then clicked
+    something (a one-line confirmation) - and the budget went to the
+    click. Alfred replied "I don't have access to your Spotify
+    playlists; only the UI controls were returned", which was true of
+    what it had been shown and false of what it had found.
+    """
+    from src.brain.agent import TaskAgent
+
+    seen = {}
+
+    class _Chat:
+        def generate(self, prompt, **kw):
+            seen["prompt"] = prompt
+            return "ANSWER: fine"
+
+    agent = TaskAgent.__new__(TaskAgent)
+    agent._fast_chat = _Chat()
+
+    big = {"controls": [{"name": f"Playlist number {i}"} for i in range(200)]}
+    small = {"status": "success", "clicked": "Playlists"}
+
+    r = TaskResult(goal="What playlists do I have in Spotify?", status="done",
+                   summary="")
+    r.steps = [
+        type("S", (), {"ok": True, "tool": "ui_control", "result": big})(),
+        type("S", (), {"ok": True, "tool": "ui_control", "result": small})(),
+    ]
+
+    agent._finding(r)
+
+    prompt = seen["prompt"]
+
+    # The big result is the one that got the room, and enough of it
+    # that a playlist deep in the list survived.
+    assert "Playlist number 40" in prompt
+
+
+def test_a_short_result_is_never_cut_to_nothing():
+    from src.brain.agent import TaskAgent
+
+    seen = {}
+
+    class _Chat:
+        def generate(self, prompt, **kw):
+            seen["prompt"] = prompt
+            return "ANSWER: fine"
+
+    agent = TaskAgent.__new__(TaskAgent)
+    agent._fast_chat = _Chat()
+
+    r = TaskResult(goal="Is Steam running?", status="done", summary="")
+    r.steps = [
+        type("S", (), {"ok": True, "tool": "powershell",
+                       "result": {"stdout": "x" * 40_000}})(),
+        type("S", (), {"ok": True, "tool": "powershell",
+                       "result": {"stdout": "Steam is running"}})(),
+    ]
+
+    agent._finding(r)
+
+    assert "Steam is running" in seen["prompt"]
