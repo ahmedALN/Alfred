@@ -216,6 +216,53 @@ class TaskResult:
 _WORTH_NARRATING = 4
 
 
+
+# Words a tool uses when it is saying the goal is not reachable, as
+# opposed to reporting that one attempt went wrong.
+_REFUSAL_WORDS = (
+    "cannot do", "can not do", "cannot be done", "is not possible",
+    "not possible", "physical task", "refused", "i can only",
+    "is not something", "unable to do", "there is no tool",
+)
+
+
+def _refused_in(steps: "list[Step]") -> str:
+    """A refusal among these steps, if one stands unanswered.
+
+    Reads the step objects rather than the log text. The first version
+    of this parsed log lines and asked whether the same TOOL later
+    succeeded - so `skill list` working counted as answering `skill
+    learn` being refused, which is the very mistake it was written to
+    catch. Tool and action both have to match.
+    """
+    def action_of(step: "Step") -> str:
+        args = step.args if isinstance(step.args, dict) else {}
+        return str(args.get("action") or args.get("query") or "")
+
+    for i, step in enumerate(steps):
+        if step.ok:
+            continue
+        text = f"{step.result}".lower()
+        if not any(word in text for word in _REFUSAL_WORDS):
+            continue
+
+        # Refused, then made to work by the same call? Then it was not
+        # a refusal of the goal.
+        later = steps[i + 1:]
+        answered = any(
+            s.ok and s.tool == step.tool and action_of(s) == action_of(step)
+            for s in later
+        )
+        if answered:
+            continue
+
+        detail = f"{step.tool}"
+        if action_of(step):
+            detail += f" {action_of(step)}"
+        return f"{detail}: {text[:150]}"
+    return ""
+
+
 class TaskAgent:
     """
     Bounded plan -> act -> observe -> retry loop.
@@ -452,14 +499,14 @@ class TaskAgent:
             progressed_here = any(s.ok for s in sub_steps)
 
             if progressed_here:
-                ok, evidence = self._verify(pstep, history, sub_hist)
+                ok, evidence = self._verify(pstep, history, sub_hist, sub_steps)
             elif not calls and any(
                 "-> ok:" in h for h in history[:hist_before]
             ):
                 # Zero tool calls this step but earlier work exists - could
                 # be "already done" after a replan. Let the verifier judge
                 # from the whole log, but it must find real evidence.
-                ok, evidence = self._verify(pstep, history, sub_hist)
+                ok, evidence = self._verify(pstep, history, sub_hist, sub_steps)
             else:
                 ok, evidence = False, "no successful tool action for this step"
             self._log(
@@ -1163,6 +1210,7 @@ class TaskAgent:
         pstep: dict[str, str],
         history: list[str],
         sub_hist: list[str] | None = None,
+        steps: "list[Step] | None" = None,
     ) -> tuple[bool, str]:
         done_when = pstep["done_when"]
 
@@ -1176,6 +1224,23 @@ class TaskAgent:
             if not claimed_done:
                 return False, "this step took no successful action"
             scope = history  # let the model check for prior coverage
+
+        # A refusal settles it, and is not a judgement call.
+        #
+        # Asked to learn a routine for making a cup of tea, the skill
+        # tool refused - correctly, saying it is a physical task these
+        # tools cannot do. The executor then called `skill list`, which
+        # succeeded, and the verifier accepted that as evidence. The
+        # task reported "Confirmed: Learn a routine for making a cup of
+        # tea". Alfred claimed to have learned something it had just
+        # explained it could not.
+        #
+        # A tool saying "this cannot be done" is a statement about the
+        # goal, not a transient failure, and no amount of other calls
+        # succeeding afterwards changes it.
+        refusal = _refused_in(steps or [])
+        if refusal:
+            return False, f"it was refused: {refusal}"
 
         # --- deterministic fast-paths (never say "no", only "yes") ------
         probe = self._deterministic_verify(done_when, scope)

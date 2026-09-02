@@ -81,3 +81,59 @@ def test_the_process_exits_when_alfred_stops_being_alfred():
     )
     # And it must do so however main() ended.
     assert "finally:" in entry
+
+
+# ------------------------------------------------- claiming false success
+
+
+def test_a_refusal_is_not_erased_by_an_unrelated_success():
+    """Alfred said it had learned to make a cup of tea.
+
+    The skill tool refused, correctly: "Making a cup of tea is a
+    physical task that requires physical actions in the real world,
+    which these digital Windows tools cannot do." The executor then
+    called `skill list`, that succeeded, and the verifier accepted it.
+    The task reported "Confirmed: Learn a routine for making a cup of
+    tea."
+
+    A tool saying the goal cannot be reached is a statement about the
+    goal. Other calls succeeding afterwards do not change it.
+    """
+    from src.brain.agent import Step, _refused_in
+
+    refused = Step(
+        1, "", "skill", {"action": "learn"}, "auto",
+        {"status": "error",
+         "error": "Making a cup of tea is a physical task that requires "
+                  "physical actions in the real world, which these digital "
+                  "Windows tools cannot do."},
+        False,
+    )
+    listed = Step(2, "", "skill", {"action": "list"}, "auto",
+                  {"status": "success", "count": 39}, True)
+
+    assert _refused_in([refused, listed]), (
+        "a different action of the same tool succeeding is not an answer "
+        "to the refusal"
+    )
+
+
+def test_a_refusal_that_was_actually_answered_is_let_go():
+    """Refused once, then made to work, is not a refusal."""
+    from src.brain.agent import Step, _refused_in
+
+    refused = Step(1, "", "skill", {"action": "learn"}, "auto",
+                   {"error": "cannot be done that way"}, False)
+    worked = Step(2, "", "skill", {"action": "learn"}, "auto",
+                  {"status": "success"}, True)
+
+    assert not _refused_in([refused, worked])
+
+
+def test_an_ordinary_failure_is_not_a_refusal():
+    """A control that was not found is a bad attempt, not a verdict."""
+    from src.brain.agent import Step, _refused_in
+
+    missed = Step(1, "", "ui_control", {"action": "click"}, "auto",
+                  {"error": "no control matches ref=None name='Save'"}, False)
+    assert not _refused_in([missed])
