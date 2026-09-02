@@ -33,6 +33,11 @@ the log.
 playing). "move the PDFs" and "delete the zip" are TWO steps (two outcomes).
 - Every 'done_when' must be checkable from a tool result - a value a tool \
 returns, a file that exists, text in a control. Never "it worked".
+- To sleep, lock, restart, shut down or sign out, the step is just "Put the PC \
+to sleep" (or lock / restart / shut down / sign out). There is a power TOOL for \
+this. NEVER plan a PowerShell command for it: the machine stops being available \
+before the command returns, so the shell route reports nothing back and looks \
+exactly like having done nothing.
 - powershell, system_info, network_info are TOOLS the executor calls directly. \
 NEVER plan "Open PowerShell" or "Open a terminal" - to run a command the step \
 is just "Run PowerShell to <do X>". Only plan "Open <app>" for a real GUI app \

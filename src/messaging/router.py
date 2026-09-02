@@ -15,6 +15,8 @@ from typing import Any, Callable
 
 from src.messaging.base import Inbound
 
+from src.messaging.masking import mask
+
 # Anything that could carry a credential. Alfred does not want these,
 # cannot use them, and should not have them sitting in a chat log.
 _SECRET = re.compile(
@@ -81,7 +83,7 @@ class MessageRouter:
         if not self.allows(message.sender):
             with self._lock:
                 self.refused += 1
-            print(f"[Message] refused a message from {message.sender!r}")
+            print(f"[Message] refused a message from {mask(message.sender)}")
             return None
 
         if not text and not getattr(message, "media", None):

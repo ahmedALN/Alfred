@@ -22,6 +22,8 @@ from src.ai.providers import build_providers
 from src.brain.audit import AuditLog
 from src.brain.deliberation import Deliberator
 from src.tools.interface_tool import InterfaceTool
+from src.tools.power import PowerTool
+from src.tools.skill_tool import SkillTool
 from src.brain.orchestrator import BrainLoop
 from src.brain.agent import TaskAgent
 from src.brain.perception import Perception
@@ -77,6 +79,7 @@ from src.windows.isolated_desktop import IsolatedDesktop
 from src.windows.uia_remote import RemoteUia
 from src.windows.session_router import ROUTER as session_router
 from src.windows.child_session.bootstrap import ensure_agent_running
+from src.messaging.masking import mask
 
 
 def _build_personal_whatsapp(
@@ -117,7 +120,8 @@ def _build_personal_whatsapp(
     )
     channel.start(router.handle)
 
-    print(f"[Message] WhatsApp linked to {owner} - messaging your own chat.")
+    print(f"[Message] WhatsApp linked to {mask(owner)} - "
+          "messaging your own chat.")
     return router
 
 
@@ -427,6 +431,7 @@ async def main() -> None:
         ClassroomTool(classroom),
         task_status_tool,
         InterfaceTool(),
+        PowerTool(),
         EpisodesTool(episode_store),
         ResourceModeTool(resource_mode),
         WhatCanYouDoTool(
@@ -466,6 +471,13 @@ async def main() -> None:
         enabled=settings.skills_enabled,
     )
     task_queue.attach_skills(skill_library)
+
+    # Registered here rather than with the others because it needs the
+    # library, which needs the registry to build its policy - so the
+    # tool that edits skills cannot exist until the skills do.
+    registry.register(
+        SkillTool(skill_library, skill_store, registry, providers.plan_chat)
+    )
     task_queue.attach_isolated_desktop(isolated_desktop, session_router)
     print(
         f"[Skills] {len(skill_store.all(include_disabled=True))} learned; "

@@ -71,10 +71,36 @@ put `ALFRED_WAKE_PHRASE=hey alfred` in `.env`.
 | "do not disturb" | silences the proactive brain for this session |
 | "stop telling me about disk space" | permanently suppresses that topic |
 | "forget my router password" | deletes a memory (asks first) |
+| "put my pc to sleep" / "lock the screen" | sleep, lock, restart, shut down or sign out |
+| "learn how to search Steam for a game" | designs a reusable routine and keeps it |
 | "what can you do" | an accurate rundown of its tools and limits |
 
 Game mode also auto-engages when a fullscreen game holds the foreground
 (`ALFRED_GAME_AUTODETECT`).
+
+## Learning new things
+
+Alfred picked up routines by accident: do a job well once and the
+sequence that worked was distilled into a skill. That gets better at
+what it already does and never at what it has just been asked for.
+
+Ask it to **learn** something and it designs the routine instead —
+working out the steps, checking every one against the tools that
+actually exist, and keeping the result. A designed routine is saved
+unproven and at low confidence, because it is a plan that has never
+been run; the first real attempt is what earns it a promotion.
+
+```
+"learn how to search Steam for a game"
+"what have you learned to do"
+"forget how to do that"
+```
+
+Anything it invents is rejected before it is saved: a step naming a
+tool that is not there, an argument the schema does not take, a
+routine with no steps or twelve of them. A skill that fails at step one
+is worse than no skill, because it fails every time and further from
+the cause.
 
 ## Everyday commands
 
