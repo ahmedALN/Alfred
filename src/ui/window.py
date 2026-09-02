@@ -17,9 +17,15 @@ anything that has not been told the key.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from typing import Any
 
 TITLE = "Alfred"
+
+# Its own mark rather than the Python interpreter's, which is what a
+# pywebview window inherits otherwise - so the taskbar showed a Python
+# logo for something that is not, to the person using it, Python.
+ICON = Path(__file__).resolve().parent.parent.parent / "assets" / "alfred.ico"
 
 
 _window: Any = None
@@ -102,6 +108,12 @@ def run(url: str) -> int:
     # EdgeChromium is WebView2, which is present on Windows 11 and is a
     # current Chromium - so the canvas, the backdrop filters and the
     # web audio all behave as they do in a real browser.
-    webview.start(gui="edgechromium" if sys.platform == "win32" else None,
-                  private_mode=False)
+    start: dict[str, Any] = {
+        "gui": "edgechromium" if sys.platform == "win32" else None,
+        "private_mode": False,
+    }
+    if ICON.exists():
+        start["icon"] = str(ICON)
+
+    webview.start(**start)
     return 0

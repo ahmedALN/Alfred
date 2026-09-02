@@ -102,12 +102,15 @@ def skills(limit: int = 200) -> list[dict[str, Any]]:
         (limit,),
     )
     for skill in found:
-        # Steps are stored as JSON; the window wants a count, not a blob.
+        # The steps come through parsed, not dropped. A count told the
+        # window how many things a routine did and nothing about what
+        # they were, so "1 step, 0 ok" was the whole description of a
+        # routine you were being asked whether to keep.
         try:
-            skill["step_count"] = len(json.loads(skill.pop("steps") or "[]"))
+            skill["steps"] = json.loads(skill.get("steps") or "[]")
         except Exception:  # noqa: BLE001
-            skill["step_count"] = 0
-            skill.pop("steps", None)
+            skill["steps"] = []
+        skill["step_count"] = len(skill["steps"])
     return found
 
 

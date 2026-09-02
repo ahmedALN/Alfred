@@ -37,6 +37,7 @@ const app = {
   listening: false,
   alfred: { running: false, abilities: {} },
   filters: { memory: "", logs: "", skills: "" },
+  memoryGroup: "you",
 };
 
 /* ------------------------------------------------------------ helpers */
@@ -209,6 +210,62 @@ function drawEverything() {
   drawAbilities();
 }
 
+
+/* ------------------------------------------------------------- rows */
+
+/** One row. `detail` makes it expandable; nothing else has to know how. */
+function row({ id, title, meta, detail, acts = "", cls = "" }) {
+  const openable = detail ? "can-open" : "";
+  return `
+    <div class="row ${cls} ${openable}" ${id ? `data-row="${esc(id)}"` : ""}>
+      <div class="main-text">
+        <div class="t">${title}</div>
+        ${meta ? `<div class="s">${meta}</div>` : ""}
+        ${detail ? `<div class="more" hidden>${detail}</div>` : ""}
+      </div>
+      <div class="acts">${acts}</div>
+    </div>`;
+}
+
+function bits(...parts) {
+  return parts.filter(Boolean).map((p) => `<span>${p}</span>`).join("");
+}
+
+/** Clicking a row opens it. Buttons inside it do not. */
+document.addEventListener("click", (e) => {
+  if (e.target.closest("[data-act]") || e.target.closest("button")) return;
+  const el = e.target.closest(".row.can-open");
+  if (!el) return;
+  const more = el.querySelector(".more");
+  if (!more) return;
+  const opening = more.hidden;
+  more.hidden = !opening;
+  el.classList.toggle("open", opening);
+  SOUND.tick();
+});
+
+/** Tool steps, said the way a person would say them. */
+function inWords(steps) {
+  return (steps || []).map((s) => {
+    const a = s.args || {};
+    switch (s.tool) {
+      case "power":      return `${a.action} the PC`;
+      case "weather":    return `look up the weather for ${a.place ?? "somewhere"}`;
+      case "open_app":   return `open ${a.name ?? a.app ?? "an app"}`;
+      case "web":        return a.action === "fetch"
+                           ? `read ${a.url ?? "a page"}`
+                           : `search the web for "${a.query ?? ""}"`;
+      case "powershell": return `run: ${(a.command ?? "").slice(0, 70)}`;
+      case "ui_control": return `${a.action ?? "use"} ${a.name ?? a.window ?? "a control"}`;
+      case "system_info":return `check ${a.query ?? "the system"}`;
+      case "mail":       return `${a.action ?? "read"} your mail`;
+      case "calendar":   return `${a.action ?? "check"} your calendar`;
+      case "skill":      return `${a.action ?? "use"} a routine`;
+      default:           return `${s.tool}${a.action ? " " + a.action : ""}`;
+    }
+  });
+}
+
 /* -------------------------------------------------------------- panels */
 
 function drawStats() {
@@ -239,115 +296,222 @@ function drawHomeLife() {
 
 function drawLife() {
   const life = app.data.life || {};
-  const row = (m) => `
-    <div class="row">
-      <div class="main-text">
-        <div class="t">${esc(m.name)}</div>
-        <div class="s">${esc(m.source || "")}${m.detail ? " &middot; " + esc(m.detail) : ""}${m.due ? " &middot; " + esc(when(m.due)) : ""}</div>
-      </div>
-      <div class="acts">
-        <button class="iconbtn" title="Done" data-act="settle" data-id="${esc(m.id)}" data-state="done">${icon("check")}</button>
-        <button class="iconbtn danger" title="Not mine" data-act="settle" data-id="${esc(m.id)}" data-state="dropped">${icon("x")}</button>
-      </div>
-    </div>`;
 
-  const due = [...(life.overdue || []), ...(life.due || [])];
-  $("lifeDue").innerHTML = due.length ? due.map(row).join("") : empty("nothing due");
+  const one = (m, late) => row({
+    id: `matter-${m.id}`,
+    title: esc(m.name),
+    meta: bits(
+      m.due ? `<span class="${late ? "late" : ""}">${esc(when(m.due))}</span>` : null,
+      m.detail ? esc(m.detail) : null,
+      m.source ? `from your ${esc(m.source)}` : null,
+    ),
+    acts: `
+      <button class="iconbtn" title="Done" data-act="settle" data-id="${esc(m.id)}" data-state="done">${icon("check")}</button>
+      <button class="iconbtn danger" title="Not mine" data-act="settle" data-id="${esc(m.id)}" data-state="dropped">${icon("x")}</button>`,
+  });
+
+  const late = life.overdue || [];
+  const due = [...late, ...(life.due || [])];
+
+  $("lifeDue").innerHTML = due.length
+    ? due.map((m) => one(m, late.includes(m))).join("")
+    : empty("nothing due");
   $("lifePeople").innerHTML = (life.people || []).length
-    ? life.people.map(row).join("") : empty("nobody waiting");
+    ? life.people.map((m) => one(m)).join("")
+    : empty("nobody waiting on you");
   $("lifeDoing").innerHTML = (life.doing || []).length
-    ? life.doing.map(row).join("") : empty("nothing noted");
+    ? life.doing.map((m) => one(m)).join("")
+    : empty("nothing noted");
 }
 
+// Memory is three different things wearing one label. Of 134 "facts",
+// 64 were the built-in Windows playbook, 69 were notes about tool
+// failures, and exactly one was about the user - under a heading that
+// said "what Alfred believes about you". Grouped, the panel finally
+// answers the question it claims to.
+const MEMORY_GROUPS = [
+  { id: "you",     label: "about you",
+    hint: "what Alfred has picked up about you and how you work",
+    match: (f) => !["correction", "system", "tool"].includes(f.category) },
+  { id: "lessons", label: "lessons",
+    hint: "what it learned from things that went wrong. Delete one and it will try that way again.",
+    match: (f) => f.category === "correction" },
+  { id: "ref",     label: "reference",
+    hint: "the built-in Windows playbook it shipped with - not learned, and safe to leave alone",
+    match: (f) => ["system", "tool"].includes(f.category) },
+];
+
 function drawMemory() {
+  const all = app.data.memory || [];
   const term = app.filters.memory.toLowerCase();
-  const facts = (app.data.memory || []).filter(
-    (f) => !term || (f.content || "").toLowerCase().includes(term)
+  const group = MEMORY_GROUPS.find((g) => g.id === app.memoryGroup)
+    || MEMORY_GROUPS[0];
+
+  const tabs = MEMORY_GROUPS.map((g) => {
+    const n = all.filter(g.match).length;
+    return `<button class="tab ${g.id === group.id ? "on" : ""}"
+      data-memgroup="${g.id}">${esc(g.label)} <b>${n}</b></button>`;
+  }).join("");
+
+  const facts = all
+    .filter(group.match)
+    .filter((f) => !term || (f.content || "").toLowerCase().includes(term));
+
+  $("memTabs").innerHTML = tabs;
+  $("memHint").textContent = group.hint;
+
+  $("memory").innerHTML = facts.length ? facts.map((f) => row({
+    id: `fact-${f.id}`,
+    title: esc(f.content),
+    meta: bits(
+      f.seen > 1 ? `seen ${f.seen} times` : null,
+      whereFrom(f.source),
+      ago(f.updated_at),
+    ),
+    // The full text, for the ones that run long - which is most of the
+    // lessons, because they quote the tool call that failed.
+    detail: (f.content || "").length > 150 ? esc(f.content) : "",
+    acts: `
+      <button class="iconbtn" title="Correct this" data-act="edit-fact" data-id="${f.id}">${icon("pencil")}</button>
+      <button class="iconbtn danger" title="Forget this" data-act="forget-fact" data-id="${f.id}">${icon("trash-2")}</button>`,
+  })).join("") : empty(
+    term ? "nothing matches" :
+    group.id === "you" ? "Alfred has not learned anything about you yet"
+                       : "nothing here"
   );
-  $("memory").innerHTML = facts.length ? facts.map((f) => `
-    <div class="row">
-      <div class="main-text">
-        <div class="t">${esc(f.content)}</div>
-        <div class="s">${esc(f.category || "general")} &middot; seen ${f.seen ?? 1}&times; &middot; ${esc(f.source || "")} &middot; ${esc(ago(f.updated_at))}</div>
-      </div>
-      <div class="acts">
-        <button class="iconbtn" title="Correct" data-act="edit-fact" data-id="${f.id}">${icon("pencil")}</button>
-        <button class="iconbtn danger" title="Forget" data-act="forget-fact" data-id="${f.id}">${icon("trash-2")}</button>
-      </div>
-    </div>`).join("") : empty(term ? "nothing matches" : "no facts yet");
+}
+
+function whereFrom(source) {
+  return {
+    playbook: "built in",
+    task_reflection: "learned from a job",
+    learned_workaround: "learned the hard way",
+    conversation: "you told it",
+    you: "you told it",
+    "you (corrected)": "you corrected it",
+  }[source] || source || "";
 }
 
 function drawSkills() {
   const term = app.filters.skills.toLowerCase();
   const skills = (app.data.skills || []).filter(
-    (s) => !term || (s.name + " " + (s.keywords || "")).toLowerCase().includes(term)
+    (s) => !term || (s.name + " " + (s.template || "") + " " + (s.keywords || ""))
+      .toLowerCase().includes(term)
   );
-  $("skills").innerHTML = skills.length ? skills.map((s) => `
-    <div class="row ${s.disabled ? "off" : ""}">
-      <div class="main-text">
-        <div class="t">${esc(s.template || s.name)}</div>
-        <div class="s">
-          ${esc(s.app || "any")} &middot; ${s.step_count} step${s.step_count === 1 ? "" : "s"}
-          &middot; ${s.success ?? 0} ok / ${s.fail ?? 0} failed
-          ${s.unconfirmed ? '&middot; <span class="tag warn">unproven</span>' : ""}
-        </div>
-      </div>
-      <div class="acts">
-        <button class="iconbtn" title="${s.disabled ? "Enable" : "Disable"}" data-act="toggle-skill" data-id="${esc(s.id)}" data-on="${s.disabled ? 1 : 0}">${icon("power")}</button>
-        <button class="iconbtn danger" title="Delete" data-act="delete-skill" data-id="${esc(s.id)}">${icon("trash-2")}</button>
-      </div>
-    </div>`).join("") : empty("no skills yet");
+
+  $("skills").innerHTML = skills.length ? skills.map((s) => {
+    const steps = s.steps || [];
+    const words = inWords(steps);
+    const runs = (s.success ?? 0) + (s.fail ?? 0);
+
+    return row({
+      id: `skill-${s.id}`,
+      title: esc(s.template || s.name),
+      // What it DOES, not how many steps it has. "1 step, 0 ok" told
+      // you nothing about whether the routine was any good or what it
+      // would do if you let it run.
+      meta: bits(
+        words.length ? esc(words.join(" → ")) : `${steps.length} steps`,
+        runs === 0 ? "never run"
+          : `${s.success ?? 0} of ${runs} worked`,
+        s.unconfirmed ? '<span class="tag warn">unproven</span>' : null,
+        s.disabled ? '<span class="tag bad">off</span>' : null,
+      ),
+      detail: steps.length ? steps.map((st, i) =>
+        `${i + 1}. ${esc(st.tool)}  ${esc(JSON.stringify(st.args || {}))}`
+      ).join("\n") : "",
+      cls: s.disabled ? "off" : "",
+      acts: `
+        <button class="iconbtn" title="Rename what this is for" data-act="edit-skill" data-id="${esc(s.id)}">${icon("pencil")}</button>
+        <button class="iconbtn" title="${s.disabled ? "Turn on" : "Turn off"}" data-act="toggle-skill" data-id="${esc(s.id)}" data-on="${s.disabled ? 1 : 0}">${icon("power")}</button>
+        <button class="iconbtn danger" title="Forget this routine" data-act="delete-skill" data-id="${esc(s.id)}">${icon("trash-2")}</button>`,
+    });
+  }).join("") : empty(term ? "nothing matches" : "no routines yet");
 }
 
 function drawLimits() {
   const limits = app.data.limitations || [];
-  $("limits").innerHTML = limits.length ? limits.map((l) => `
-    <div class="row">
-      <div class="main-text">
-        <div class="t">${esc(l.detail || l.signature)}</div>
-        <div class="s">${esc(l.tool || "")}${l.app ? " &middot; " + esc(l.app) : ""} &middot; hit ${l.hits ?? 1}&times;${l.workaround ? " &middot; has a way round" : ""}</div>
-      </div>
-      <div class="acts">
-        <button class="iconbtn danger" title="Let it try again" data-act="clear-limit" data-sig="${esc(l.signature)}">${icon("refresh-cw")}</button>
-      </div>
-    </div>`).join("") : empty("nothing it thinks it cannot do");
+
+  $("limits").innerHTML = limits.length ? limits.map((l) => row({
+    id: `limit-${l.signature}`,
+    title: esc(plainly(l)),
+    meta: bits(
+      l.hits > 1 ? `hit ${l.hits} times` : "hit once",
+      l.workaround ? "found a way round" : null,
+      ago(l.last_seen),
+    ),
+    detail: esc(l.detail || l.signature) +
+      (l.workaround ? `
+
+what worked instead:
+${esc(l.workaround)}` : ""),
+    acts: `<button class="iconbtn danger" title="Let it try again"
+             data-act="clear-limit" data-sig="${esc(l.signature)}">${icon("refresh-cw")}</button>`,
+  })).join("") : empty("nothing it thinks it cannot do");
+}
+
+/** A tool failure, said as the thing it stops Alfred doing. */
+function plainly(l) {
+  const detail = (l.detail || l.signature || "").trim();
+  const app_ = l.app ? ` in ${l.app}` : "";
+
+  if (/no control matches/i.test(detail)) {
+    const name = (detail.match(/name='([^']+)'|name="([^"]+)"/) || [])
+      .slice(1).find(Boolean);
+    return `Can't find ${name ? `"${name}"` : "a control"}${app_} without looking at the window first`;
+  }
+  if (/timed out/i.test(detail)) return `Times out${app_}`;
+  if (/must be a non-empty string/i.test(detail)) return "Was asked to open an app with no name";
+  if (/must be one of/i.test(detail)) return "Was given an action that does not exist";
+  if (/^failed$/i.test(detail)) return `Something${app_} failed without saying why`;
+  return detail.length > 110 ? detail.slice(0, 110) + "…" : detail;
 }
 
 function drawTasks() {
   const tasks = app.data.tasks || [];
-  const badge = { done: "good", failed: "bad", running: "warn" };
-  $("tasks").innerHTML = tasks.length ? tasks.map((t) => `
-    <div class="row">
-      <div class="main-text">
-        <div class="t">${esc(t.goal)}</div>
-        <div class="s">
-          <span class="tag ${badge[t.status] || ""}">${esc(t.status)}</span>
-          &nbsp;${esc(t.source || "")} &middot; ${esc(ago(t.created_at))}
-          ${t.summary ? "<br>" + esc(t.summary) : ""}
-        </div>
-      </div>
-      <div class="acts">
-        <button class="iconbtn danger" title="Remove from the record" data-act="forget-task" data-id="${esc(t.id)}">${icon("trash-2")}</button>
-      </div>
-    </div>`).join("") : empty("no tasks yet");
+  const badge = { done: "good", failed: "bad", error: "bad",
+                  running: "warn", exhausted: "warn", partial: "warn" };
+  const plain = { done: "done", failed: "failed", error: "failed",
+                  running: "running now", exhausted: "ran out of time",
+                  partial: "partly done", queued: "waiting" };
+
+  $("tasks").innerHTML = tasks.length ? tasks.map((t) => row({
+    id: `task-${t.id}`,
+    title: esc(t.goal),
+    meta: bits(
+      `<span class="tag ${badge[t.status] || ""}">${esc(plain[t.status] || t.status)}</span>`,
+      t.source === "whatsapp" ? "asked on WhatsApp"
+        : t.source === "voice" ? "asked out loud"
+        : t.source === "interface" ? "asked here"
+        : t.source === "brain" ? "its own idea" : esc(t.source || ""),
+      ago(t.created_at),
+    ),
+    // The summary is the interesting part and it was squeezed into the
+    // metadata line at 11px, which is where it went to be unread.
+    detail: t.summary ? esc(t.summary) : "",
+    acts: `<button class="iconbtn danger" title="Remove from the record"
+             data-act="forget-task" data-id="${esc(t.id)}">${icon("trash-2")}</button>`,
+  })).join("") : empty("nothing has been asked of it yet");
 }
 
 function drawAutos() {
   const autos = app.data.automations || [];
-  $("autos").innerHTML = autos.length ? autos.map((a) => `
-    <div class="row ${a.enabled ? "" : "off"}">
-      <div class="main-text">
-        <div class="t">${esc(a.goal || a.said)}</div>
-        <div class="s">
-          ${esc(a.kind || "once")}${a.repeat ? " &middot; " + esc(a.repeat) : ""}
-          &middot; ${esc(when(a.due))} &middot; run ${a.runs ?? 0}&times;
-        </div>
-      </div>
-      <div class="acts">
-        <button class="iconbtn" title="${a.enabled ? "Turn off" : "Turn on"}" data-act="toggle-auto" data-id="${esc(a.id)}" data-on="${a.enabled ? 1 : 0}">${icon("power")}</button>
-        <button class="iconbtn danger" title="Delete" data-act="delete-auto" data-id="${esc(a.id)}">${icon("trash-2")}</button>
-      </div>
-    </div>`).join("") : empty("nothing scheduled");
+
+  $("autos").innerHTML = autos.length ? autos.map((a) => row({
+    id: `auto-${a.id}`,
+    title: esc(a.goal || a.said),
+    meta: bits(
+      a.repeat ? `every ${esc(a.repeat)}` : "once",
+      when(a.due),
+      a.runs ? `run ${a.runs} times` : "not run yet",
+      a.enabled ? null : '<span class="tag">off</span>',
+    ),
+    detail: a.said && a.said !== a.goal ? `you said: ${esc(a.said)}` : "",
+    cls: a.enabled ? "" : "off",
+    acts: `
+      <button class="iconbtn" title="${a.enabled ? "Turn off" : "Turn on"}" data-act="toggle-auto" data-id="${esc(a.id)}" data-on="${a.enabled ? 1 : 0}">${icon("power")}</button>
+      <button class="iconbtn danger" title="Delete" data-act="delete-auto" data-id="${esc(a.id)}">${icon("trash-2")}</button>`,
+  })).join("") : empty("nothing scheduled - ask Alfred to remind you of something");
 }
 
 function drawTicker() {
@@ -578,6 +742,15 @@ const ACTS = {
       action: el.dataset.on === "1" ? "enable_skill" : "disable_skill",
       payload: { id: el.dataset.id } }) });
   },
+  "edit-skill": async (el) => {
+    const now = el.closest(".row").querySelector(".t").textContent.trim();
+    const next = await ask("what is this routine for?", now);
+    if (next === null || next.trim() === now) return;
+    await api("/api/act", { method: "POST", body: JSON.stringify({
+      action: "rename_skill",
+      payload: { id: el.dataset.id, template: next } }) });
+    toast("renamed", "good");
+  },
   "delete-skill": async (el) => {
     await api("/api/act", { method: "POST", body: JSON.stringify({
       action: "delete_skill", payload: { id: el.dataset.id } }) });
@@ -639,6 +812,13 @@ function wireDock() {
   };
 
   $("memFilter").oninput = (e) => { app.filters.memory = e.target.value; drawMemory(); };
+  $("memTabs").addEventListener("click", (e) => {
+    const tab = e.target.closest("[data-memgroup]");
+    if (!tab) return;
+    app.memoryGroup = tab.dataset.memgroup;
+    SOUND.select();
+    drawMemory();
+  });
   $("skillFilter").oninput = (e) => { app.filters.skills = e.target.value; drawSkills(); };
   $("logFilter").oninput = (e) => { app.filters.logs = e.target.value; drawLogs(); };
 

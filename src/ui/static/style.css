@@ -22,9 +22,13 @@
   --red:       #ff5c6c;
   --green:     #4dffa6;
 
-  --text:      #d3e8f4;
-  --muted:     #6f8da3;
-  --faint:     #47606f;
+  /* These were #6f8da3 and #47606f, which on a near-black ground is
+     roughly 2.5:1 - below any legibility threshold. Every metadata
+     line in the interface used the faint one, so the answer to "when
+     did it learn this" was technically on screen and practically not. */
+  --text:      #dceaf3;
+  --muted:     #9fbccd;
+  --faint:     #7794a6;
 
   --rail:  74px;
   --dock:  74px;
@@ -216,6 +220,8 @@ body::after {
   z-index: 40;
 }
 .nav button:hover .tip { opacity: 1; transform: none; }
+/* Never intercepts a click, and never outranks a dialog. */
+.nav button .tip { pointer-events: none; }
 .nav button .badge {
   position: absolute; top: 5px; right: 5px;
   min-width: 15px; height: 15px; padding: 0 4px;
@@ -439,12 +445,30 @@ body::after {
 .row .main-text { min-width: 0; }
 .row .t { font-size: 13.5px; line-height: 1.45; word-break: break-word; }
 .row .s {
-  margin-top: 3px;
-  font-family: var(--mono); font-size: 11.5px; letter-spacing: .1em;
-  color: var(--faint); text-transform: uppercase;
+  margin-top: 5px;
+  font-family: var(--body); font-size: 12px; letter-spacing: .01em;
+  color: var(--faint); text-transform: none;
+  display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center;
 }
-.row .acts { display: flex; gap: 4px; opacity: 0; transition: opacity .16s; }
-.row:hover .acts { opacity: 1; }
+/* One line unless opened. Rows held three lines of raw JSON, so the
+   list could not be scanned at all. */
+.row .t {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.row.open .t { -webkit-line-clamp: unset; overflow: visible; }
+.row .more {
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-family: var(--mono); font-size: 12px; line-height: 1.65;
+  color: var(--muted); white-space: pre-wrap; word-break: break-word;
+}
+/* Was opacity 0 until hover: the only way to discover that a memory
+   could be corrected was to sweep the mouse over it. */
+.row .acts { display: flex; gap: 4px; opacity: .45; transition: opacity .16s; }
+.row:hover .acts, .row.open .acts { opacity: 1; }
+.row { cursor: default; }
+.row.can-open { cursor: pointer; }
 .row.off { opacity: .42; }
 
 .tag {
@@ -661,3 +685,45 @@ body::after {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* ------------------------------------------------------------- tabs */
+
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; flex: none; }
+.tabs .tab {
+  font-family: var(--mono); font-size: 12px; letter-spacing: .12em;
+  text-transform: uppercase;
+  padding: 5px 12px; border-radius: 6px;
+  background: rgba(77,227,255,.05);
+  border: 1px solid var(--line);
+  color: var(--muted); cursor: pointer;
+  transition: all .16s;
+}
+.tabs .tab:hover { color: var(--text); border-color: var(--line-hot); }
+.tabs .tab.on {
+  background: rgba(77,227,255,.14);
+  border-color: var(--line-hot); color: var(--cyan);
+}
+.tabs .tab b {
+  font-family: var(--body); font-weight: 600; font-size: 11px;
+  margin-left: 5px; opacity: .75;
+}
+
+.hint {
+  margin: 0 0 10px; flex: none;
+  font-size: 12.5px; line-height: 1.5; color: var(--faint);
+  max-width: 74ch;
+}
+
+/* An overdue date should look overdue. */
+.row .s .late { color: var(--red); font-weight: 600; }
+
+/* Panels that hold two rows should not be nine-tenths empty. */
+.pane[data-pane="autos"] .panel.tall,
+.pane[data-pane="tasks"] .panel.tall { height: auto; max-height: 100%; }
+
+/* Long single words - urls, powershell - must not push the row wide. */
+.row .main-text { overflow-wrap: anywhere; }
+
+/* The reactor caption sat on the rings and was hard to read against
+   them; a little ground of its own fixes it without a box. */
+.reactor-read { text-shadow: 0 0 14px var(--bg), 0 0 26px var(--bg); }

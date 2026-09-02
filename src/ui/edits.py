@@ -118,6 +118,23 @@ def set_skill_enabled(skill_id: str, enabled: bool) -> bool:
     return True
 
 
+def rename_skill(skill_id: str, template: str) -> bool:
+    """What the routine is for, in the user's own words.
+
+    The template is also what matching runs against, so this is not
+    cosmetic: renaming changes when the routine fires.
+    """
+    template = (template or "").strip()
+    if not template:
+        raise EditError("A routine needs to say what it is for.")
+    if not _write(
+        "skills", "UPDATE skills SET template = ?, name = ? WHERE id = ?",
+        (template, template[:60], str(skill_id)),
+    ):
+        raise EditError("No such skill.")
+    return True
+
+
 def delete_skill(skill_id: str) -> bool:
     if not _write("skills", "DELETE FROM skills WHERE id = ?", (str(skill_id),)):
         raise EditError("No such skill.")
@@ -179,6 +196,7 @@ ACTIONS = {
     "clear_limitation": lambda p: clear_limitation(p["signature"]),
     "enable_skill": lambda p: set_skill_enabled(p["id"], True),
     "disable_skill": lambda p: set_skill_enabled(p["id"], False),
+    "rename_skill": lambda p: rename_skill(p["id"], p["template"]),
     "delete_skill": lambda p: delete_skill(p["id"]),
     "settle_matter": lambda p: settle_matter(p["id"], p.get("state", "done")),
     "enable_automation": lambda p: set_automation_enabled(p["id"], True),
