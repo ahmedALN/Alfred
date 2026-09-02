@@ -260,3 +260,20 @@ def test_a_fact_to_keep_is_not_a_routine_to_build():
         assert "coriander" in prompt          # the example, spelled out
         # And the skill rule is explicitly about HOW TO, not remember.
         assert "Learn HOW TO x" in prompt
+
+
+def test_questions_about_itself_are_looked_up_not_guessed():
+    """Asked what routines it knew, Alfred said it had none.
+
+    It had thirty-nine. Asked the same thing an hour earlier it
+    invented a plausible list instead. Neither answer came from the
+    skill store, because the conversation layer answered from the
+    model's own idea of itself - and a model has no idea what is in a
+    database it has not read.
+    """
+    from src.messaging.reply import _SYSTEM
+
+    assert "questions about YOURSELF" in _SYSTEM
+    assert "thirty-nine" in _SYSTEM        # the actual wrong answer
+    # And the examples route them to a lookup rather than a reply.
+    assert "DO: List the routines you have learned" in _SYSTEM
