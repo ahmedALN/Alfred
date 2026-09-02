@@ -227,9 +227,14 @@ class _Sky:
     def __call__(self, url, params, timeout=15.0):
         if "geocoding" in url:
             self.asked.append(params["name"])
-            if not self.found or params["name"].lower() not in ("sana'a", "bangkok"):
+            # The real geocoder answers to the apostrophe-free spelling
+            # too, and a fake narrower than the thing it stands in for
+            # fails the moment the caller gets cleverer.
+            asked = params["name"].lower().replace("'", "")
+            if not self.found or asked not in ("sanaa", "bangkok"):
                 return {"results": []}
             return {"results": [{"name": "Sana'a", "country": "Yemen",
+                                 "feature_code": "PPLC", "population": 1937451,
                                  "latitude": 15.35, "longitude": 44.2}]}
         return {"current": {"temperature_2m": 22.6, "apparent_temperature": 21.0,
                             "relative_humidity_2m": 40, "wind_speed_10m": 4.3,
@@ -260,9 +265,10 @@ def test_a_country_said_with_the_city_still_finds_it():
     out = WeatherTool(fetch=sky).execute({"action": "now", "place": "yemen sana'a"})
 
     assert out["status"] == "success"
-    # It tried the whole thing first, then dropped the leading word.
+    # It tried the whole thing first, then dropped the leading word -
+    # in whichever spelling; the apostrophe gets stripped on the way.
     assert sky.asked[0] == "yemen sana'a"
-    assert "sana'a" in [a.lower() for a in sky.asked]
+    assert any(a.lower().replace("'", "").strip() == "sanaa" for a in sky.asked)
 
 
 def test_the_city_is_looked_for_before_the_country():
@@ -270,7 +276,14 @@ def test_the_city_is_looked_for_before_the_country():
 
     tries = _candidates("yemen sana'a")
     assert tries[0] == "yemen sana'a"
-    assert tries.index("sana'a") < tries.index("yemen")
+
+    def where(word):
+        return next(i for i, t in enumerate(tries)
+                    if t.replace("'", "") == word)
+
+    # The city before the country: English puts the big place first
+    # when it qualifies, so the last word is usually the one wanted.
+    assert where("sanaa") < where("yemen")
 
 
 def test_a_place_that_does_not_exist_says_so():
@@ -292,3 +305,76 @@ def test_the_sky_is_described_in_words_not_wmo_codes():
 
     assert _SKY[0] == "clear"
     assert _SKY[95] == "thunderstorms"
+
+
+class _Geo:
+    """The geocoder as it really answers, apostrophe and all."""
+
+    ANSWERS = {
+        "sana'a": [{"name": "Sana'a International Airport", "country": "Yemen",
+                    "feature_code": "AIRP", "latitude": 15.4, "longitude": 44.2}],
+        "sanaa": [
+            {"name": "Sanaa", "country": "Yemen", "feature_code": "PPLC",
+             "population": 1937451, "latitude": 15.35, "longitude": 44.2},
+            {"name": "Sanaa", "country": "Somalia", "feature_code": "PPL",
+             "population": 300, "latitude": 9.0, "longitude": 46.0},
+        ],
+    }
+
+    def __init__(self):
+        self.asked: list[str] = []
+
+    def __call__(self, url, params, timeout=15.0):
+        if "geocoding" in url:
+            name = params["name"].lower()
+            self.asked.append(name)
+            return {"results": self.ANSWERS.get(name, [])}
+        return {"current": {"temperature_2m": 22.0, "apparent_temperature": 22.0,
+                            "relative_humidity_2m": 40, "wind_speed_10m": 4.0,
+                            "weather_code": 2}}
+
+
+def test_an_apostrophe_does_not_send_you_to_the_airport():
+    """The geocoder gives only the airport for "Sana'a".
+
+    Alfred answered a question about a capital city by naming a runway.
+    Dropping the apostrophe finds the city itself.
+    """
+    from src.tools.weather import WeatherTool
+
+    out = WeatherTool(fetch=_Geo()).execute({"action": "now", "place": "Sana'a"})
+    assert out["status"] == "success"
+    assert "Airport" not in out["place"]
+    assert out["place"].startswith("Sanaa")
+
+
+def test_a_non_town_hit_is_not_good_enough_to_stop_on():
+    from src.tools.weather import WeatherTool
+
+    geo = _Geo()
+    WeatherTool(fetch=geo).execute({"action": "now", "place": "Sana'a"})
+    # It saw the airport, kept the apostrophe-free spelling in reserve,
+    # and only settled once a populated place turned up.
+    assert geo.asked[0] == "sana'a"
+    assert "sanaa" in geo.asked
+
+
+def test_the_big_town_wins_over_the_village_of_the_same_name():
+    """"Sanaa" is a capital of two million and a village of 300."""
+    from src.tools.weather import WeatherTool
+
+    out = WeatherTool(fetch=_Geo()).execute({"action": "now", "place": "sanaa"})
+    assert out["place"] == "Sanaa, Yemen"
+
+
+def test_an_airport_is_still_better_than_nothing():
+    """If no spelling finds a town, the nearby thing is the answer."""
+    from src.tools.weather import WeatherTool
+
+    class OnlyAirport(_Geo):
+        ANSWERS = {"sana'a": _Geo.ANSWERS["sana'a"]}
+
+    out = WeatherTool(fetch=OnlyAirport()).execute(
+        {"action": "now", "place": "Sana'a"})
+    assert out["status"] == "success"
+    assert "Airport" in out["place"]

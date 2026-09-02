@@ -57,6 +57,26 @@ def _get(url: str, params: dict[str, Any], timeout: float = 15.0) -> dict:
         return json.loads(response.read().decode("utf-8"))
 
 
+
+def _best(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """A town, in preference to the airport named after it.
+
+    The top hit for "Sana'a" is Sana'a International Airport, so Alfred
+    answered a question about a capital city by naming a runway. The
+    geonames feature codes starting PPL are populated places, which is
+    what somebody asking about the weather means.
+    """
+    towns = [
+        r for r in results
+        if str(r.get("feature_code", "")).startswith("PPL")
+    ]
+    if not towns:
+        return results[0]
+    # Among towns, the big one. "Sanaa" matches a capital of nearly two
+    # million and four villages; the question is almost never about a
+    # village.
+    return max(towns, key=lambda r: int(r.get("population") or 0))
+
 def _candidates(place: str) -> list[str]:
     """Ways to ask for one place, most specific first.
 
@@ -71,12 +91,20 @@ def _candidates(place: str) -> list[str]:
         return []
 
     tries = [place]
+
+    # Apostrophes defeat the geocoder: "sana'a" returns only the airport
+    # named after the city, while "sanaa" returns the capital itself.
+    bare = place.replace("'", "").replace("’", "").replace("-", " ")
+    bare = " ".join(bare.split())
+    if bare and bare != place:
+        tries.append(bare)
+
     for part in place.split(","):
         part = part.strip()
         if part and part not in tries:
             tries.append(part)
 
-    words = place.replace(",", " ").split()
+    words = bare.replace(",", " ").split() or place.replace(",", " ").split()
     for i in range(1, len(words)):
         tail = " ".join(words[i:])
         if tail not in tries:
@@ -86,7 +114,7 @@ def _candidates(place: str) -> list[str]:
         if head not in tries:
             tries.append(head)
 
-    return tries[:6]
+    return tries[:8]
 
 
 class WeatherTool(AlfredTool):
@@ -159,13 +187,22 @@ class WeatherTool(AlfredTool):
         Asked the way it was typed, it returns nothing, and Alfred
         reports that a real capital does not exist.
         """
+        # A hit that is not a town is not good enough to stop on: asked
+        # for "Sana'a", the geocoder offers the airport and nothing
+        # else, while "sanaa" offers the capital. So keep going, and
+        # settle for the airport only if no spelling finds a town.
         top = None
         for candidate in _candidates(place):
-            data = self._get(_GEOCODE, {"name": candidate, "count": 1})
+            data = self._get(_GEOCODE, {"name": candidate, "count": 5})
             results = data.get("results") or []
-            if results:
-                top = results[0]
+            if not results:
+                continue
+            best = _best(results)
+            if str(best.get("feature_code", "")).startswith("PPL"):
+                top = best
                 break
+            if top is None:
+                top = best          # keep it, in case nothing better comes
         if top is None:
             return None
         return {
