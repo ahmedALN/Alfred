@@ -52,6 +52,8 @@ src/windows/native/ChildScreenCapture/child-*.png
 # Its own diaries and measurements
 logs/
 bench-*.json
+bench-*.log
+teach-*.log
 teach-*.json
 
 # --- downloaded, not authored --------------------------------------
