@@ -72,6 +72,10 @@ _NAVIGATION = re.compile(
 _NEEDS_WINDOW = {
     "click", "double_click", "right_click", "invoke", "get", "select",
     "expand", "type",
+    # `find` searches the window last read, and given a window it had
+    # not read it searched nothing and reported success with no
+    # results - which reads exactly like "that control is not there".
+    "find", "exists",
 }
 
 # Field names that mean "secret" - Alfred never types into these.
@@ -102,6 +106,14 @@ def _as_int(value: Any) -> int | None:
     return None
 
 
+# An error that is a bug in Alfred rather than a locked-down window.
+_OUR_FAULT = re.compile(
+    r"has no attribute|AttributeError|TypeError|NameError|ImportError|"
+    r"not callable|unexpected keyword|takes \d+ positional",
+    re.I,
+)
+
+
 def _explain(error: str, window: str | None) -> str:
     """Say why a window that is plainly there cannot be touched.
 
@@ -116,6 +128,18 @@ def _explain(error: str, window: str | None) -> str:
     version of that limit rather than a mysterious timeout.
     """
     if not window or ("not found" not in error and "did not become" not in error):
+        return error
+
+    # Only for a window that genuinely could not be reached - never for
+    # a fault in here that happens to surface as "not found".
+    #
+    # GetForegroundWindow went missing from pywinauto, so any call that
+    # named no window raised AttributeError, arrived here as "window not
+    # found: module ... has no attribute ...", and was explained to the
+    # user as Spotify running as administrator. A confident, wholly
+    # invented answer to a question nobody had asked, and exactly the
+    # sort that sends somebody off restarting things for an hour.
+    if _OUR_FAULT.search(error):
         return error
 
     try:
@@ -834,11 +858,11 @@ class UIControlTool(AlfredTool):
             action in _NEEDS_WINDOW
             and window
             and ref is None
-            and isinstance(name, str)
-            and name
+            and isinstance(needle := (name or arguments.get("query")), str)
+            and needle
         ):
             try:
-                ui.tree(window, pid, limit=200, contains=name)
+                ui.tree(window, pid, limit=200, contains=needle)
             except UiaError:
                 pass
 

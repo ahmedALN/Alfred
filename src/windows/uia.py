@@ -291,9 +291,16 @@ class UiaSession:
                     if _is_deliberate_pattern(wanted) and not _exists(win):
                         win = dt.window(title_re=wanted)
             else:
-                from pywinauto import win32functions
+                # Straight to the OS. pywinauto's win32functions no
+                # longer carries GetForegroundWindow, so every call
+                # that named no window raised AttributeError - and
+                # `_explain` then dressed that up as "the window is
+                # running as administrator", which was a confident and
+                # completely wrong answer to a question nobody had
+                # asked. ctypes has always had it.
+                import ctypes
 
-                hwnd = win32functions.GetForegroundWindow()
+                hwnd = ctypes.windll.user32.GetForegroundWindow()
                 win = dt.window(handle=hwnd)
             # dt.window(...) hands back an unresolved specification that
             # has to be waited on; _best_window hands back an element
@@ -469,17 +476,56 @@ class UiaSession:
             self._last_title = ""
         return self._last_title
 
-    @staticmethod
-    def _descendants(win, max_depth: int) -> list:
-        """Depth-bounded so a browser's enormous a11y tree can't hang the
-        call. pywinauto walks the whole subtree otherwise."""
-        for kwargs in ({"depth": max_depth}, {}):
+    def _descendants(self, win, max_depth: int) -> list:
+        """Every control in the window.
+
+        Unbounded FIRST, which is the opposite of what this did and of
+        what it said. The depth limit was here so "a browser's enormous
+        a11y tree can't hang the call", and measured against six real
+        windows it is the thing causing the hang - pywinauto's bounded
+        walk filters in Python where the unbounded one lets UIA do it:
+
+            window                    depth=30      unbounded
+            Spotify Premium     1770 ctl  18.8s   1770 ctl  0.8s
+            Discord             1008 ctl   8.8s   1008 ctl  0.4s
+            Claude               305 ctl   3.2s    305 ctl  0.2s
+            File Explorer        100 ctl   0.4s    100 ctl  0.2s
+            Notepad               47 ctl   0.1s     47 ctl  0.0s
+
+        Identical control counts every time, and up to twenty-three
+        times the speed. The bound cost nineteen seconds on Spotify and
+        bought nothing at all.
+
+        It also cost the controls themselves whenever the caller passed
+        a smaller depth: Spotify's tree has four controls at depth 3 and
+        1,770 unbounded, so a shallow read reported an empty window and
+        Alfred told the user Spotify was not responding while it sat
+        there perfectly healthy with its search box named "What do you
+        want to play?".
+        """
+        errors: list[str] = []
+
+        for attempt, kwargs in enumerate(({}, {"depth": max_depth})):
             try:
                 return list(win.descendants(**kwargs))
             except TypeError:
                 continue
-            except Exception as exc:
-                raise UiaError(f"could not read the control tree: {exc}") from exc
+            except Exception as exc:  # noqa: BLE001
+                errors.append(str(exc))
+
+                # A Chromium window whose accessibility tree is switched
+                # off does not fail cleanly - it fails as
+                # "'NoneType' object has no attribute 'has_depth'",
+                # which is what Alfred reported to the user twice while
+                # apologising for a technical issue it could have fixed
+                # by asking the app to wake up.
+                if attempt == 0:
+                    self._wake_accessibility(win)
+                    time.sleep(0.6)
+
+        raise UiaError(
+            "could not read the control tree: " + (errors[-1] if errors else "?")
+        )
         return []
 
     # ---------------------------------------------------------------- tree
