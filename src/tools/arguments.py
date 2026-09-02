@@ -150,6 +150,37 @@ _UI_SYNONYMS: dict[str, tuple[str, ...]] = {
 # `action` is also spelled these.
 _ACTION_KEYS = ("action", "op", "operation", "command", "verb", "do")
 
+# Verbs that are not ui_control actions but plainly mean one.
+#
+# These are what a model reaches for when it is thinking about the app
+# rather than about the tool - "play this", "launch that" - and every
+# one of them cost a refusal and a wasted turn.
+_MEANS: dict[str, str] = {
+    "play": "open_item",
+    "launch": "open_item",
+    "start": "open_item",
+    "run": "open_item",
+    "open": "open_item",
+    "choose": "select",
+    "pick": "select",
+    "tap": "click",
+    "press": "click",
+    "push": "click",
+    "hit": "click",
+    "enter": "type",
+    "write": "type",
+    "input": "type",
+    "fill": "type",
+    "read": "get",
+    "list": "tree",
+    "inspect": "tree",
+    "look": "tree",
+    "wait": "wait_ready",
+    "dismiss": "clear_popups",
+    "quit": "close",
+    "exit": "close",
+}
+
 
 def normalise_ui_control(
     arguments: dict[str, Any],
@@ -172,15 +203,54 @@ def normalise_ui_control(
     action = _first_text(out, _ACTION_KEYS)
 
     if action:
-        out["action"] = action.strip().lower().replace(" ", "_").replace("-", "_")
+        tidy = action.strip().lower().replace(" ", "_").replace("-", "_")
+        out["action"] = tidy
         _keys_for_the_key_action(out)
 
-        # A named action nobody recognises is a mistake to report, not
-        # one to paper over with a guess - so this returns either way.
-        return out
+        if not valid_actions or tidy in valid_actions:
+            return out
 
+        # A verb that is not one of ours, but plainly means one of them.
+        #
+        # Live, driving Spotify: {"action": "play", "item": "Shababs by
+        # Drake"}. There is no `play`, so the tool answered with its
+        # list of twenty-seven verbs, Alfred apologised to the user and
+        # said it could not play the song without mapping the app -
+        # which was not true and not the problem. "Play this item" is
+        # open_item and nothing else.
+        meant = _MEANS.get(tidy)
+
+        if meant and (not valid_actions or meant in valid_actions):
+            out["action"] = meant
+            _keys_for_the_key_action(out)
+            return out
+
+        # Otherwise fall through: if the rest of the call points at
+        # exactly one real action, take that.
+        #
+        # `specific_only` is what keeps "a named action nobody
+        # recognises is a mistake to report" true. The last tell -
+        # a window and nothing else means `tree` - is a sensible
+        # default for a call with no verb at all, and much too eager
+        # for one whose verb we simply did not know: it would turn
+        # {"action": "obliterate", "window": "X"} into a quiet tree
+        # read instead of saying the verb does not exist.
+        return _from_the_tells(out, valid_actions, specific_only=True)
+
+    return _from_the_tells(out, valid_actions, specific_only=False)
+
+
+def _from_the_tells(
+    out: dict[str, Any],
+    valid_actions: tuple[str, ...] | frozenset[str],
+    *,
+    specific_only: bool,
+) -> dict[str, Any]:
     for candidate, required in _UI_ACTION_TELLS:
         if valid_actions and candidate not in valid_actions:
+            continue
+
+        if specific_only and required == ("window",):
             continue
 
         if all(

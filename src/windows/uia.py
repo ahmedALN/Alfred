@@ -84,6 +84,41 @@ def clean_title(title: str) -> str:
     return text
 
 
+def _process_name(pid: int) -> str:
+    """The program behind a window, without its extension.
+
+    Cached: a window lookup walks every top-level window, and asking
+    the OS about the same handful of processes each time is the sort of
+    cost that turns a fallback into a reason not to have one.
+    """
+
+    if not pid:
+        return ""
+
+    cached = _PROCESS_NAMES.get(pid)
+
+    if cached is not None:
+        return cached
+
+    try:
+        import psutil
+
+        name = psutil.Process(pid).name()
+    except Exception:  # noqa: BLE001
+        name = ""
+
+    name = name.rsplit(".", 1)[0] if name.lower().endswith(".exe") else name
+    _PROCESS_NAMES[pid] = name
+
+    return name
+
+
+# pid -> program name. Pids are reused eventually, but a window lookup
+# lives for a few seconds and a stale entry can only ever cost one
+# wrong fallback on a window whose title already failed to match.
+_PROCESS_NAMES: dict[int, str] = {}
+
+
 def _title_score(title: str, wanted: str) -> int:
     """How well a window title answers what was asked for."""
     haystack = title.strip().lower()
@@ -331,7 +366,46 @@ class UiaSession:
             if score > best_score:
                 best, best_score = candidate, score
 
-        return best
+        return best or self._by_program(dt, wanted)
+
+    def _by_program(self, dt, wanted: str):
+        """No title matched - is any of them the PROGRAM that was asked for?
+
+        Spotify's window is called "Spotify Premium" until it plays
+        something, and then it is called "Shababs - Drake". Alfred read
+        the title, wrote it down, came back sixty seconds later to map
+        the window, and was told it did not exist - while it sat on
+        screen the whole time, because by then it was called something
+        else entirely.
+
+        Every app whose title carries its content does this: Spotify,
+        Discord, VLC, Stremio, browsers, editors. The program behind the
+        window does not change, so when the name fails, ask what the
+        window IS rather than what it is currently called.
+        """
+        want = wanted.strip().lower()
+
+        if not want:
+            return None
+
+        # "Spotify Premium" -> spotify. The recorded title is usually
+        # the program's name plus something; the first word is the part
+        # that stays.
+        first = re.split(r"[\s\-–—|:]+", want)[0]
+
+        for candidate in dt.windows():
+            try:
+                name = _process_name(candidate.process_id()).lower()
+            except Exception:  # noqa: BLE001
+                continue
+
+            if not name:
+                continue
+
+            if name in (want, first) or want.startswith(name):
+                return candidate
+
+        return None
 
     def focus(self, win) -> None:
         for _ in range(2):

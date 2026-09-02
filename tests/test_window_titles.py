@@ -161,3 +161,115 @@ def test_a_whole_word_beats_a_fragment_in_a_path():
     fragment = _title_score("C:/upsteamed/thing.txt", "steam")
 
     assert word > fragment > 0
+
+
+# ====================================================================
+# A window whose title changed out from under Alfred
+# ====================================================================
+
+
+def test_a_title_that_no_longer_matches_scores_nothing():
+    """Spotify is "Spotify Premium" until it plays something, and then
+    it is "Shababs - Drake". Alfred read the title, wrote it down, came
+    back a minute later to map the window, and was told it did not
+    exist - while it sat on screen the whole time."""
+    from src.windows.uia import _title_score
+
+    assert _title_score("Shababs - Drake", "Spotify Premium") == 0
+
+
+def test_the_program_behind_a_window_is_read_without_its_extension():
+    import os
+
+    from src.windows.uia import _process_name
+
+    assert _process_name(os.getpid()) == "python"
+
+
+def test_a_pid_that_is_not_there_is_empty_rather_than_an_error():
+    from src.windows.uia import _process_name
+
+    assert _process_name(999_999_999) == ""
+    assert _process_name(0) == ""
+
+
+def test_the_program_lookup_is_cached():
+    """A window lookup walks every top-level window; asking the OS about
+    the same processes each time is what turns a fallback into a reason
+    not to have one."""
+    import os
+
+    from src.windows.uia import _PROCESS_NAMES, _process_name
+
+    _PROCESS_NAMES.clear()
+    _process_name(os.getpid())
+
+    assert os.getpid() in _PROCESS_NAMES
+
+
+class _Win:
+    def __init__(self, title, pid):
+        self._title = title
+        self._pid = pid
+
+    def window_text(self):
+        return self._title
+
+    def process_id(self):
+        return self._pid
+
+    @property
+    def handle(self):
+        return self._pid
+
+
+class _Desktop:
+    def __init__(self, windows):
+        self._windows = windows
+
+    def windows(self):
+        return self._windows
+
+
+def test_a_renamed_window_is_found_by_its_program(monkeypatch):
+    """The fix, end to end: no title matches, so ask what the window IS
+    rather than what it is currently called."""
+    import src.windows.uia as uia
+
+    monkeypatch.setattr(
+        uia, "_process_name", lambda pid: {101: "Spotify", 102: "explorer"}.get(pid, "")
+    )
+
+    session = uia.UiaSession()
+    desktop = _Desktop([_Win("Shababs - Drake", 101), _Win("Downloads", 102)])
+
+    found = session._best_window(desktop, "Spotify Premium")
+
+    assert found is not None
+    assert found.window_text() == "Shababs - Drake"
+
+
+def test_a_matching_title_still_wins(monkeypatch):
+    """The fallback is a fallback - it must not take over from a title
+    that matches perfectly well."""
+    import src.windows.uia as uia
+
+    monkeypatch.setattr(uia, "_process_name", lambda pid: "Spotify")
+
+    session = uia.UiaSession()
+    desktop = _Desktop([_Win("Shababs - Drake", 101), _Win("Spotify Premium", 102)])
+
+    found = session._best_window(desktop, "Spotify Premium")
+
+    assert found.window_text() == "Spotify Premium"
+
+
+def test_nothing_matching_is_still_nothing(monkeypatch):
+    import src.windows.uia as uia
+
+    monkeypatch.setattr(uia, "_process_name", lambda pid: "explorer")
+
+    session = uia.UiaSession()
+    desktop = _Desktop([_Win("Downloads", 102)])
+
+    assert session._best_window(desktop, "Spotify Premium") is None
