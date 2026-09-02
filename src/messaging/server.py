@@ -36,7 +36,7 @@ class _Handler(BaseHTTPRequestHandler):
         if payload:
             self.wfile.write(payload)
 
-    def do_GET(self) -> None:  # noqa: N802 - required by the base class
+    def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if not parsed.path.startswith(self.path_prefix):
             self._plain(404)
@@ -57,7 +57,7 @@ class _Handler(BaseHTTPRequestHandler):
         print("[Webhook] subscription verified")
         self._plain(200, challenge)
 
-    def do_POST(self) -> None:  # noqa: N802 - required by the base class
+    def do_POST(self) -> None:
         if not urlparse(self.path).path.startswith(self.path_prefix):
             self._plain(404)
             return

@@ -1,4 +1,3 @@
-import json
 
 from src.usage import UsageTracker, record_response
 

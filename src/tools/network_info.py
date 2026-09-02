@@ -7,7 +7,6 @@ from src.tools.base import AlfredTool
 from src.windows.powershell import PowerShellRunner
 from src.windows.system_probe import NETWORK_QUERIES
 
-
 # Shared with the background brain via src/windows/system_probe.py.
 _QUERIES: dict[str, str] = NETWORK_QUERIES
 

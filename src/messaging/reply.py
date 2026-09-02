@@ -23,7 +23,7 @@ meant, and you say it again.
 from __future__ import annotations
 
 from collections import deque
-from typing import Callable
+from collections.abc import Callable
 
 _SYSTEM = """You are Alfred, a butler-like assistant living on this \
 person's Windows PC. They are texting you from their phone.
@@ -178,8 +178,8 @@ class Conversation:
         submit: Callable[[str], object],
         remember: int = 6,
         screen=None,
-        steer: "Callable[[str], bool] | None" = None,
-        running: "Callable[[], str] | None" = None,
+        steer: Callable[[str], bool] | None = None,
+        running: Callable[[], str] | None = None,
         eyes=None,
         record=None,
         cancel=None,

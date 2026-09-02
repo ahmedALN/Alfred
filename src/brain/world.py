@@ -404,10 +404,7 @@ def _is_a_person(sender: str) -> bool:
         return False
 
     letters = [ch for ch in name if ch.isalpha()]
-    if len(letters) > 6 and sum(ch.isupper() for ch in letters) > len(letters) * 0.6:
-        return False
-
-    return True
+    return not (len(letters) > 6 and sum(ch.isupper() for ch in letters) > len(letters) * 0.6)
 
 def _name_of(address: str) -> str:
     """"Sam Green <sam@x.com>" -> "Sam Green". A person, not an inbox."""

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import subprocess
-
-from src.windows.quiet import NO_WINDOW
 import time
 from dataclasses import dataclass
+
+from src.windows.quiet import NO_WINDOW
 
 
 @dataclass(frozen=True)

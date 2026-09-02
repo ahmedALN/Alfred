@@ -1,11 +1,9 @@
-import json
 
 from src.brain.agent import TaskAgent
 from src.brain.policy import Policy
 from src.brain.skill_store import SkillStore
 from src.brain.skills import SkillLibrary, align, apply_params
 from tests._taskfakes import KNOWN, DispatchChat, FakeRegistry
-
 
 # --------------------------------------------------------------------
 # template alignment
@@ -50,7 +48,7 @@ def _lib(tmp_path, **kw):
 
 
 def test_distill_makes_param_slot_from_request_literal(tmp_path):
-    lib, store = _lib(tmp_path)
+    lib, _store = _lib(tmp_path)
     trace = [
         ("open_app", {"name": "spotify"}),
         ("ui_control", {"action": "type", "text": "drake"}),
@@ -61,13 +59,13 @@ def test_distill_makes_param_slot_from_request_literal(tmp_path):
     assert skill is not None
     assert skill["params"] == ["p0"]
     assert skill["template"] == "play {p0} on spotify"
-    typed = [s for s in skill["steps"] if s["args"].get("action") == "type"][0]
+    typed = next(s for s in skill["steps"] if s["args"].get("action") == "type")
     assert typed["args"]["text"] == "{p0}"
     assert skill["tier"] == "ordinary"
 
 
 def test_distill_flags_dangerous_routine(tmp_path):
-    lib, store = _lib(tmp_path)
+    lib, _store = _lib(tmp_path)
     trace = [("powershell", {"command": "Move-Item C:\\a C:\\b -Recurse"})]
     skill = lib.distill("archive my old files", trace)
 
@@ -78,7 +76,7 @@ def test_distill_flags_dangerous_routine(tmp_path):
 
 
 def test_distill_rejects_duplicate_template(tmp_path):
-    lib, store = _lib(tmp_path)
+    lib, _store = _lib(tmp_path)
     trace = [("open_app", {"name": "spotify"})]
     first = lib.distill("open spotify", trace)
     lib.save(first)
@@ -90,7 +88,7 @@ def test_distill_rejects_duplicate_template(tmp_path):
 # --------------------------------------------------------------------
 
 def test_match_finds_saved_skill_by_keywords(tmp_path):
-    lib, store = _lib(tmp_path)
+    lib, _store = _lib(tmp_path)
     skill = lib.distill("play drake on spotify",
                         [("ui_control", {"action": "type", "text": "drake"})],
                         verify="a track is playing")
@@ -101,7 +99,7 @@ def test_match_finds_saved_skill_by_keywords(tmp_path):
 
 
 def test_match_misses_unrelated_request(tmp_path):
-    lib, store = _lib(tmp_path)
+    lib, _store = _lib(tmp_path)
     lib.save(lib.distill("play drake on spotify",
                          [("ui_control", {"action": "type", "text": "drake"})]))
     assert lib.match("what's my cpu temperature") is None
@@ -138,7 +136,7 @@ def _agent(chat, reg):
 
 
 def test_agent_replays_skill_with_filled_params(tmp_path):
-    lib, store = _lib(tmp_path)
+    lib, _store = _lib(tmp_path)
     skill = lib.distill(
         "play drake on spotify",
         [("ui_control", {"action": "type", "text": "drake"}),
@@ -161,7 +159,7 @@ def test_agent_replays_skill_with_filled_params(tmp_path):
 
 
 def test_agent_replay_does_not_claim_done_when_nothing_ran(tmp_path):
-    lib, store = _lib(tmp_path)
+    lib, _store = _lib(tmp_path)
     skill = lib.distill("play drake on spotify",
                         [("ui_control", {"action": "type", "text": "drake"})],
                         verify="a track is playing")
@@ -176,7 +174,7 @@ def test_agent_replay_does_not_claim_done_when_nothing_ran(tmp_path):
 
 
 def test_replay_reports_missing_param(tmp_path):
-    lib, store = _lib(tmp_path)
+    lib, _store = _lib(tmp_path)
     skill = lib.distill("play {p0} on spotify".replace("{p0}", "drake"),
                         [("ui_control", {"action": "type", "text": "drake"})])
     lib.save(skill)

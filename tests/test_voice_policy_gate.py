@@ -2,10 +2,10 @@ import os
 
 os.environ.setdefault("GEMINI_API_KEY", "dummy-key-for-tests")
 
-from src.ai.gemini import AlfredLiveSession  # noqa: E402
-from src.brain.policy import Policy  # noqa: E402
-from src.tools.registry import ToolRegistry  # noqa: E402
-from src.tools.system_info import SystemInfoTool  # noqa: E402
+from src.ai.gemini import AlfredLiveSession
+from src.brain.policy import Policy
+from src.tools.registry import ToolRegistry
+from src.tools.system_info import SystemInfoTool
 
 
 def _session():

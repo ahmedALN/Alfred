@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-from typing import Any, Callable
+from collections.abc import Callable
 
 from src.messaging.base import Channel, Inbound
 

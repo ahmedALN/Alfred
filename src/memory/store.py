@@ -4,13 +4,13 @@ import json
 import sqlite3
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @dataclass(frozen=True)
@@ -303,7 +303,7 @@ class MemoryStore:
         import datetime as _dt
 
         since = (
-            _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=hours)
+            _dt.datetime.now(_dt.UTC) - _dt.timedelta(hours=hours)
         ).isoformat()
 
         with self._lock:

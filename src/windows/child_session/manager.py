@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import ctypes
 import subprocess
-
-from src.windows.quiet import NO_WINDOW
 import threading
 from pathlib import Path
+
+from src.windows.quiet import NO_WINDOW
 
 
 class ChildSessionError(RuntimeError):

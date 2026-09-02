@@ -15,7 +15,8 @@ driving.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from src.windows.child_session import ChildSessionError
 from src.windows.uia import Control, UiaError, clean_title, key_tokens
@@ -69,7 +70,7 @@ class RemoteUia:
                 ) from exc
 
             raise UiaError(message) from exc
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise UiaError(
                 f"could not reach the accessibility agent: {exc}"
             ) from exc

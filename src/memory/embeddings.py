@@ -4,7 +4,6 @@ import math
 
 from google import genai
 
-
 _warned_about_dimensions = False
 
 
@@ -67,7 +66,7 @@ class EmbeddingClient:
                 model=self._model,
                 contents=text,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             print(f"[Embeddings] failed to embed text: {exc}")
             return None
 

@@ -36,7 +36,7 @@ def test_the_way_back_survives_the_argument_being_called_something_else():
 def test_a_diary_entry_says_it_cannot_undo_it_itself():
     """Alfred holds no permission to delete an event. The honest way
     back is telling you which one to remove."""
-    tool, args, what = _reverse_of("calendar", {"action": "add", "title": "Dentist"})
+    tool, _args, what = _reverse_of("calendar", {"action": "add", "title": "Dentist"})
 
     assert tool is None
     assert "Dentist" in what

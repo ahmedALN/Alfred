@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 _MODIFIERS = {
     "alt": 0x0001,      # MOD_ALT

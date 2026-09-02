@@ -147,9 +147,9 @@ def test_find_searches_current_window():
 
 def test_password_field_is_flagged_in_the_tree():
     out = _tool().execute({"action": "tree", "window": "App"})
-    pwd = [c for c in out["controls"] if c["name"] == "Password"][0]
+    pwd = next(c for c in out["controls"] if c["name"] == "Password")
     assert pwd["password_field"] is True
-    other = [c for c in out["controls"] if c["name"] == "Search"][0]
+    other = next(c for c in out["controls"] if c["name"] == "Search")
     assert "password_field" not in other
 
 

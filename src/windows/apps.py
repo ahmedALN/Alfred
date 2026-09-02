@@ -3,24 +3,22 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import shlex
+import shutil
 import subprocess
-
-from src.windows.quiet import NO_WINDOW
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
 import psutil
-import win32con
 import win32gui
 import win32process
 
 from src.config import load_settings
 from src.windows.desktop_bridge import DesktopBridgeClient
 from src.windows.desktops import DesktopManager
+from src.windows.quiet import NO_WINDOW
 
 DesktopTarget = Literal["alfred", "user", "current"]
 
@@ -263,7 +261,7 @@ class AppLauncher:
     def _find_shortcut(self, query: str) -> Path | None:
         q = query.strip().lower()
         roots = [
-            Path(os.environ.get("ProgramData", r"C:\ProgramData"))
+            Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData"))
             / "Microsoft" / "Windows" / "Start Menu" / "Programs",
             Path(os.environ.get("APPDATA", "")) / "Microsoft"
             / "Windows" / "Start Menu" / "Programs",
@@ -675,7 +673,7 @@ def shortcut_target(path: str | Path) -> tuple[str, str]:
                     return line.split("=", 1)[1].strip(), ""
             return "", ""
 
-        import win32com.client  # noqa: PLC0415 - COM is slow to import
+        import win32com.client
 
         link = win32com.client.Dispatch("WScript.Shell").CreateShortCut(str(p))
         return str(link.Targetpath or ""), str(link.Arguments or "")

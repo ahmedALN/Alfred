@@ -8,11 +8,11 @@ import json
 import os
 import sqlite3
 import subprocess
+import tempfile
+from datetime import UTC, datetime
+from pathlib import Path
 
 from src.windows.quiet import NO_WINDOW
-import tempfile
-from datetime import datetime, timezone
-from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
 
@@ -38,7 +38,7 @@ def _audit_summary(db_path: Path) -> dict[str, object]:
         return {"available": False}
 
     out: dict[str, object] = {"available": True}
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = datetime.now(UTC).date().isoformat()
 
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
@@ -158,9 +158,9 @@ def main() -> int:
     usage_file = _ROOT / "alfred_usage.json"
     if usage_file.exists():
         try:
-            from datetime import datetime, timezone
+            from datetime import datetime
 
-            today = datetime.now(timezone.utc).date().isoformat()
+            today = datetime.now(UTC).date().isoformat()
             u = json.loads(usage_file.read_text()).get(today, {})
             if u:
                 errs = ", ".join(

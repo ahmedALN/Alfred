@@ -5,7 +5,11 @@ from __future__ import annotations
 from datetime import datetime
 
 from src.voice.greeting import (
-    enabled, greeting, may_speak, part_of_day, phrase,
+    enabled,
+    greeting,
+    may_speak,
+    part_of_day,
+    phrase,
 )
 
 

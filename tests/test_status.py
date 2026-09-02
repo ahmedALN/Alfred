@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import UTC
 
 from src import status
 
@@ -10,9 +11,9 @@ def test_audit_summary_reads_counts(tmp_path):
         "CREATE TABLE brain_audit (id INTEGER PRIMARY KEY, session_id TEXT, "
         "kind TEXT, payload TEXT, created_at TEXT);"
     )
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = datetime.now(UTC).date().isoformat()
     conn.executemany(
         "INSERT INTO brain_audit (kind, payload, created_at) VALUES (?, ?, ?)",
         [

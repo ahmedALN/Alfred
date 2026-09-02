@@ -11,9 +11,9 @@ import os
 
 os.environ.setdefault("GEMINI_API_KEY", "dummy-key-for-tests")
 
-from src.ai.gemini import AlfredLiveSession  # noqa: E402
-from src.tools.open_app import OpenAppTool  # noqa: E402
-from src.tools.registry import ToolRegistry  # noqa: E402
+from src.ai.gemini import AlfredLiveSession
+from src.tools.open_app import OpenAppTool
+from src.tools.registry import ToolRegistry
 
 
 class FakeRouter:

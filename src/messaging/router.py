@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import re
 import threading
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from src.messaging.base import Inbound
-
 from src.messaging.masking import mask
 
 # Anything that could carry a credential. Alfred does not want these,
@@ -26,7 +26,7 @@ _SECRET = re.compile(
 )
 
 _REFUSED_SECRET = (
-    "I don't want that - I never type passwords, codes or card details, "
+    "I don't want that - I never type passwords, codes or card details, "  # noqa: S105
     "so there is nothing useful I can do with it. Please delete that "
     "message. If something needs signing in to, I'll get it to the "
     "sign-in screen and hand it to you."

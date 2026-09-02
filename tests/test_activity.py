@@ -75,7 +75,7 @@ def test_it_says_how_long_you_have_been_there(tmp_path):
     clock.on(30)
     seen = collector.collect()
 
-    where = [o for o in seen if o.key == "activity.where"][0]
+    where = next(o for o in seen if o.key == "activity.where")
     assert where.value["minutes"] == 30
     assert "Code" in where.summary
 
@@ -89,9 +89,9 @@ def test_a_long_stretch_is_something_the_brain_can_notice(tmp_path):
                                   clock=clock)
 
     collector.collect()
-    short = [o for o in collector.collect() if o.key == "activity.long_stretch"][0]
+    short = next(o for o in collector.collect() if o.key == "activity.long_stretch")
     clock.on(200)
-    long = [o for o in collector.collect() if o.key == "activity.long_stretch"][0]
+    long = next(o for o in collector.collect() if o.key == "activity.long_stretch")
 
     assert short.value is False
     assert long.value is True

@@ -129,7 +129,6 @@ def test_a_minimised_window_is_still_on_the_list(monkeypatch):
     test read as "not really there"."""
     import types
 
-    seen = []
 
     fake_gui = types.SimpleNamespace(
         IsWindowVisible=lambda h: True,

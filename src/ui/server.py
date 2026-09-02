@@ -64,7 +64,10 @@ class Interface:
     def build(self):
         from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
         from fastapi.responses import (
-            FileResponse, HTMLResponse, JSONResponse, Response,
+            FileResponse,
+            HTMLResponse,
+            JSONResponse,
+            Response,
         )
 
         app = FastAPI(title="Alfred", docs_url=None, redoc_url=None)

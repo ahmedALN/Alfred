@@ -1,13 +1,10 @@
 import asyncio
 from pathlib import Path
 
-import pytest
-
 from src.brain.audit import AuditLog
 from src.brain.orchestrator import BrainLoop
 from src.brain.policy import Policy
 from src.brain.types import Notable, Proposal, ProposalKind
-
 
 # ---------------------------------------------------------------- fakes
 
@@ -305,7 +302,7 @@ def test_the_brain_does_not_talk_to_itself_out_loud(tmp_path):
     """Most of what the brain comes up with on a tick is a note to
     itself - "I'm remembering that ui_control has a tree action". Spoken,
     that is Alfred muttering his own reference material at the user."""
-    loop, spoken, audit, _ = build_loop(
+    loop, spoken, _audit, _ = build_loop(
         tmp_path,
         [Proposal(kind=ProposalKind.SPEAK, message="I'm noting that ...")],
     )
@@ -318,7 +315,7 @@ def test_the_brain_does_not_talk_to_itself_out_loud(tmp_path):
 
 def test_what_it_would_have_said_is_still_kept(tmp_path):
     """Silenced, not discarded - the observation stays auditable."""
-    loop, spoken, audit, _ = build_loop(
+    loop, _spoken, audit, _ = build_loop(
         tmp_path,
         [Proposal(kind=ProposalKind.SPEAK, message="disk is nearly full")],
     )

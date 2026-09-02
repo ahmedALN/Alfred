@@ -48,7 +48,7 @@ def _rows(name: str, sql: str, args: tuple = ()) -> list[dict[str, Any]]:
 
 def _one(name: str, sql: str, args: tuple = ()) -> int:
     found = _rows(name, sql, args)
-    return int(list(found[0].values())[0]) if found else 0
+    return int(next(iter(found[0].values()))) if found else 0
 
 
 # ------------------------------------------------------------------ panels

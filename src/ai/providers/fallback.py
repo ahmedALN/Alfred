@@ -3,14 +3,13 @@ from __future__ import annotations
 import concurrent.futures
 import re
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from src.ai.providers.base import (
     ChatProvider,
     ProviderError,
     VisionProvider,
 )
-
 
 # How long a rung sits out, by what went wrong with it.
 #
@@ -227,12 +226,12 @@ def _is_useless(text: str) -> bool:
     and passing it on as one is worse than failing, because it looks
     exactly like an answer.
     """
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    lines = [l.strip() for l in text.splitlines() if l.strip()]  # noqa: E741
     if not lines:
         return True
 
     echoed = sum(
-        1 for l in lines
+        1 for l in lines  # noqa: E741
         if "<name>" in l.lower() or l.lower().startswith("<")
     )
     return echoed >= max(2, len(lines) // 2)
@@ -248,7 +247,7 @@ class FallbackVisionProvider(VisionProvider):
 
     def __init__(
         self,
-        providers: "list[VisionProvider]",
+        providers: list[VisionProvider],
         *,
         retry_primary_after: float = 600.0,
         patience: float = 12.0,

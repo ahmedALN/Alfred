@@ -67,7 +67,7 @@ def _rm(**kw):
         clear_seconds=kw.get("clear_seconds", 1.0),
         fullscreen_probe=kw.get("fullscreen_probe", lambda: False),
         foreground_probe=kw.get("foreground_probe", lambda: "game.exe"),
-        monotonic=kw.get("monotonic", None) or (lambda: 0.0),
+        monotonic=kw.get("monotonic") or (lambda: 0.0),
     )
     return rm, providers, brain, queue, child, spoken
 
@@ -88,7 +88,7 @@ def test_enter_game_frees_resources():
 
 
 def test_exit_game_restores():
-    rm, providers, brain, queue, child, spoken = _rm()
+    rm, _providers, brain, queue, _child, _spoken = _rm()
     asyncio.run(rm.enter_game("user"))
     asyncio.run(rm.exit_game("user"))
 
@@ -108,7 +108,7 @@ def test_autodetect_engages_on_sustained_fullscreen_game():
     clock = [0.0]
     fs = [False]
 
-    rm, providers, brain, *_ = _rm(
+    rm, _providers, _brain, *_ = _rm(
         autodetect=True,
         detect_seconds=25,
         clear_seconds=10,

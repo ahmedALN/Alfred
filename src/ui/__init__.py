@@ -7,7 +7,7 @@ a web framework to say "Alfred is speaking now".
 
 from src.ui.live import BUS, LIVE, capture_output
 
-__all__ = ["BUS", "LIVE", "capture_output", "INTERFACE", "Interface"]
+__all__ = ["BUS", "INTERFACE", "LIVE", "Interface", "capture_output"]
 
 
 def __getattr__(name: str):

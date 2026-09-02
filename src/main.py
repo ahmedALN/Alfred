@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import sys
-import logging
 from pathlib import Path
 
 from src.logging_setup import configure_logging
@@ -17,7 +17,7 @@ from src.logging_setup import configure_logging
 
 _ROOT = Path(__file__).resolve().parent.parent
 
-from google import genai  # noqa: E402
+from google import genai
 
 # The SDK logs a noisy "AFC is not recommended" warning on every plain
 # generate_content call; we use that path deliberately.
@@ -25,68 +25,69 @@ logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 
 from src.ai.gemini import AlfredLiveSession
 from src.ai.providers import build_providers
+from src.brain.activity import ActivityCollector, ActivityLog, watching
+from src.brain.agent import TaskAgent
+from src.brain.app_memory import AppMemory
 from src.brain.audit import AuditLog
 from src.brain.deliberation import Deliberator
-from src.tools.interface_tool import InterfaceTool
-from src.tools.power import PowerTool
-from src.tools.weather import WeatherTool
-from src.tools.skill_tool import SkillTool
+from src.brain.limitations import LimitationStore
+from src.brain.mailwatch import MailCollector
 from src.brain.orchestrator import BrainLoop
-from src.brain.agent import TaskAgent
 from src.brain.perception import Perception
 from src.brain.policy import Policy
 from src.brain.reasoner import LLMReasoner
-from src.brain.app_memory import AppMemory
-from src.brain.limitations import LimitationStore
-from src.brain.activity import ActivityCollector, ActivityLog, watching
-from src.brain.signals import default_collectors
-from src.brain.mailwatch import MailCollector
 from src.brain.schedule import ScheduleStore
-from src.brain.undo import Undo
-from src.brain.world import World, refresh as refresh_world
-from src.brain.worldwatch import WorldCollector
-from src.mail import Gmail
-from src.workspace import GoogleAccount
-from src.workspace.calendar import Calendar
-from src.workspace.classroom import Classroom
+from src.brain.signals import default_collectors
 from src.brain.skill_store import SkillStore
 from src.brain.skills import SkillLibrary
-from src.brain.tasks import TaskQueue
 from src.brain.task_store import TaskStore
+from src.brain.tasks import TaskQueue
+from src.brain.undo import Undo
+from src.brain.world import World
+from src.brain.world import refresh as refresh_world
+from src.brain.worldwatch import WorldCollector
 from src.config import load_settings
 from src.context import build_situation
-from src.tools.introspect import WhatCanYouDoTool
-from src.tools.episodes_tool import EpisodesTool
+from src.mail import Gmail
 from src.memory.episodes import EpisodeStore
 from src.memory.learner import MemoryLearner
 from src.memory.store import MemoryStore
+from src.messaging.masking import mask
 from src.resource_mode import ResourceMode
-from src.tools.resource_tool import ResourceModeTool
+from src.singleton import AlreadyRunning, SingleInstance
+from src.tools.calendar_tool import CalendarTool
+from src.tools.classroom_tool import ClassroomTool
 from src.tools.computer_screenshot import ComputerScreenshotTool
 from src.tools.desktop_control import DesktopControlTool
-from src.tools.ui_control import UIControlTool
+from src.tools.diary_tool import DiaryTool
+from src.tools.episodes_tool import EpisodesTool
+from src.tools.interface_tool import InterfaceTool
+from src.tools.introspect import WhatCanYouDoTool
+from src.tools.mail_tool import MailTool
 from src.tools.memory_tools import ForgetTool, RecallTool, RememberTool
 from src.tools.network_info import NetworkInfoTool
 from src.tools.open_app import OpenAppTool
+from src.tools.power import PowerTool
 from src.tools.powershell import PowerShellTool
 from src.tools.registry import ToolRegistry
-from src.tools.system_info import SystemInfoTool
-from src.tools.web import WebTool
-from src.singleton import AlreadyRunning, SingleInstance
-from src.tools.calendar_tool import CalendarTool
-from src.tools.diary_tool import DiaryTool
-from src.tools.undo_tool import UndoTool
-from src.tools.world_tool import WorldTool
-from src.tools.classroom_tool import ClassroomTool
-from src.tools.mail_tool import MailTool
+from src.tools.resource_tool import ResourceModeTool
 from src.tools.schedule_tool import ScheduleTool
+from src.tools.skill_tool import SkillTool
+from src.tools.system_info import SystemInfoTool
 from src.tools.task_tool import RunTaskTool, SteerTaskTool, TaskStatusTool
+from src.tools.ui_control import UIControlTool
+from src.tools.undo_tool import UndoTool
+from src.tools.weather import WeatherTool
+from src.tools.web import WebTool
+from src.tools.world_tool import WorldTool
 from src.windows.child_session import ChildSessionClient
-from src.windows.isolated_desktop import IsolatedDesktop
-from src.windows.uia_remote import RemoteUia
-from src.windows.session_router import ROUTER as session_router
 from src.windows.child_session.bootstrap import ensure_agent_running
-from src.messaging.masking import mask
+from src.windows.isolated_desktop import IsolatedDesktop
+from src.windows.session_router import ROUTER as session_router
+from src.windows.uia_remote import RemoteUia
+from src.workspace import GoogleAccount
+from src.workspace.calendar import Calendar
+from src.workspace.classroom import Classroom
 
 
 def _build_personal_whatsapp(
@@ -272,7 +273,9 @@ async def main() -> None:
     # that narration is the interface's log panel. Tee it now rather
     # than at the point the window opens, so the logs contain the boot
     # - which is the part you most want when something did not start.
-    from src.ui.live import BUS as _UI_BUS, LIVE as _UI, capture_output
+    from src.ui.live import BUS as _UI_BUS
+    from src.ui.live import LIVE as _UI
+    from src.ui.live import capture_output
     capture_output()
 
     # One Alfred at a time - two voice sessions = two voices.
@@ -281,7 +284,7 @@ async def main() -> None:
         instance_lock.acquire()
     except AlreadyRunning as exc:
         print(f"\n{exc}\n")
-        raise SystemExit(3)  # watchdog: retry later, don't treat as clean exit
+        raise SystemExit(3)  # watchdog: retry later, don't treat as clean exit  # noqa: B904
 
     # --------------------------------------------------------------
     # Long-term memory: persists across every future run of Alfred.

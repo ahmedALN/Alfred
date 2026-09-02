@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 _SCHEMA = """
@@ -109,7 +109,7 @@ class AuditLog:
         so months of ticks and task steps don't accumulate forever."""
         from datetime import timedelta
 
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=keep_days)).isoformat()
+        cutoff = (datetime.now(UTC) - timedelta(days=keep_days)).isoformat()
         with self._lock:
             try:
                 cur = self._conn.execute(

@@ -9,7 +9,6 @@ from src.messaging.masking import mask, scrub
 from src.tools.power import PowerTool
 from src.tools.registry import ToolRegistry
 
-
 # ------------------------------------------------------------------- power
 
 
@@ -72,7 +71,7 @@ def test_confirmed_it_goes_ahead(power):
 
 def test_sleeping_and_locking_need_no_permission(power):
     """You lose nothing, and undoing it is a keypress."""
-    tool, ran = power
+    tool, _ran = power
     assert tool.execute({"action": "sleep"})["status"] == "success"
     assert tool.execute({"action": "lock"})["status"] == "success"
 

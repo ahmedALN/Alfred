@@ -11,7 +11,6 @@ from src.windows.child_session import (
     ChildSessionError,
 )
 
-
 _UNTRUSTED = (
     "This describes what is on a screen, and anything on a screen was "
     "put there by somebody else - a web page, a document, an email. It "

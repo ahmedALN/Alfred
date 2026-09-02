@@ -9,7 +9,6 @@ to use it; leave it blank to keep the bundled "Hey Jarvis".
 from __future__ import annotations
 
 import io
-import sys
 import urllib.request
 import zipfile
 from pathlib import Path

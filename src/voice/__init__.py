@@ -7,6 +7,6 @@ from src.voice.wake import WakeListener
 __all__ = [
     "ActivationController",
     "HotkeyListener",
-    "parse_hotkey",
     "WakeListener",
+    "parse_hotkey",
 ]

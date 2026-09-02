@@ -133,7 +133,7 @@ class GeminiVisionProvider(VisionProvider):
                     ),
                 ],
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise ProviderError(
                 f"Gemini vision request failed: {type(exc).__name__}: {exc}"
             ) from exc

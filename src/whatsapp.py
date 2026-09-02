@@ -23,6 +23,13 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Imported for the annotation only. The real import stays inside
+    # the function that needs it: neonize is heavy, and `python -m
+    # src.whatsapp --help` should not pay for it.
+    from src.messaging.whatsapp_personal import PersonalWhatsApp
 
 _ROOT = Path(__file__).resolve().parent.parent
 _SESSION = _ROOT / os.getenv("ALFRED_WHATSAPP_SESSION", "alfred_whatsapp.sqlite3")
@@ -81,7 +88,7 @@ def cmd_pair(argv: list[str]) -> int:
     return 1
 
 
-def _done(channel: "PersonalWhatsApp") -> int:
+def _done(channel: PersonalWhatsApp) -> int:
     """Linked. Now let go, or the program never ends.
 
     WhatsApp starts pouring years of history down the connection the

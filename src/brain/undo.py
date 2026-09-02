@@ -175,7 +175,7 @@ def _reverse_of(
     if tool == "mail" and str(args.get("action", "")) == "archive":
         return (
             None, {},
-            f"archived a message (it is in All Mail, not deleted)",
+            "archived a message (it is in All Mail, not deleted)",
         )
 
     return None

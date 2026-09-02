@@ -49,7 +49,7 @@ def strip_reasoning(text: str) -> str:
 class _Unloadable:
     """Mixin: free any GPU/RAM the backend is holding. No-op for cloud APIs."""
 
-    def unload(self) -> None:  # noqa: D401
+    def unload(self) -> None:
         return None
 
 

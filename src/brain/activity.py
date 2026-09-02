@@ -27,8 +27,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from src.brain.types import Observation
 from src.brain.signals import SignalCollector
+from src.brain.types import Observation
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS spells (
@@ -234,9 +234,9 @@ def _tidy(title: str) -> str:
 def _foreground_window() -> tuple[str, str]:
     """The app and title of whatever is in front."""
     try:
+        import psutil
         import win32gui
         import win32process
-        import psutil
 
         hwnd = win32gui.GetForegroundWindow()
         if not hwnd:

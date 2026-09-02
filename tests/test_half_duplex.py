@@ -1,11 +1,10 @@
 import os
-import queue
 
 os.environ.setdefault("GEMINI_API_KEY", "dummy-key-for-tests")
 
-from src.ai.gemini import AlfredLiveSession  # noqa: E402
-from src.tools.registry import ToolRegistry  # noqa: E402
-from src.voice.activation import ActivationController  # noqa: E402
+from src.ai.gemini import AlfredLiveSession
+from src.tools.registry import ToolRegistry
+from src.voice.activation import ActivationController
 
 
 def _session(**kw):

@@ -77,9 +77,9 @@ def cmd_forget(args: list[str]) -> int:
         return 2
     key = app_key(" ".join(args))
     store = _store()
-    with store._lock:  # noqa: SLF001 - small admin CLI
+    with store._lock:
         for table in ("app_controls", "app_notes"):
-            store._conn.execute(f"DELETE FROM {table} WHERE app_key = ?", (key,))
+            store._conn.execute(f"DELETE FROM {table} WHERE app_key = ?", (key,))  # noqa: S608
         cur = store._conn.execute("DELETE FROM apps WHERE key = ?", (key,))
         store._conn.commit()
     store.close()

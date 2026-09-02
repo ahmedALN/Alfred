@@ -94,7 +94,7 @@ def test_a_job_that_will_not_start_says_so():
 
 
 def test_nothing_is_said_about_an_empty_message():
-    talk, jobs, chat = _talk()
+    talk, _jobs, chat = _talk()
 
     assert talk.handle("   ") == ""
     assert chat.prompts == []

@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import base64
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.message import EmailMessage
-from pathlib import Path
 from typing import Any
 
+# Re-exported: the scope list lives with the account, and callers
+# (and the tests) ask this module which scopes reading mail needs.
 from src.workspace.account import GMAIL as SCOPES
 from src.workspace.account import GoogleError
+
+__all__ = ["SCOPES", "GoogleError"]
 
 # Read, label, archive, draft. Not send. Not delete.
 #
@@ -188,7 +191,7 @@ def _is_bulk(headers: dict, labels: list) -> bool:
 
 def _when(internal: Any) -> str:
     try:
-        stamp = datetime.fromtimestamp(int(internal) / 1000, tz=timezone.utc)
+        stamp = datetime.fromtimestamp(int(internal) / 1000, tz=UTC)
         return stamp.astimezone().strftime("%d %b %H:%M")
     except Exception:  # noqa: BLE001
         return ""

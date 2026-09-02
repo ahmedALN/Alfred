@@ -3,8 +3,8 @@ from __future__ import annotations
 import os
 import signal
 import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 try:
     import win32api

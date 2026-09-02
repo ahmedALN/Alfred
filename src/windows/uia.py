@@ -196,7 +196,7 @@ class UiaSession:
         out: list[dict[str, Any]] = []
         try:
             tops = self._dt().windows()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise UiaError(f"could not list windows: {exc}") from exc
 
         for w in tops:
@@ -269,7 +269,7 @@ class UiaSession:
             if callable(waiter):
                 waiter("exists", timeout=4)
             return win
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise UiaError(f"window not found: {exc}") from exc
 
     def _same_as_last(self, candidate) -> bool:
@@ -359,7 +359,7 @@ class UiaSession:
 
         try:
             win.close()
-        except Exception:
+        except Exception:  # noqa: BLE001
             # Some windows refuse the polite request - a modal is up, or
             # the frame does not handle it. Alt+F4 goes to the same
             # place through the keyboard.
@@ -369,7 +369,7 @@ class UiaSession:
                 from pywinauto.keyboard import send_keys
 
                 send_keys("%{F4}")
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 raise UiaError(f"could not close {title!r}: {exc}") from exc
 
         return title
@@ -404,7 +404,7 @@ class UiaSession:
                 return list(win.descendants(**kwargs))
             except TypeError:
                 continue
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 raise UiaError(f"could not read the control tree: {exc}") from exc
         return []
 
@@ -525,7 +525,7 @@ class UiaSession:
 
         try:
             wr = win.rectangle()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise UiaError(f"could not measure the window: {exc}") from exc
 
         width = max(1, wr.width())
@@ -731,7 +731,7 @@ class UiaSession:
         try:
             el.invoke()  # type: ignore[attr-defined]
             return label
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise UiaError(f"could not click {label or ref}: {exc}") from exc
 
     @staticmethod
@@ -818,7 +818,7 @@ class UiaSession:
         try:
             rect = win.rectangle()
             image = win.capture_as_image()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise UiaError(f"could not capture the window: {exc}") from exc
 
         import io

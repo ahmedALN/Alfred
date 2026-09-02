@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 _DAYS = {
     "monday": 0, "mon": 0, "tuesday": 1, "tue": 1, "tues": 1,
@@ -57,7 +57,7 @@ class When:
     weekday: int = -1         # for weekly
     said: str = ""            # the words it was read from
 
-    def after(self, moment: datetime) -> "datetime | None":
+    def after(self, moment: datetime) -> datetime | None:
         """The next time this comes round after ``moment``, or None if
         it was a one-off that has already happened."""
         if not self.repeat:
@@ -246,7 +246,7 @@ def _clock(said: str) -> tuple[int, int, bool] | None:
     return None
 
 
-def _hhmm(found: "tuple[int, int, bool] | None") -> "tuple[int, int] | None":
+def _hhmm(found: tuple[int, int, bool] | None) -> tuple[int, int] | None:
     return (found[0], found[1]) if found else None
 
 

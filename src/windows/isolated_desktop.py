@@ -3,9 +3,10 @@ from __future__ import annotations
 import subprocess
 import threading
 import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any
 
 from src.windows.child_session import (
     ChildSessionClient,

@@ -269,9 +269,9 @@ def report(rows: list[dict]) -> None:
     mean = total_secs / max(len(rows), 1)
 
     print()
-    print("  passed      {}/{}".format(ok, len(rows)))
-    print("  total time  {:.0f}s   (mean {:.1f}s)".format(total_secs, mean))
-    print("  tool calls  {}   of which failed: {}".format(steps, failed))
+    print(f"  passed      {ok}/{len(rows)}")
+    print(f"  total time  {total_secs:.0f}s   (mean {mean:.1f}s)")
+    print(f"  tool calls  {steps}   of which failed: {failed}")
     slowest = sorted(rows, key=lambda r: -r["secs"])[:3]
     print("  slowest     " + ", ".join(
         "{} {:.0f}s".format(r["goal"][:28], r["secs"]) for r in slowest

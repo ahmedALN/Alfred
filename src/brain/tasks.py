@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import threading
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from src.brain.agent import TaskAgent, TaskResult
 from src.brain.isolation import strip_isolation_phrase, wants_isolation
@@ -149,7 +150,7 @@ class TaskQueue:
     def running(self) -> bool:
         return any(r.status == "running" for r in self._records.values())
 
-    def current(self) -> "TaskRecord | None":
+    def current(self) -> TaskRecord | None:
         for task_id in reversed(self._order):
             record = self._records.get(task_id)
             if record is not None and record.status == "running":

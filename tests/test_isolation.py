@@ -3,7 +3,6 @@
 from src.brain.isolation import strip_isolation_phrase, wants_isolation
 from src.windows.isolated_desktop import IsolatedDesktop
 
-
 # ---------------------------------------------------------------- trigger
 
 
@@ -112,7 +111,7 @@ def test_cleanup_catches_apps_that_handed_off_to_another_process():
         {"pid": 1, "name": "explorer"},
         {"pid": 77, "name": "Notepad"},   # NOT the pid launch reported
     ]
-    d, client = _desktop(apps, baseline={1}, launched=[42])
+    d, _client = _desktop(apps, baseline={1}, launched=[42])
     result = d.cleanup()
 
     assert 77 in result["closed"]
@@ -129,7 +128,7 @@ def test_cleanup_leaves_everything_alone_when_nothing_is_new():
 
 def test_close_everything_also_clears_the_baseline_clutter():
     apps = [{"pid": 1, "name": "explorer"}, {"pid": 5, "name": "Discord"}]
-    d, client = _desktop(apps, baseline={1, 5})
+    d, _client = _desktop(apps, baseline={1, 5})
     result = d.cleanup(close_everything=True)
 
     assert set(result["closed"]) == {1, 5}

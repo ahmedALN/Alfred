@@ -25,8 +25,9 @@ import os
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from src.messaging.base import Channel, Inbound
 
@@ -224,7 +225,7 @@ class PersonalWhatsApp(Channel):
         while True:
             try:
                 return client.PairPhone(self._owner, show_notification)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 if not _still_waking(exc) or time.monotonic() >= deadline:
                     raise
                 time.sleep(0.4)

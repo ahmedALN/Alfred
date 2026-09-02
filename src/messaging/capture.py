@@ -16,11 +16,11 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-
-from src.windows.quiet import NO_WINDOW
 import tempfile
 import time
 from pathlib import Path
+
+from src.windows.quiet import NO_WINDOW
 
 # Long enough to show what happened, short enough to arrive.
 MAX_SECONDS = 30

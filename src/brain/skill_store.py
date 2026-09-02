@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 _SCHEMA = """
@@ -108,7 +108,7 @@ class SkillStore:
         updates = ", ".join(f"{c} = excluded.{c}" for c in row if c != "id")
         with self._lock:
             self._conn.execute(
-                f"INSERT INTO skills ({cols}) VALUES ({placeholders}) "
+                f"INSERT INTO skills ({cols}) VALUES ({placeholders}) "  # noqa: S608
                 f"ON CONFLICT(id) DO UPDATE SET {updates}",
                 tuple(row.values()),
             )
@@ -120,7 +120,7 @@ class SkillStore:
         col = "success" if ok else "fail"
         with self._lock:
             self._conn.execute(
-                f"UPDATE skills SET {col} = {col} + 1, confidence = ?, "
+                f"UPDATE skills SET {col} = {col} + 1, confidence = ?, "  # noqa: S608
                 f"last_used = ? WHERE id = ?",
                 (round(confidence, 3), _now(), skill_id),
             )

@@ -207,7 +207,7 @@ def test_executor_loop_is_broken():
         verify=False,
     )
     reg = FakeRegistry()
-    result = _agent2(chat, reg).run("check disks", source="voice")
+    _agent2(chat, reg).run("check disks", source="voice")
     # the same call runs at most twice before the loop guard abandons it
     assert len(reg.executed) <= 2
 

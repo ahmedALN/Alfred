@@ -41,10 +41,7 @@ def tool_succeeded(result: Any) -> bool:
         return False
 
     # An 'error' field alongside anything other than an explicit success.
-    if result.get("error") and status != "success":
-        return False
-
-    return True
+    return not (result.get("error") and status != "success")
 
 
 def summarize_result(result: Any, limit: int = 600) -> str:

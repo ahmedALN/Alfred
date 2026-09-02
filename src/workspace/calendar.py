@@ -8,7 +8,7 @@ promise, stated as one.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 _MAX = 50
@@ -151,7 +151,7 @@ def _readable(when: dict[str, Any] | None) -> str:
             return datetime.fromisoformat(raw).strftime("%a %d %b (all day)")
         moment = datetime.fromisoformat(raw)
         if moment.tzinfo is None:
-            moment = moment.replace(tzinfo=timezone.utc)
+            moment = moment.replace(tzinfo=UTC)
         return moment.astimezone().strftime("%a %d %b %H:%M")
     except Exception:  # noqa: BLE001
         return raw

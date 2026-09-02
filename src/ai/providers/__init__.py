@@ -11,8 +11,8 @@ from src.ai.providers.factory import ProviderBundle, build_providers
 __all__ = [
     "ChatProvider",
     "EmbeddingProvider",
-    "VisionProvider",
-    "ProviderError",
     "ProviderBundle",
+    "ProviderError",
+    "VisionProvider",
     "build_providers",
 ]

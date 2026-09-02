@@ -11,7 +11,6 @@ import src.web as web
 from src.tools.web import WebTool, _words
 from src.web import _is_advert
 
-
 # ------------------------------------------------------------- adverts
 
 

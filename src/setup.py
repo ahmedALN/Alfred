@@ -8,11 +8,10 @@ creates a .env if you don't have one. Safe to run repeatedly.
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
-import time
 import sys
+import time
 import urllib.request
 from pathlib import Path
 

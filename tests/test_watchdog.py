@@ -1,8 +1,5 @@
 import subprocess
 import time
-from collections import deque
-
-import pytest
 
 from src import watchdog
 

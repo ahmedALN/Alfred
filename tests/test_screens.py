@@ -91,7 +91,7 @@ def test_an_empty_tree_is_not_a_diagnosis():
 # ------------------------------------------------ popups in the way
 
 
-from src.windows.screens import dismiss_target, is_noise  # noqa: E402
+from src.windows.screens import dismiss_target, is_noise
 
 UPDATE_POPUP = [
     _c("Text", "A new update is available!"),

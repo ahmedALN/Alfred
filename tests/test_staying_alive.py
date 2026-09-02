@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import re
 import pathlib
 
 from src.ai.gemini import _is_connection_error
@@ -27,7 +25,7 @@ def test_a_closed_session_is_transport_not_a_fault():
 def test_transient_transport_failures_are_all_reconnectable():
     for exc in (
         ConnectionResetError("reset"),
-        asyncio.TimeoutError(),
+        TimeoutError(),
         OSError("network unreachable"),
         RuntimeError("session is not connected"),
     ):

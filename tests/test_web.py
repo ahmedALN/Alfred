@@ -1,10 +1,8 @@
 """Reading the web without a browser - and never obeying it."""
 
-import pytest
 
 from src.tools.web import WebTool
-from src.web import _Reader, _unwrap, _strip
-
+from src.web import _Reader, _strip, _unwrap
 
 # ---------------------------------------------------------------- reading
 

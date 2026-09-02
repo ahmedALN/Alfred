@@ -87,7 +87,7 @@ def cmd_sessions(_args: list[str]) -> int:
         return 1
     print(f"{'session':<10}{'processes':>11}{'RAM (MB)':>11}")
     for r in sorted(rows, key=lambda x: str(x.get("Session"))):
-        print(f"  {str(r.get('Session')):<8}{r.get('Count', 0):>11}"
+        print(f"  {r.get('Session')!s:<8}{r.get('Count', 0):>11}"
               f"{r.get('MB', 0):>11}")
 
     from src.windows.child_session import child_session_id
@@ -99,7 +99,9 @@ def cmd_sessions(_args: list[str]) -> int:
 
 def _child_apps() -> tuple[int | None, list[dict]]:
     from src.windows.child_session import (
-        ChildSessionClient, ChildSessionError, child_session_id,
+        ChildSessionClient,
+        ChildSessionError,
+        child_session_id,
     )
 
     sid = child_session_id()
@@ -144,7 +146,7 @@ def cmd_trim(args: list[str]) -> int:
     print("\n  would close:" if dry else "\n  closing:")
     for a in close:
         title = str(a.get("title") or "")[:40]
-        print(f"    {str(a.get('name')):<28} {title}")
+        print(f"    {a.get('name')!s:<28} {title}")
 
     if dry:
         print("\n(dry run - nothing was closed)")

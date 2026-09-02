@@ -178,7 +178,7 @@ def design(
     try:
         raw = chat.generate(prompt, system=_SYSTEM, temperature=0.2,
                             max_tokens=700)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise Impossible(f"could not reach the designer: {exc}") from exc
 
     answer = _parse(raw)

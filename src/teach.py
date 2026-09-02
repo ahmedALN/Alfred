@@ -221,8 +221,8 @@ def build():
     agent, ui = bench.build()
 
     from src.ai.providers.factory import build_providers  # noqa: F401
-    from src.brain.skills import SkillLibrary
     from src.brain.skill_store import SkillStore
+    from src.brain.skills import SkillLibrary
     from src.config import load_settings
 
     settings = load_settings()
@@ -314,7 +314,7 @@ def cmd_teach(argv: list[str]) -> int:
 
     lessons = CURRICULUM
     if not everything:
-        lessons = [l for l in CURRICULUM if not already_known(library, l["goal"])]
+        lessons = [l for l in CURRICULUM if not already_known(library, l["goal"])]  # noqa: E741
         skipped = len(CURRICULUM) - len(lessons)
         if skipped:
             print("  " + str(skipped) + " already known - use --all to redo them\n")
@@ -333,8 +333,8 @@ def cmd_teach(argv: list[str]) -> int:
     learned = sum(1 for r in rows if r["learned"])
     worked = sum(1 for r in rows if r["ok"])
     print()
-    print("  worked   {}/{}".format(worked, len(rows)))
-    print("  learned  {}".format(learned))
+    print(f"  worked   {worked}/{len(rows)}")
+    print(f"  learned  {learned}")
 
     (_ROOT / "teach-last.json").write_text(
         json.dumps(rows, indent=2), encoding="utf-8"
@@ -378,16 +378,16 @@ def cmd_time(_argv: list[str]) -> int:
             agent.replay(skill, goal, source="voice")
             took = time.time() - started
         except Exception as exc:  # noqa: BLE001
-            print("  {:44} replay failed: {}".format(goal[:44], str(exc)[:40]))
+            print(f"  {goal[:44]:44} replay failed: {str(exc)[:40]}")
             continue
 
         tidy(lesson.get("after"), ui)
         rows.append((goal, took))
-        print("  {:46} {:5.1f}s from memory".format(goal[:46], took))
+        print(f"  {goal[:46]:46} {took:5.1f}s from memory")
 
     if rows:
         mean = sum(t for _, t in rows) / len(rows)
-        print("\n  {} learned routes, mean {:.1f}s".format(len(rows), mean))
+        print(f"\n  {len(rows)} learned routes, mean {mean:.1f}s")
     else:
         print("  nothing learned to time yet - run: python -m src.teach")
     return 0

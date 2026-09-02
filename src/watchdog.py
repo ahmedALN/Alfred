@@ -13,12 +13,12 @@ from __future__ import annotations
 
 import signal
 import subprocess
-
-from src.windows.quiet import NO_WINDOW
 import sys
 import time
 from collections import deque
 from pathlib import Path
+
+from src.windows.quiet import NO_WINDOW
 
 _ROOT = Path(__file__).resolve().parent.parent
 

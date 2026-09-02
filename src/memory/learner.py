@@ -7,7 +7,6 @@ from src.ai.providers.base import ChatProvider, EmbeddingProvider
 from src.memory.embeddings import cosine_similarity
 from src.memory.store import Fact, MemoryStore
 
-
 # Above this similarity to an existing fact, treat a new statement as
 # reinforcing that fact rather than creating a duplicate.
 DEDUPE_THRESHOLD = 0.90

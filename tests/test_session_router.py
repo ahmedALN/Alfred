@@ -39,7 +39,7 @@ def _patch(monkeypatch, alive_targets=("current", "child")):
 
 
 def test_defaults_to_the_users_desktop(monkeypatch):
-    made = _patch(monkeypatch)
+    _patch(monkeypatch)
     r = SessionRouter()
     assert r.target == "current" and not r.isolated
     assert r.client().target == "current"
@@ -72,7 +72,7 @@ def test_connections_are_reused(monkeypatch):
 
 
 def test_a_dead_connection_is_replaced(monkeypatch):
-    made = _patch(monkeypatch)
+    _patch(monkeypatch)
     r = SessionRouter()
     first = r.client()
     first.alive = False          # the agent went away

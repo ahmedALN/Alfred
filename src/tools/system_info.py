@@ -7,7 +7,6 @@ from src.tools.base import AlfredTool
 from src.windows.powershell import PowerShellRunner
 from src.windows.system_probe import SYSTEM_QUERIES
 
-
 # PowerShell one-liners kept structured (ConvertTo-Json) instead of
 # left to free-form text so results are parseable and don't rely on
 # the model correctly reading column-aligned console output. Shared

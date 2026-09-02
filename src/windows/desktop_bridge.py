@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import subprocess
-
-from src.windows.quiet import NO_WINDOW
 import threading
 from pathlib import Path
 from typing import Any
+
+from src.windows.quiet import NO_WINDOW
 
 
 class DesktopBridgeError(RuntimeError):
@@ -310,7 +310,7 @@ class DesktopBridgeClient:
                 self._request(
                     "shutdown"
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
 
         try:

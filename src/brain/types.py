@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
-
 
 # ====================================================================
 # Perception
@@ -58,7 +57,7 @@ class DeliberationContext:
     autonomy: str
 
 
-class ProposalKind(str, Enum):
+class ProposalKind(StrEnum):
     SPEAK = "speak"
     ACT = "act"
 
@@ -76,7 +75,7 @@ class Proposal:
     reversible: bool | None = None
 
     @staticmethod
-    def from_dict(raw: dict[str, Any]) -> "Proposal | None":
+    def from_dict(raw: dict[str, Any]) -> Proposal | None:
         kind_raw = str(raw.get("kind", "")).strip().lower()
 
         if kind_raw not in (ProposalKind.SPEAK.value, ProposalKind.ACT.value):
@@ -120,7 +119,7 @@ class Proposal:
 # ====================================================================
 
 
-class Verdict(str, Enum):
+class Verdict(StrEnum):
     AUTO = "auto"        # execute now
     CONFIRM = "confirm"  # ask the user out loud, wait for approval
     FORBID = "forbid"    # never, drop and log

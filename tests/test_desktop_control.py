@@ -85,7 +85,7 @@ def tool(monkeypatch):
 
 
 def test_look_no_focus_switch(tool):
-    t, client, desks = tool
+    t, _client, desks = tool
     out = t.execute({"action": "look"})
     assert out["status"] == "success" and "Notepad" in out["analysis"]
     assert desks.switches == []  # look never switches desktops

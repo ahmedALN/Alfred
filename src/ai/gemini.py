@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import array
 import asyncio
 import os
 import queue
 import threading
-import array
 import time
 import uuid
 from typing import Any
@@ -18,7 +18,6 @@ from src.memory.learner import MemoryLearner
 from src.memory.store import MemoryStore
 from src.tools.registry import ToolRegistry
 from src.ui.live import LIVE
-
 
 _CONNECTION_ERROR_HINTS = (
     "aborted", "closed", "connectionclosed", "1008", "1011", "1006",
@@ -401,7 +400,7 @@ class AlfredLiveSession:
                 ),
                 turn_complete=True,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             print(f"[Brain] inject_system_prompt failed: {exc}")
 
     # ================================================================
@@ -419,7 +418,7 @@ class AlfredLiveSession:
 
         try:
             context = self._learner.recall_context()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             print(f"[Memory] failed to recall context: {exc}")
             return ""
 
@@ -596,7 +595,7 @@ class AlfredLiveSession:
                 self._audio_output.write(
                     chunk
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 print(
                     f"[Speaker] playback error: {exc}"
                 )
@@ -680,7 +679,7 @@ class AlfredLiveSession:
         LIVE.set_level(min(1.0, peak * 2.2))
 
 
-    def _keep(self, task: "asyncio.Task") -> "asyncio.Task":
+    def _keep(self, task: asyncio.Task) -> asyncio.Task:
         """Hold a reference until the task finishes."""
         self._background.add(task)
         task.add_done_callback(self._background.discard)
@@ -918,7 +917,7 @@ class AlfredLiveSession:
                 ),
                 turn_complete=True,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             print(f"[Startup] failed to send greeting prompt: {exc}")
 
     # ================================================================
@@ -1048,7 +1047,7 @@ class AlfredLiveSession:
                     server_content.input_transcription
                 )
 
-                if input_transcription is not None:
+                if input_transcription is not None:  # noqa: SIM102
                     if input_transcription.text:
                         print(
                             f"\nYou: "
@@ -1081,7 +1080,7 @@ class AlfredLiveSession:
                     server_content.output_transcription
                 )
 
-                if output_transcription is not None:
+                if output_transcription is not None:  # noqa: SIM102
                     if output_transcription.text:
                         transcript_parts.append(
                             output_transcription.text
@@ -1155,7 +1154,7 @@ class AlfredLiveSession:
                             await self._brain.note_user_reply(
                                 user_utterance
                             )
-                        except Exception as exc:
+                        except Exception as exc:  # noqa: BLE001
                             print(
                                 f"[Brain] note_user_reply failed: {exc}"
                             )
@@ -1184,7 +1183,7 @@ class AlfredLiveSession:
 
     # Tools that act on a desktop - these are the ones isolation has to
     # cover. Everything else (memory, system_info) is desktop-agnostic.
-    _DESKTOP_TOOLS = {
+    _DESKTOP_TOOLS = {  # noqa: RUF012
         "open_app", "ui_control", "desktop_control", "computer_screenshot",
     }
 
@@ -1348,7 +1347,7 @@ class AlfredLiveSession:
                     ),
                     timeout=90.0,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # A wedged tool (frozen app, stuck UIA call) must not make
                 # Alfred go deaf - report it and move on. The worker
                 # thread is abandoned but daemonised.
@@ -1657,7 +1656,7 @@ class AlfredLiveSession:
             if merged:
                 print(f"[Memory] merged {merged} duplicate fact(s).")
 
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             print(f"[Memory] session distillation failed: {exc}")
 
     async def close(self) -> None:

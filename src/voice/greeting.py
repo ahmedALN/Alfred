@@ -17,7 +17,8 @@ from __future__ import annotations
 
 import os
 import random
-from datetime import datetime, time as clock
+from datetime import datetime
+from datetime import time as clock
 
 # Enough that you will not hear the same one twice in a week, and all
 # short enough to talk over.
@@ -58,8 +59,12 @@ def part_of_day(now: datetime | None = None) -> str:
 
 
 def phrase(now: datetime | None = None) -> str:
-    """One line, suited to the hour."""
-    return random.choice({
+    """One line, suited to the hour.
+
+    Random for variety, not for secrecy - which is the whole of
+    what `random` is unsuitable for.
+    """
+    return random.choice({  # noqa: S311
         "morning": _MORNING,
         "afternoon": _AFTERNOON,
         "evening": _EVENING,

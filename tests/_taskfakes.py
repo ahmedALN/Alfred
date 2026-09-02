@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 
 def _line_after(prompt: str, marker: str) -> str:
@@ -32,7 +33,7 @@ class DispatchChat:
         *,
         plan: list[Any] | None = None,
         steps: dict[str, list[Any]] | None = None,
-        verify: bool | None | Callable[[str], bool] = True,
+        verify: bool | Callable[[str], bool] | None = True,
         plan_raises: BaseException | None = None,
     ) -> None:
         self._plan = list(plan or [])

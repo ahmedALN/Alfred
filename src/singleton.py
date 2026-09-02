@@ -72,7 +72,7 @@ class SingleInstance:
             except FileExistsError:
                 holder = self._holder_is_alive()
                 if holder is not None:
-                    raise AlreadyRunning(holder)
+                    raise AlreadyRunning(holder)  # noqa: B904
                 # Stale lock (dead pid / unrelated process). Clear once.
                 if attempt == 0:
                     try:
@@ -80,7 +80,7 @@ class SingleInstance:
                     except OSError:
                         pass
                     continue
-                raise AlreadyRunning(-1)
+                raise AlreadyRunning(-1)  # noqa: B904
             except OSError as exc:
                 print(f"[Singleton] could not create lock file: {exc}")
                 return
@@ -105,7 +105,7 @@ class SingleInstance:
         except OSError:
             pass
 
-    def __enter__(self) -> "SingleInstance":
+    def __enter__(self) -> SingleInstance:
         self.acquire()
         return self
 

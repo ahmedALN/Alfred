@@ -150,7 +150,7 @@ def _least_squares(pairs) -> tuple[float, float, int, int] | None:
 
         mean_r = sum(reported) / n
         mean_a = sum(actual) / n
-        top = sum((r - mean_r) * (a - mean_a) for r, a in zip(reported, actual))
+        top = sum((r - mean_r) * (a - mean_a) for r, a in zip(reported, actual, strict=False))
         bottom = sum((r - mean_r) ** 2 for r in reported) or 1.0
         scale = top / bottom
         return scale, int(mean_a - scale * mean_r)

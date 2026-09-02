@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
-
 from src.messaging.reply import _read, _trim, wants_picture
-
 
 # --------------------------------------------------- the model thinking out loud
 

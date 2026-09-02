@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from src.brain.world import Matter, World, _is_a_person, refresh
 from src.mail.gmail import _is_bulk
 from src.workspace.calendar import _aware
-
 
 # ---------------------------------------------------------------- calendar
 
@@ -25,7 +24,7 @@ def test_a_naive_time_is_given_an_offset_before_google_sees_it():
 
 
 def test_a_time_that_already_knows_its_offset_is_left_alone():
-    already = datetime(2026, 9, 1, 1, 52, tzinfo=timezone.utc)
+    already = datetime(2026, 9, 1, 1, 52, tzinfo=UTC)
     assert _aware(already) is already
 
 

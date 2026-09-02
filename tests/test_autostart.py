@@ -6,7 +6,6 @@ denied" - and nothing checked, so an assistant meant to be always on was
 off after every restart until somebody started it by hand.
 """
 
-from pathlib import Path
 
 import src.autostart as autostart
 

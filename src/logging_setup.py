@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -69,9 +69,9 @@ def configure_logging() -> Path:
     _LOG_DIR.mkdir(parents=True, exist_ok=True)
     _rotate()
 
-    handle = open(_LOG_FILE, "a", encoding="utf-8", buffering=1)
+    handle = open(_LOG_FILE, "a", encoding="utf-8", buffering=1)  # noqa: SIM115
     handle.write(
-        f"\n===== Alfred started {datetime.now(timezone.utc).isoformat()} "
+        f"\n===== Alfred started {datetime.now(UTC).isoformat()} "
         f"(pid {os.getpid()}) =====\n"
     )
 

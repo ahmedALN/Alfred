@@ -8,7 +8,6 @@ from typing import Any
 
 from src.windows.powershell import PowerShellRunner
 
-
 # ====================================================================
 # Structured PowerShell queries
 #
@@ -124,7 +123,7 @@ def run_json_query(
 
     try:
         result = runner.run(query, timeout=timeout)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
     if not result.success:
@@ -177,7 +176,7 @@ def idle_seconds() -> float:
         tick_now = ctypes.windll.kernel32.GetTickCount()
 
         return max(0.0, (tick_now - info.dwTime) / 1000.0)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return 0.0
 
 
@@ -207,7 +206,7 @@ def power_state() -> PowerState:
             percent = None
 
         return PowerState(on_battery=on_battery, percent=percent)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return PowerState(on_battery=False, percent=None)
 
 
@@ -230,7 +229,7 @@ def foreground_app() -> str | None:
             return None
 
         return psutil.Process(pid).name()
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -285,5 +284,5 @@ def is_fullscreen_foreground() -> bool:
             and right >= m_right
             and bottom >= m_bottom
         )
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False

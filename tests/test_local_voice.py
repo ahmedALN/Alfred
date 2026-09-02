@@ -1,4 +1,3 @@
-import json
 
 from src.brain.policy import Policy
 from src.voice.local_voice import LocalVoiceSession, _extract_tool_call

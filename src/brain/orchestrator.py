@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime, time as clock_time
-from typing import Awaitable, Callable
+from datetime import datetime
+from datetime import time as clock_time
 
 from src.brain.audit import AuditLog
 from src.brain.deliberation import SUPPRESS_PREFIX, Deliberator

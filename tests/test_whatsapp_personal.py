@@ -340,9 +340,9 @@ def test_it_listens_for_being_unseated_not_just_for_messages(tmp_path):
     one unseats the first silently, and a silently deaf Alfred looks
     exactly like an Alfred ignoring you."""
     from neonize.events import (
+        EVENT_TO_INT,
         ConnectedEv,
         DisconnectedEv,
-        EVENT_TO_INT,
         LoggedOutEv,
         MessageEv,
         StreamReplacedEv,
@@ -499,7 +499,9 @@ def _media_event(kind, caption="", url="https://mmg.whatsapp.net/x"):
     A fake built from a guess tests the guess.
     """
     from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import (
-        ImageMessage, Message, VideoMessage,
+        ImageMessage,
+        Message,
+        VideoMessage,
     )
 
     if kind == "image":
@@ -529,6 +531,7 @@ def test_a_message_with_no_attachment_is_not_one():
     """Asked of the protobuf, which knows, rather than of a field
     inside it, which was the mistake that dropped every photo."""
     from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import Message
+
     from src.messaging.whatsapp_personal import _kind_of
 
     words = type("Ev", (), {"Message": Message(conversation="hello")})()

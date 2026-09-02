@@ -93,7 +93,7 @@ class ChildSessionClient:
         self._lock = threading.RLock()
 
     @property
-    def PIPE_NAME(self) -> str:  # noqa: N802 - kept for callers/tests
+    def PIPE_NAME(self) -> str:
         return self._resolve_pipe()
 
     def _resolve_pipe(self) -> str:
@@ -537,7 +537,7 @@ class ChildSessionClient:
         return _payload(self._request(request))
 
     def close_apps(
-        self, pids: "int | list[int]", force: bool = False,
+        self, pids: int | list[int], force: bool = False,
     ) -> dict[str, Any]:
         """Close apps by pid. Tries a graceful window close first so apps
         can save; falls back to terminating. The agent refuses any pid
@@ -636,7 +636,7 @@ class ChildSessionClient:
         if pipe is not None:
             try:
                 pipe.close()
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
 
     def close(self) -> None:
@@ -645,7 +645,7 @@ class ChildSessionClient:
 
     def __enter__(
         self,
-    ) -> "ChildSessionClient":
+    ) -> ChildSessionClient:
         self.connect()
         return self
 

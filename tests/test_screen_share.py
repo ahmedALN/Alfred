@@ -67,7 +67,7 @@ def test_an_empty_grab_is_not_sent_as_a_picture():
 
 
 def test_a_picture_that_will_not_send_says_so_rather_than_going_quiet():
-    share, sent = _share(sent=_Sent(ok=False))
+    share, _sent = _share(sent=_Sent(ok=False))
 
     assert "couldn't send" in share.picture()
 

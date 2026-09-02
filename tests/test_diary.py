@@ -10,7 +10,7 @@ whatever it happened to remember about the last few minutes.
 import sqlite3
 from datetime import date, datetime, timedelta
 
-from src.brain.diary import Day, gather, tell
+from src.brain.diary import gather, tell
 
 TODAY = date(2026, 9, 1)
 

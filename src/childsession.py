@@ -19,10 +19,10 @@ import ctypes
 import os
 import socket
 import subprocess
-
-from src.windows.quiet import NO_WINDOW
 import sys
 from dataclasses import dataclass, field
+
+from src.windows.quiet import NO_WINDOW
 
 OK, WARN, FAIL, INFO = "ok", "warn", "fail", "info"
 
@@ -199,7 +199,7 @@ def check_loopback_rdp(r: Report) -> None:
         f"(Get-ItemProperty '{_RDP_TCP_KEY}' -Name PortNumber"
         " -ErrorAction SilentlyContinue).PortNumber"
     )
-    if port and port.isdigit() and port != "3389":
+    if port and port.isdigit() and port != "3389":  # noqa: SIM102
         if _port_open("127.0.0.1", int(port)):
             r.add("Loopback RDP", OK, f"listening on custom port {port}")
             return
@@ -213,7 +213,7 @@ def check_loopback_rdp(r: Report) -> None:
 
 def check_rdp_activex(r: Report) -> None:
     """The host needs the RDP ActiveX control (mstscax.dll)."""
-    path = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+    path = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),  # noqa: SIM112
                         "System32", "mstscax.dll")
     if os.path.exists(path):
         r.add("RDP ActiveX control", OK, "mstscax.dll present")
@@ -532,8 +532,10 @@ def cmd_uninstall_agent(_args: list[str]) -> int:
 def cmd_agents(_args: list[str]) -> int:
     """Which sessions currently have a reachable agent."""
     from src.windows.child_session import (
-        ChildSessionClient, ChildSessionError,
-        child_session_id, current_session_id,
+        ChildSessionClient,
+        ChildSessionError,
+        child_session_id,
+        current_session_id,
     )
 
     here = current_session_id()

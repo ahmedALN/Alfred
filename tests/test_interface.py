@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import threading
 import time
 import urllib.error
 import urllib.request
@@ -14,7 +13,6 @@ import pytest
 from src.ui import edits, state
 from src.ui.live import BUS, Bus, Tee
 from src.ui.server import Interface
-
 
 # ------------------------------------------------------------------ state
 
@@ -368,7 +366,7 @@ def test_every_live_hook_has_something_that_calls_it():
 
 def test_speaking_is_only_announced_when_it_changes():
     """Called every audio chunk, so it must not publish every chunk."""
-    from src.ui.live import BUS, Live
+    from src.ui.live import Live
 
     live = Live()
     before = len(BUS.history(999))
@@ -480,9 +478,7 @@ def test_model_written_content_is_never_dropped_into_the_page_raw():
         """
         if "esc(" in expr:
             return False
-        if ".test(" in expr or ".includes(" in expr:
-            return False
-        return True
+        return not (".test(" in expr or ".includes(" in expr)
 
     unescaped = []
     for field in risky:

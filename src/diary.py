@@ -38,7 +38,7 @@ def _day_from(argv: list[str]) -> date:
             return date.fromisoformat(arg)
         except ValueError:
             print(f"I don't know what day {arg!r} is. Try 2026-08-31.")
-            raise SystemExit(1)
+            raise SystemExit(1)  # noqa: B904
     return date.today()
 
 

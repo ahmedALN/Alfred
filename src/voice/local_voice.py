@@ -5,8 +5,9 @@ import io
 import json
 import time
 import wave
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from src.brain.types import Proposal, ProposalKind, Verdict
 
@@ -137,7 +138,7 @@ class LocalVoiceSession:
         except Exception as exc:  # noqa: BLE001
             print(f"[LocalVoice] playback failed: {exc}")
 
-    def _listen(self, max_seconds: float = 10.0) -> "Any | None":
+    def _listen(self, max_seconds: float = 10.0) -> Any | None:
         import numpy as np
         import sounddevice as sd
 
@@ -268,7 +269,7 @@ class LocalVoiceSession:
             await self._say(reply)
 
 
-def _extract_tool_call(raw: str) -> "tuple[str, dict] | None":
+def _extract_tool_call(raw: str) -> tuple[str, dict] | None:
     text = raw.strip()
     if text.startswith("```"):
         text = text.strip("`")

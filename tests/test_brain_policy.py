@@ -1,7 +1,6 @@
 from src.brain.policy import Policy, classify_command
 from src.brain.types import Proposal, ProposalKind, Verdict
 
-
 KNOWN = {
     "powershell", "open_app", "system_info", "network_info",
     "computer_screenshot", "remember", "recall", "desktop_control",
