@@ -233,38 +233,53 @@ def _claims_a_tool_cannot(lesson: str) -> bool:
             and any(word in text for word in _ABILITY))
 
 
+# Words that make a lesson a claim about something being broken. Only
+# these need evidence; a lesson that merely suggests a technique does
+# not stop Alfred doing anything, so the cost of it being wrong is
+# small and the cost of rejecting it is losing something useful.
+_BLAMES = (
+    "fail", "fails", "failed", "cannot", "can't", "does not", "doesn't",
+    "unable", "unsupported", "not supported", "never works", "broken",
+    "do not use", "don't use", "avoid", "is not able",
+)
+
+
 def supported(lesson: str, errors: list[str]) -> bool:
     """Is this lesson something the evidence actually says?
 
     The post-mortem used to be shown "FAILED" with no error text, so it
     filled the gap itself. "The skill tool does not support list or
     learn actions" is false, was written from a trace that said nothing
-    of the kind, and is one of sixty-nine such entries.
+    of the kind, and sat in memory stopping Alfred using that tool.
 
-    Two rules, both narrow, because rejecting real lessons would trade
-    one problem for another:
+    But the first version of this gate went too far the other way and
+    threw away "Use PowerShell Get-ChildItem to locate file paths on
+    the desktop" - a perfectly good lesson - because nothing in that
+    run had failed. Lessons do not only come from failures.
 
-    Nothing informative failed -> nothing was learned. A step that came
-    back "error" with no message cannot teach you anything.
-
-    A claim that a tool CANNOT do something has to be quoted, not
-    inferred. Everything else is allowed: a model generalising from a
-    real error to a real lesson is the whole point of asking it.
+    So only lessons that BLAME something need evidence. A lesson that
+    stops Alfred trying a thing is permanent and dangerous; a lesson
+    that suggests a technique is neither.
     """
     lesson = (lesson or "").strip()
     if len(lesson) < 8:
         return False
 
-    real = [
-        e for e in errors
-        if e and e.strip().lower() not in _SAYS_NOTHING
-    ]
+    text = lesson.lower()
+
+    # Positive advice: keep it. Nothing here forecloses anything.
+    if not any(word in text for word in _BLAMES):
+        return True
+
+    real = [e for e in errors if e and e.strip().lower() not in _SAYS_NOTHING]
     if not real:
+        # It says something is broken, and nothing broke.
         return False
 
     if _claims_a_tool_cannot(lesson):
         haystack = " ".join(real).lower()
-        # The error has to say so itself.
+        # A claim that a tool LACKS a feature has to be quoted, not
+        # inferred - that is the shape that was wrong before.
         return any(
             phrase in haystack
             for phrase in ("not support", "unsupported", "no such",
@@ -273,14 +288,3 @@ def supported(lesson: str, errors: list[str]) -> bool:
         )
 
     return True
-
-
-_EVERYWHERE = {
-    "this", "that", "with", "from", "when", "then", "than", "have", "will",
-    "should", "would", "could", "must", "need", "needs", "using", "used",
-    "into", "onto", "does", "doing", "make", "made", "take", "taken",
-    "step", "steps", "task", "tasks", "tool", "tools", "alfred", "user",
-    "instead", "because", "there", "their", "they", "were", "before",
-    "after", "which", "while", "about", "always", "never", "cannot",
-    "failed", "failure", "error", "errors", "attempt", "attempted",
-}

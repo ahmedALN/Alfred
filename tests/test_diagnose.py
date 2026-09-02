@@ -121,8 +121,22 @@ def test_a_lesson_that_matches_the_error_is_kept():
     ) is True
 
 
-def test_nothing_failed_means_nothing_was_learned():
-    assert supported("some plausible sounding lesson", errors=[]) is False
+def test_a_lesson_that_blames_needs_something_to_have_broken():
+    """Only lessons that FORECLOSE something need evidence.
+
+    The first version of this gate required it of every lesson, and
+    threw away "Use PowerShell Get-ChildItem to locate file paths on
+    the desktop" because nothing in that run had failed. Lessons do not
+    only come from failures, and a technique note stops Alfred doing
+    nothing at all.
+    """
+    assert supported("PowerShell fails to stop a process that is not "
+                     "running", errors=[]) is False
+
+    # No blame, no evidence needed.
+    assert supported("Use PowerShell Get-ChildItem to locate file paths "
+                     "and shortcuts on the desktop", errors=[]) is True
+    assert supported("Spotify search is opened with Ctrl+L", errors=[]) is True
 
 
 def test_a_claim_that_a_tool_cannot_do_something_must_be_quoted():

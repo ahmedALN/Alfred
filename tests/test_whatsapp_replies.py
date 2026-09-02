@@ -155,3 +155,88 @@ def test_a_failing_announcer_does_not_take_the_task_with_it():
         raise RuntimeError("no channel")
 
     asyncio.run(_safe_speak(broken, "done", "voice"))   # must not raise
+
+
+# ------------------------------------------------ telling it to stop
+
+
+from src.messaging.reply import Conversation, forbids, is_stop
+
+
+class _NeverAsked:
+    def generate(self, *_a, **_k):
+        raise AssertionError(
+            "a prohibition must never reach the model - it inverted one"
+        )
+
+
+def _talker(running="Search the web for how to fish.", **kw):
+    jobs, steers, cancels = [], [], []
+    talk = Conversation(
+        _NeverAsked(),
+        lambda goal: jobs.append(goal),
+        steer=lambda t: (steers.append(t), True)[1],
+        running=lambda: running,
+        cancel=lambda: cancels.append(True),
+        **kw,
+    )
+    return talk, jobs, steers, cancels
+
+
+def test_do_not_do_x_never_becomes_do_x():
+    """The real one, from a real evening.
+
+    Told "stop that, do not search for how to fish", the model dropped
+    the negation and answered DO: Open a browser and search for how to
+    fish. A task by that name was created twenty-seven seconds after
+    the person said not to, and Alfred fetched the Steam page.
+    """
+    talk, jobs, _steers, cancels = _talker()
+
+    talk.handle("stop that, do not search for how to fish")
+
+    assert jobs == [], "a prohibition became a job"
+    assert cancels, "the running job should have been stopped"
+
+
+def test_a_bare_stop_stops_the_running_job():
+    talk, jobs, _s, cancels = _talker()
+    reply = talk.handle("stop")
+    assert cancels and jobs == []
+    assert "stop" in reply.lower()
+
+
+def test_stopping_when_nothing_runs_says_so():
+    talk, jobs, _s, cancels = _talker(running="")
+    reply = talk.handle("cancel that")
+    assert jobs == [] and cancels == []
+    assert "nothing running" in reply.lower()
+
+
+def test_a_prohibition_while_working_is_a_correction():
+    talk, jobs, steers, cancels = _talker()
+    talk.handle("don't use the browser for that")
+    assert jobs == [] and cancels == []
+    assert steers, "it should have steered the running job"
+
+
+def test_a_prohibition_with_nothing_running_starts_nothing():
+    talk, jobs, _s, cancels = _talker(running="")
+    reply = talk.handle("don't open steam")
+    assert jobs == [] and cancels == []
+    assert "won't" in reply.lower() or "not" in reply.lower()
+
+
+def test_stopping_a_thing_is_not_stopping_the_job():
+    """"stop the music" is an instruction about Spotify."""
+    assert is_stop("stop the music") is False
+    assert is_stop("stop spotify") is False
+    assert is_stop("stop that") is True
+    assert is_stop("stop what you are doing") is True
+
+
+def test_ordinary_requests_are_not_mistaken_for_prohibitions():
+    for said in ("open steam", "open notepad instead of wordpad",
+                 "no not that one", "what is the weather"):
+        assert not forbids(said), said
+        assert not is_stop(said), said

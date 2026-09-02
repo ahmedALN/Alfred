@@ -110,6 +110,7 @@ def _build_personal_whatsapp(
         ),
         eyes=eyes,
         record=remember_turn,
+        cancel=task_queue.cancel_current,
     )
 
     router = MessageRouter(
@@ -208,6 +209,7 @@ def _build_phone_channel(
         running=lambda: (
             task_queue.current().goal if task_queue.current() else ""
         ),
+        cancel=task_queue.cancel_current,
     )
 
     router = MessageRouter(
@@ -668,6 +670,7 @@ async def main() -> None:
             task_queue.current().goal if task_queue.current() else ""
         ),
         eyes=providers.vision,
+        cancel=task_queue.cancel_current,
         record=lambda role, text: store.add_turn(
             session.session_key, role, text
         ),

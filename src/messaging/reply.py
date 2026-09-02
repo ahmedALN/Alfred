@@ -98,6 +98,59 @@ Examples:
 _MAX_REPLY = 900
 
 
+
+# Stopping, and forbidding. A message carrying either must never become
+# a job, whatever a model makes of it.
+
+_BARE_STOP = {
+    "stop", "cancel", "abort", "halt", "quit it", "never mind",
+    "nevermind", "forget it", "leave it", "drop it", "enough",
+    "stop it", "stop that", "stop please", "cancel that", "cancel it",
+}
+
+# What "stop" has to be pointed at for it to mean the running job.
+# "stop the music" is an instruction about Spotify, not about Alfred.
+_THE_JOB = (
+    "that", "it", "this", "the task", "the job", "doing", "what you",
+    "everything", "all of it", "the search", "searching",
+)
+
+# Real prohibitions only. "instead of" and "not that one" are
+# corrections, and a running job reads those as steers through the
+# ordinary path - they are not stop words.
+_FORBIDS = ("don't ", "dont ", "do not ", "no longer", "no more", "never ")
+
+
+def is_stop(text: str) -> bool:
+    """Does this ask for the running job to end?"""
+    said = (text or "").strip().lower().strip("!.? ")
+    if not said:
+        return False
+    if said in _BARE_STOP:
+        return True
+
+    for word in ("stop", "cancel", "abort", "halt"):
+        if said.startswith(word + " "):
+            rest = said[len(word) + 1:].strip()
+            # "stop that" yes; "stop the music" no - that one is a
+            # thing to go and do, not a job to abandon.
+            return any(rest.startswith(target) for target in _THE_JOB)
+    return False
+
+
+def forbids(text: str) -> bool:
+    """Does this tell Alfred NOT to do something?
+
+    Told "stop that, do not search for how to fish", the model dropped
+    the negation and answered DO: Open a browser and search for how to
+    fish. Alfred then went and did it, twenty-seven seconds after being
+    told not to. Small models lose "not" often enough that this cannot
+    be left to one.
+    """
+    said = " " + (text or "").strip().lower() + " "
+    return any(word in said for word in _FORBIDS)
+
+
 class Conversation:
     """One model call that both decides and answers."""
 
@@ -111,6 +164,7 @@ class Conversation:
         running: "Callable[[], str] | None" = None,
         eyes=None,
         record=None,
+        cancel=None,
     ) -> None:
         self._chat = chat
         self._submit = submit
@@ -119,6 +173,9 @@ class Conversation:
         # second job that fights the first.
         self._steer = steer
         self._running = running
+        # Stopping is not steering: "stop" wants the job to end, not to
+        # continue differently.
+        self._cancel = cancel
         # For looking at what you send it. Alfred could be talked to and
         # not shown anything, which rules out most of the reasons a
         # person picks up their phone: this error, this letter, this
@@ -141,6 +198,17 @@ class Conversation:
 
         if not text:
             return ""
+
+        # A prohibition is never a job. This is decided before the model
+        # sees it, because the model inverted one: "stop that, do not
+        # search for how to fish" came back as DO: search for how to
+        # fish, and Alfred went and did it.
+        if is_stop(text) or forbids(text):
+            answer = self._halt(text)
+            self._history.append(f"Them: {text}")
+            self._history.append(f"You: {answer}")
+            self._keep(text, answer)
+            return answer[:_MAX_REPLY]
 
         # Decided here rather than by the model, because the model got
         # it wrong repeatedly and then imitated its own wrong answers.
@@ -231,6 +299,33 @@ class Conversation:
         # lets you correct Alfred before it has done the wrong thing.
         return said or f"Right - {job[0].lower()}{job[1:].rstrip('.')}."
 
+
+
+    def _halt(self, text: str) -> str:
+        """Stop, or steer away from - but never start anything.
+
+        The one thing that must not happen here is a new job. A message
+        saying not to do something has, by definition, nothing in it
+        that anybody asked for.
+        """
+        running = self._running() if self._running else ""
+
+        if is_stop(text):
+            if not running:
+                return "Nothing running to stop."
+            if self._cancel is not None:
+                self._cancel()
+                return f"Stopped - {running[0].lower()}{running[1:].rstrip('.')}."
+            return "I can't stop that from here."
+
+        # A prohibition while something runs is a correction to it.
+        if running and self._steer is not None and self._steer(text):
+            return f"Right - {text}"
+
+        return (
+            "Noted - I won't. Nothing is running, so there was nothing "
+            "to stop."
+        )
 
     def _look(self, text: str, media: bytes, kind: str) -> str:
         """Say what is in the thing they sent."""
