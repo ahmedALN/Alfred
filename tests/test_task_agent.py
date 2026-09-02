@@ -1,4 +1,3 @@
-import json
 
 from src.brain.agent import TaskAgent, _parse
 from src.brain.policy import Policy
@@ -84,12 +83,9 @@ def test_unverified_step_is_never_reported_done():
 
 
 def test_partial_when_some_steps_verify():
-    calls = {"n": 0}
 
     def verify(step):
-        if "play" in step:
-            return False
-        return True
+        return "play" not in step
 
     chat = DispatchChat(
         plan=[
@@ -329,7 +325,7 @@ def test_work_with_nothing_to_report_says_nothing():
 
 
 def test_steps_that_failed_are_not_read_as_findings():
-    finding, chat = _finding_for(
+    _finding, chat = _finding_for(
         "Check whether Steam is running.",
         [_step("powershell", "Access denied", ok=False),
          _step("powershell", "steam.exe Running")],
@@ -366,7 +362,8 @@ def test_a_model_that_falls_over_costs_only_the_finding():
 # ------------------------------------- not calling a bad end a good one
 
 
-def _result_with(steps, plan=None, verified=None):
+def _result_with(steps, plan=None, verified=None,
+                 goal="Save the clipboard image to Downloads."):
     from src.brain.agent import TaskAgent, TaskResult
 
     agent = TaskAgent.__new__(TaskAgent)
@@ -374,7 +371,7 @@ def _result_with(steps, plan=None, verified=None):
     agent._plan_chat = None
     agent._first_plan_len = len(plan or [])
     result = TaskResult(
-        goal="Save the clipboard image to Downloads.",
+        goal=goal,
         status="running", summary="", steps=steps,
         plan=list(plan or []), verified=list(verified or []),
     )
@@ -408,7 +405,10 @@ def test_a_task_that_recovered_and_finished_is_still_done():
 
 
 def test_a_task_with_no_tool_calls_is_judged_on_its_plan_as_before():
-    result = _result_with([], plan=["say hello"], verified=["say hello"])
+    result = _result_with(
+        [], plan=["say hello"], verified=["say hello"],
+        goal="Say hello to me.",
+    )
 
     assert result.status == "done"
 
@@ -430,7 +430,7 @@ def test_the_wall_records_what_actually_went_wrong():
     detail = _why_it_failed(step)
 
     assert "Cannot convert value Downloads" in detail
-    assert "auto" != detail
+    assert detail != "auto"
     assert command not in detail          # the echo is not the error
 
 

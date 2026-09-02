@@ -4,17 +4,18 @@ import json
 import os
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from src.ai.providers.base import ChatProvider
+from src.brain.diagnose import diagnose, supported
 from src.brain.policy import Policy
 from src.brain.skills import align, apply_params
 from src.brain.types import Proposal, ProposalKind, Verdict
 from src.tools.registry import ToolRegistry
 from src.tools.results import summarize_result, tool_succeeded
 from src.ui.live import LIVE
-from src.brain.diagnose import diagnose, supported
 
 _PLAN_SYSTEM = """You are Alfred's task planner on a Windows PC. Turn the goal \
 into the SHORTEST ordered plan a tool-using agent can execute.
@@ -211,6 +212,10 @@ class TaskResult:
     # What the work found, as opposed to what it did. Empty when
     # there was nothing to find out.
     answer: str = ""
+    # The learned routine this run replayed, if it replayed one. Not
+    # reported; it is how the goal-relevance check knows the request
+    # was already matched against the routine by name and by meaning.
+    replayed_template: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -250,7 +255,7 @@ _REFUSAL_WORDS = (
 )
 
 
-def _refused_in(steps: "list[Step]") -> str:
+def _refused_in(steps: list[Step]) -> str:
     """A refusal among these steps, if one stands unanswered.
 
     Reads the step objects rather than the log text. The first version
@@ -259,7 +264,7 @@ def _refused_in(steps: "list[Step]") -> str:
     learn` being refused, which is the very mistake it was written to
     catch. Tool and action both have to match.
     """
-    def action_of(step: "Step") -> str:
+    def action_of(step: Step) -> str:
         args = step.args if isinstance(step.args, dict) else {}
         return str(args.get("action") or args.get("query") or "")
 
@@ -313,7 +318,7 @@ class TaskAgent:
         max_steps: int = 16,
         max_seconds: float = 240.0,
         substep_max_calls: int = 5,
-        situation: "Callable[[], str] | None" = None,
+        situation: Callable[[], str] | None = None,
         learner: Any = None,
         app_memory: Any = None,
         audit: Any = None,
@@ -349,7 +354,7 @@ class TaskAgent:
         self._policy_brain = policy
         self._policy_voice = policy_voice or policy
         self._policy = policy  # active policy, set per run()
-        self._ask_user: "Callable[[str], bool] | None" = None
+        self._ask_user: Callable[[str], bool] | None = None
         self._max_steps = max_steps
         self._max_seconds = max_seconds
         self._substep_max_calls = substep_max_calls
@@ -362,7 +367,7 @@ class TaskAgent:
         self._planned_ever: set[str] = set()
         self._first_plan_len = 0
         self._deadline = 0.0
-        self._cancel_check: "Callable[[], bool]" = lambda: False
+        self._cancel_check: Callable[[], bool] = lambda: False
 
     # ----------------------------------------------------------------
 
@@ -398,12 +403,12 @@ class TaskAgent:
         self,
         goal: str,
         session_id: str | None = None,
-        cancel_check: "Callable[[], bool] | None" = None,
-        on_progress: "Callable[[str], None] | None" = None,
+        cancel_check: Callable[[], bool] | None = None,
+        on_progress: Callable[[str], None] | None = None,
         *,
         source: str = "brain",
-        ask_user: "Callable[[str], bool] | None" = None,
-        steers: "Callable[[], list[str]] | None" = None,
+        ask_user: Callable[[str], bool] | None = None,
+        steers: Callable[[], list[str]] | None = None,
     ) -> TaskResult:
         goal = goal.strip()
         started = time.monotonic()
@@ -642,10 +647,7 @@ class TaskAgent:
                         session_id,
                     )
                     plan = (
-                        plan[:pi]
-                        + [{"step": fix.step,
-                            "done_when": f"{fix.tool} returns success"}]
-                        + plan[pi:]
+                        [*plan[:pi], {"step": fix.step, "done_when": f"{fix.tool} returns success"}, *plan[pi:]]
                     )
                     result.plan = [p["step"] for p in plan]
                     self._planned_ever.update(result.plan)
@@ -712,12 +714,12 @@ class TaskAgent:
         skill: dict[str, Any],
         request: str,
         session_id: str | None = None,
-        cancel_check: "Callable[[], bool] | None" = None,
-        on_progress: "Callable[[str], None] | None" = None,
+        cancel_check: Callable[[], bool] | None = None,
+        on_progress: Callable[[str], None] | None = None,
         *,
         source: str = "voice",
-        ask_user: "Callable[[str], bool] | None" = None,
-        steers: "Callable[[], list[str]] | None" = None,
+        ask_user: Callable[[str], bool] | None = None,
+        steers: Callable[[], list[str]] | None = None,
     ) -> TaskResult:
         """Run a learned skill's steps directly - no planning call. Params
         are filled from ``request``; the skill's ``verify`` is still checked
@@ -738,6 +740,11 @@ class TaskAgent:
         done_when = str(skill.get("verify") or goal)
         result = TaskResult(goal=goal, status="failed", summary="")
         result.plan = [done_when]
+        # A skill's `verify` is deliberately written in different words
+        # from the request - "a track is playing" for "play adele on
+        # spotify". The routine's own name is what ties the run to what
+        # was asked.
+        result.replayed_template = str(skill.get("template") or "")
 
         values = align(str(skill.get("template", "")), goal) or {}
         missing = [p for p in skill.get("params", []) if p not in values]
@@ -884,7 +891,7 @@ class TaskAgent:
             text = s["step"]
             # identifier-like ("search_spotify_top_track") or one bare word
             if " " not in text and (
-                "_" in text or text.isalnum() and len(text) > 12
+                "_" in text or (text.isalnum() and len(text) > 12)
             ):
                 self._plan_gripe = f"step is not a real sentence: {text!r}"
                 return False
@@ -919,7 +926,7 @@ class TaskAgent:
                 return False
         return True
 
-    def _note_wall(self, step: "Step") -> None:
+    def _note_wall(self, step: Step) -> None:
         """Count what Alfred ran into, and what got past it.
 
         A failure followed by a different tool succeeding is the only
@@ -1003,7 +1010,7 @@ class TaskAgent:
 
         return learned
 
-    def _diagnose_last(self, result: "TaskResult", goal: str) -> str:
+    def _diagnose_last(self, result: TaskResult, goal: str) -> str:
         """The most recent real failure, read rather than assumed."""
         for step in reversed(result.steps):
             if step.ok:
@@ -1018,7 +1025,7 @@ class TaskAgent:
             return str(finding)
         return ""
 
-    def reflect(self, result: "TaskResult") -> str:
+    def reflect(self, result: TaskResult) -> str:
         """One cheap post-mortem call. Turns a concrete failure reason into
         a durable LESSON fact for next time. Returns the reflection line
         (or '') for logging. Safe to call from a worker thread."""
@@ -1218,7 +1225,7 @@ class TaskAgent:
                    if apps else "")
                 + (f"KNOWN GOOD PRACTICE:\n{know}\n\n" if know else "")
                 + f"TOOLS:\n{self._exec_catalogue}\n\n"
-                + f"HISTORY:\n" + ("\n".join(history[-16:]) or "(nothing yet)")
+                + "HISTORY:\n" + ("\n".join(history[-16:]) or "(nothing yet)")
                 + "\n\nYour next JSON:"
             )
             try:
@@ -1231,7 +1238,7 @@ class TaskAgent:
 
             decision = _parse(raw)
             if decision is None:
-                history.append(f"[system] unparseable model reply, retry")
+                history.append("[system] unparseable model reply, retry")
                 continue
 
             action = decision.get("action")
@@ -1327,14 +1334,14 @@ class TaskAgent:
 
         return calls
 
-    _VERIFY_STOP = {
+    _VERIFY_STOP = {  # noqa: RUF012
         "the", "a", "an", "is", "are", "was", "were", "and", "or", "to", "of",
         "in", "on", "at", "it", "that", "this", "with", "for", "shows", "show",
         "returns", "return", "tool", "result", "when", "done", "currently",
         "value", "text", "control", "window", "which", "line", "there",
     }
 
-    def _aftercheck(self, sub_steps: "list[Step]") -> Any:
+    def _aftercheck(self, sub_steps: list[Step]) -> Any:
         """The world's opinion of a step that has just claimed success.
 
         Only the most recent checkable action is looked at, and only a
@@ -1352,7 +1359,7 @@ class TaskAgent:
             return None if found.ok else found
         return None
 
-    def _repair_for(self, sub_steps: "list[Step]", evidence: str) -> Any:
+    def _repair_for(self, sub_steps: list[Step], evidence: str) -> Any:
         """One thing to do first that would make this step work."""
         from src.brain import repair as _repair
 
@@ -1396,7 +1403,7 @@ class TaskAgent:
         pstep: dict[str, str],
         history: list[str],
         sub_hist: list[str] | None = None,
-        steps: "list[Step] | None" = None,
+        steps: list[Step] | None = None,
     ) -> tuple[bool, str]:
         done_when = pstep["done_when"]
 
@@ -1548,7 +1555,13 @@ class TaskAgent:
                 "exhausted": "Ran out of time",
                 "error": "Hit an error",
             }[result.status]
-        elif n_ok and not outstanding and not shrank and not _ended_badly(result):
+        elif (
+            n_ok
+            and not outstanding
+            and not shrank
+            and not _ended_badly(result)
+            and _answers_the_goal(result)
+        ):
             result.status = "done"
             base = "Done"
         elif n_ok:
@@ -1557,6 +1570,11 @@ class TaskAgent:
             if shrank and not outstanding:
                 result.unverified.append(
                     "some of the original plan was dropped when I got stuck"
+                )
+            if not outstanding and not _answers_the_goal(result):
+                result.unverified.append(
+                    "every step worked, but none of them was about what you "
+                    "asked for - say it again and I will plan it properly"
                 )
         else:
             result.status = "failed"
@@ -1578,7 +1596,7 @@ class TaskAgent:
 
     # ----------------------------------------------------------------
 
-    def _finding(self, result: "TaskResult") -> str:
+    def _finding(self, result: TaskResult) -> str:
         """What the work found out, in a sentence.
 
         The summary reports what was done - "Confirmed: run PowerShell to
@@ -1812,7 +1830,7 @@ def _answer_line(raw: str) -> str:
     the end, because when a model does think out loud the conclusion is
     the last thing it says, never the first.
     """
-    lines = [l.strip() for l in (raw or "").splitlines() if l.strip()]
+    lines = [l.strip() for l in (raw or "").splitlines() if l.strip()]  # noqa: E741
     if not lines:
         return ""
 
@@ -1833,7 +1851,7 @@ def _answer_line(raw: str) -> str:
     return "" if last.rstrip().upper().rstrip(":") == "ANSWER" else last
 
 
-def _why_it_failed(step: "Step") -> str:
+def _why_it_failed(step: Step) -> str:
     """The words that say what went wrong.
 
     Tools disagree about where they put it: PowerShell has stderr, others
@@ -1866,7 +1884,95 @@ def _without_echo(text: str, command: str) -> str:
     return text.replace(command, "").lstrip(" :\r\n") or text
 
 
-def _ended_badly(result: "TaskResult") -> bool:
+# Words that say nothing about WHICH job this is. A goal made only of
+# these - "how long has this PC been up?" - is one the check has no
+# opinion about, and says so by leaving fewer than two words behind.
+_GOAL_STOP = {
+    "the", "a", "an", "and", "or", "to", "of", "in", "on", "at", "for",
+    "with", "from", "into", "that", "this", "then", "when", "what",
+    "please", "user", "users", "alfred", "make", "get", "have", "there",
+    "some", "any", "just", "also", "about", "current", "currently",
+    "check", "find", "look", "show", "tell", "give", "want", "need",
+    "using", "use", "run", "open", "start", "launch", "learn", "routine",
+    "set", "put", "take", "do", "does", "done",
+    "how", "has", "had", "been", "being", "was", "were", "are", "its",
+    "you", "your", "my", "mine", "me", "can", "could", "would", "should",
+    "much", "many", "long", "more", "most", "very", "still", "right",
+    "now", "out", "off", "over", "back", "here", "thing", "things",
+    "again", "which", "whether", "will", "shall", "let",
+}
+
+
+def _words(text: str) -> set[str]:
+    """Content words, split the way a tool name is spelled.
+
+    On word boundaries rather than whitespace: `system_info` has to
+    come apart into `system` and `info`, or a step that ran exactly the
+    right tool reads as unrelated to the question it answered. Three
+    letters, not four, because RAM and CPU are the whole subject of the
+    sentences they appear in.
+    """
+
+    return {
+        stripped
+        for word in re.findall(r"[a-z0-9']+", (text or "").lower())
+        # An apostrophe belongs inside a word (Sana'a, don't) and never
+        # at its edge, where it is a quote mark: 'Stretch' has to come
+        # out as the same word as Stretch.
+        if (stripped := word.strip("'")) and len(stripped) >= 3
+        and stripped not in _GOAL_STOP
+    }
+
+
+def _answers_the_goal(result: TaskResult) -> bool:
+    """Is the work that was verified about the thing that was asked?
+
+    Every step is verified against its own done_when, which means a
+    plan can be fully verified and still be a plan for something else.
+    That is exactly what happened to "Search for how to fish": the
+    planner opened File Explorer at the Desktop, the step did what it
+    said it would, and the task was reported done. Nothing in the chain
+    had ever compared the work against the request.
+
+    Deliberately blunt - it asks for a single word in common, not for a
+    good answer. A task that shares no content word at all with what was
+    asked is not a task that did it.
+    """
+
+    # A question's deliverable is its answer, and an answer is not
+    # obliged to repeat the question: "192.168.1.42" is the right reply
+    # to "what is my local IPv4" and shares no word with it. Word
+    # overlap cannot judge those, so it does not try. The failure this
+    # guards against - a plan that went and did something else - shows
+    # up as a task that finished with nothing found.
+    if (result.answer or "").strip():
+        return True
+
+    wanted = _words(result.goal)
+
+    # One content word is not enough to judge on: "Open Notepad" against
+    # a step called "Notepad" is a match either way, and a one-word goal
+    # that misses would more likely be a synonym than a wrong plan.
+    if len(wanted) < 2:
+        return True
+
+    # What Alfred says it did, not what its tools happened to return.
+    # A folder listing can contain any word at all - the Desktop in the
+    # "how to fish" run held a game called How to Fish - so matching
+    # against raw results would make the check agree with itself.
+    haystack = " ".join(
+        [
+            *result.verified,
+            *result.plan,
+            result.answer or "",
+            result.replayed_template,
+        ]
+    )
+
+    return bool(wanted & _words(haystack))
+
+
+def _ended_badly(result: TaskResult) -> bool:
     """Did the last thing Alfred actually did fail?
 
     Everything else about finishing looks at the plan - which steps were
