@@ -205,3 +205,14 @@ def test_an_unknown_provider_is_refused_rather_than_guessed(capsys):
 
     out = capsys.readouterr().out
     assert "groq" in out and "base URL" in out
+
+
+@pytest.mark.parametrize("model", [
+    "canopylabs/orpheus-v1-english",
+    "canopylabs/orpheus-arabic-saudi",
+    "playai-tts-arabic",
+])
+def test_speech_models_are_not_timed(model):
+    """Groq serves these, and each one costs a real call to discover
+    that it "is not supported for chat completions"."""
+    assert model not in _worth_timing([model, "llama-3.3-70b-versatile"])

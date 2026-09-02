@@ -187,7 +187,10 @@ KNOWN_PROVIDERS: dict[str, str] = {
 _NOT_A_PLANNER = re.compile(
     r"whisper|tts|audio|speech|embed|rerank|moderat|guard|safety|"
     r"vision|image|diffus|video|code(?!stral)|prompt-guard|"
-    r"nemoguard|parse|reward",
+    r"nemoguard|parse|reward|"
+    # Groq serves these two and they cost a real call each to find
+    # out: "The model ... is not supported for chat completions".
+    r"orpheus|canopylabs|playai",
     re.I,
 )
 
@@ -200,9 +203,18 @@ def _list_models(base_url: str, key: str) -> list[str]:
     import json
     import urllib.request
 
+    from src.ai.providers._http import _USER_AGENT
+
     request = urllib.request.Request(
         f"{base_url.rstrip('/')}/models",
-        headers={"Authorization": f"Bearer {key}"},
+        headers={
+            "Authorization": f"Bearer {key}",
+            # Without this, Groq and Cerebras both answer 403 to a
+            # perfectly good key - their bot protection refuses
+            # urllib's default "Python-urllib/3.13" before the request
+            # ever reaches the API.
+            "User-Agent": _USER_AGENT,
+        },
     )
 
     with urllib.request.urlopen(request, timeout=30) as response:
@@ -340,6 +352,15 @@ def add_provider(name: str, key: str, base_url: str = "") -> int:
     slot = _slot_for(name)
     print(f"\n  best: {best_model} at {best_time:.2f}s   -> ALFRED_{slot.upper()}_*")
 
+    # Fast enough to lead with.
+    #
+    # A rung this quick belongs at the front, not behind whatever is
+    # already there. Measured on this machine: Groq answered in 0.58s
+    # while the configured primary - gemini-flash-lite - was 429 for
+    # the rest of the day, so every single call paid a wasted round
+    # trip to an exhausted model before reaching the fast one.
+    lead = best_time < 1.5
+
     # Where it goes in the chain. Faster than what is already there and
     # it goes first; otherwise it slots in behind the fast rung and
     # ahead of the slow ones.
@@ -360,16 +381,30 @@ def add_provider(name: str, key: str, base_url: str = "") -> int:
     )
     current.insert(where, slot)
 
-    _write_env(
-        {
-            f"ALFRED_{slot.upper()}_BASE_URL": base,
-            f"ALFRED_{slot.upper()}_API_KEY": key,
-            f"ALFRED_{slot.upper()}_MODEL": best_model,
-        },
-        ",".join(current),
-    )
+    values = {
+        f"ALFRED_{slot.upper()}_BASE_URL": base,
+        f"ALFRED_{slot.upper()}_API_KEY": key,
+        f"ALFRED_{slot.upper()}_MODEL": best_model,
+    }
 
-    print(f"  written to .env; plan chain is now: {','.join(current)}")
+    if lead:
+        # It leads, so the old primary becomes the rung behind it
+        # rather than being dropped.
+        was = settings.ai_plan_provider
+
+        if was and was not in current and was != slot:
+            current.insert(1, was)
+
+        current = [f for f in current if f != slot]
+        values["ALFRED_AI_PLAN_PROVIDER"] = slot
+        values["ALFRED_AI_PLAN_MODEL"] = best_model
+
+    _write_env(values, ",".join(current))
+
+    if lead:
+        print(f"  it leads: plan provider is now {slot} ({best_model})")
+
+    print(f"  written to .env; fallbacks are now: {','.join(current)}")
     print("\n  Restart Alfred to pick it up, then check with:")
     print("      python -m src.models")
 

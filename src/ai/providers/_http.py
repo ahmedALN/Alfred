@@ -12,6 +12,20 @@ from src.ai.providers.base import ProviderError
 # giving up (and, for the fallback chain, before failing over).
 _RETRYABLE = {429, 500, 502, 503, 504}
 
+# Say who is calling.
+#
+# urllib sends "Python-urllib/3.13" when nothing else is set, and the
+# bot protection in front of several providers refuses that outright:
+# Groq answered 403 Forbidden to a key that curl got a 200 with, and
+# Cerebras the same. Not a rate limit, not a bad key - the request
+# never reached the API at all.
+#
+# That would have been a quiet disaster. The key would go in, the model
+# would be configured, the rung would sit in the chain returning 403 on
+# every call, and the failover would route around it forever without
+# anybody learning why.
+_USER_AGENT = "Alfred/0.1 (+https://github.com/ahmedALN/Alfred)"
+
 
 def post_json(
     url: str,
@@ -32,6 +46,7 @@ def post_json(
 
     request = urllib.request.Request(url, data=body, method="POST")
     request.add_header("Content-Type", "application/json")
+    request.add_header("User-Agent", _USER_AGENT)
 
     for key, value in (headers or {}).items():
         request.add_header(key, value)

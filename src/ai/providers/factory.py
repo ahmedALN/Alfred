@@ -67,9 +67,13 @@ class ProviderBundle:
 def _resolve(name: str | None, fallback: str) -> str:
     chosen = (name or fallback or "gemini").strip().lower()
 
-    if chosen not in SUPPORTED:
+    # openai2, openai3... are the numbered extra endpoints, and any of
+    # them may be the primary rather than only a fallback.
+    if chosen not in SUPPORTED and not _EXTRA_ENDPOINT.fullmatch(chosen):
         raise ProviderError(
-            f"Unknown AI provider {chosen!r}. Supported: {', '.join(SUPPORTED)}."
+            f"Unknown AI provider {chosen!r}. Supported: "
+            f"{', '.join(SUPPORTED)}, or openai2/openai3/... for an extra "
+            "OpenAI-compatible endpoint."
         )
 
     return chosen
@@ -373,6 +377,22 @@ def _build_chat(
 
     if provider == "ollama":
         return OllamaChatProvider(model, settings.ollama_base_url)
+
+    # A numbered endpoint can be the primary, not only a fallback.
+    # Measured here: Groq answers a planner prompt in 0.58s against
+    # gemini-flash-lite's 1.4s, and with a far larger daily allowance -
+    # so the fastest rung with the biggest cap was stuck behind an
+    # exhausted one, paying a wasted 429 on every call.
+    if _EXTRA_ENDPOINT.fullmatch(provider):
+        extra = _extra_openai(provider)
+
+        if extra is not None:
+            return extra
+
+        raise ProviderError(
+            f"{provider} is the plan provider but ALFRED_{provider.upper()}_"
+            "BASE_URL / _API_KEY / _MODEL are not all set."
+        )
 
     return OpenAICompatibleChatProvider(
         model, settings.openai_base_url or "", settings.openai_api_key
