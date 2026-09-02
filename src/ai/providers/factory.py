@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -236,6 +237,11 @@ def build_plan_chat(
                             settings, gemini_client,
                         )
                     )
+            elif _EXTRA_ENDPOINT.fullmatch(name):
+                extra = _extra_openai(name)
+
+                if extra is not None:
+                    chain.append(extra)
             elif name == "ollama":
                 model = settings.ai_chat_model or _DEFAULT_MODELS[("ollama", "chat")]
                 chain.append(OllamaChatProvider(model, settings.ollama_base_url))
@@ -257,8 +263,18 @@ def build_plan_chat(
     if not chain:
         chain.append(local_chat)
 
-    # Always keep the local model as the final safety net.
-    if not any(getattr(p, "name", "") == "ollama" for p in chain):
+    # Always END on the local model.
+    #
+    # This asked whether a local model was anywhere in the chain, which
+    # is not the same thing and stopped being true the moment the chain
+    # could be arranged freely: put ollama first and a cloud provider
+    # after it - which is what `ALFRED_AI_PLAN_FALLBACKS=openai2` on a
+    # local primary does - and the last rung is one that can rate-limit,
+    # with nothing underneath it. The net has to be at the bottom.
+    #
+    # A local model both first and last is not a mistake: if the first
+    # one answers, the last is never reached.
+    if getattr(chain[-1], "name", "") != "ollama":
         chain.append(local_chat)
 
     import os
@@ -274,6 +290,41 @@ def build_plan_chat(
         chain = _probe_and_order(chain)
 
     return FallbackChatProvider(chain) if len(chain) > 1 else chain[0]
+
+
+# A second, third, fourth OpenAI-compatible endpoint.
+#
+# There was one - ALFRED_OPENAI_BASE_URL - so Alfred could use NVIDIA
+# or Groq or Cerebras, but never two of them. That is the wrong shape
+# for the way these are actually used: the free tiers are all
+# rate-limited, they run out at different times of day, and the whole
+# point of the chain is having somewhere to go when one does. One
+# endpoint means one free tier, and when it is spent the next rung is
+# the local 4B.
+#
+# Name them openai2, openai3... in ALFRED_AI_PLAN_FALLBACKS and set
+# ALFRED_OPENAI2_BASE_URL / _API_KEY / _MODEL beside them.
+_EXTRA_ENDPOINT = re.compile(r"openai(\d+)")
+
+
+def _extra_openai(name: str) -> ChatProvider | None:
+    """One of the numbered extra endpoints, if it is configured."""
+
+    import os
+
+    suffix = name.upper()
+    base = os.getenv(f"ALFRED_{suffix}_BASE_URL", "").strip()
+    key = os.getenv(f"ALFRED_{suffix}_API_KEY", "").strip()
+    model = os.getenv(f"ALFRED_{suffix}_MODEL", "").strip()
+
+    if not (base and key and model):
+        return None
+
+    from src.ai.providers.openai_provider import OpenAICompatibleChatProvider
+
+    return OpenAICompatibleChatProvider(
+        model=model, base_url=base, api_key=key,
+    )
 
 
 def _probe_and_order(chain: list[ChatProvider]) -> list[ChatProvider]:

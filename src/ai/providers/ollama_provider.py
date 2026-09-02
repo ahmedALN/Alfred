@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import os
 
 from src.ai.providers._http import post_json
 from src.ai.providers.base import (
@@ -45,10 +46,25 @@ class OllamaChatProvider(ChatProvider):
         timeout: float = 180.0,
         think: bool = False,
         num_ctx: int = 8192,
+        keep_alive: str | None = None,
     ) -> None:
         self.model = model
         self._base = _clean_base(base_url)
         self._timeout = timeout
+        # How long Ollama holds the model in VRAM after a request.
+        #
+        # Ollama's default is five minutes, and Alfred is quiet for
+        # longer than that all the time - so the first request after a
+        # gap pays for a 3.3GB reload. Measured on this machine: 2.10s
+        # warm, 5.11s cold. That three seconds lands on the FIRST thing
+        # you ask after a quiet spell, which is the request you notice.
+        #
+        # Game mode still unloads explicitly, so holding the model does
+        # not fight the "free up the GPU" promise - it just stops the
+        # model being dropped by a timer nobody asked for.
+        self._keep_alive = keep_alive or os.getenv(
+            "ALFRED_OLLAMA_KEEP_ALIVE", "30m"
+        ).strip()
         # Reasoning models (qwen3.5, etc.) default to extended "thinking"
         # in Ollama, which can burn 15k+ tokens and 60s+ on a trivial
         # decision. Alfred wants fast structured answers, so thinking is
@@ -80,6 +96,7 @@ class OllamaChatProvider(ChatProvider):
             "prompt": prompt,
             "stream": False,
             "think": self._think,
+            "keep_alive": self._keep_alive,
             "options": options,
         }
 

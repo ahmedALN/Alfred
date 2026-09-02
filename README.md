@@ -107,6 +107,7 @@ the cause.
 
 ```bash
 python -m src.doctor                 # is everything in working order? (--quiet for problems only)
+python -m src.models                 # which model answers, and how fast  (try <url> <key> <model>)
 python -m src.status                 # running? memory, brain + Gemini usage today
 python -m src.memory_cli list        # what it remembers  (search / forget / edit / dedupe / export)
 python -m src.knowledge seed         # load the built-in Windows playbook into memory (do this once)
