@@ -48,6 +48,10 @@ executor handles the clicks and typing within a step - do not plan those.
 - Write steps in PLAIN ENGLISH, never as tool syntax. "Select all the text" \
 is a step; "ui_control key keys='^a'" is NOT - the executor chooses the tool \
 call, you describe the outcome.
+- "Learn how to X", "remember how to X", "always do X this way" means BUILD A \
+ROUTINE, not go and read about X. It is ONE step - "Learn a routine for X" - \
+and the skill tool does it. Do NOT plan web searches or research: the user is \
+asking Alfred to acquire a capability, not to look something up.
 - If the goal needs signing in, make that its own step ("Get to the sign-in \
 screen"). Alfred never types passwords; the user does that part.
 - For a "tell me / show me / what is / how much" question, the plan is just \
@@ -336,8 +340,15 @@ class TaskAgent:
         # one, the other one" has to still be true three steps later.
         self._said_since: list[str] = []
 
+        # Whether a person asked, not which door they used. A job typed
+        # into WhatsApp is every bit as much a request as one spoken
+        # aloud; judging it by the brain's rules - which exist for
+        # things Alfred decided to do unprompted - made ordinary steps
+        # need a confirmation nobody could give, so they were skipped
+        # in silence. That is the whole of "he said he was doing it and
+        # didn't do it".
         self._policy = (
-            self._policy_voice if source == "voice" else self._policy_brain
+            self._policy_brain if source == "brain" else self._policy_voice
         )
         self._ask_user = ask_user
 
@@ -1350,7 +1361,13 @@ class TaskAgent:
                 history.append(f"[step {index}] {tool}: user approved.")
                 # fall through and execute
             else:
-                note = f"{tool} ({thought or 'no rationale'})"
+                # Nobody to ask. Say what was needed rather than letting
+                # the step evaporate - a skipped step that is never
+                # mentioned is indistinguishable from a lie.
+                note = (
+                    f"{tool} ({thought or 'no rationale'}) - needed your OK "
+                    f"and there was no way to ask from here"
+                )
                 result.skipped_confirmations.append(note)
                 history.append(
                     f"[step {index}] SKIPPED {tool}: needs the user's OK "
