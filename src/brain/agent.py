@@ -53,6 +53,11 @@ call, you describe the outcome.
 ROUTINE, not go and read about x. It is ONE step - "Learn a routine for x" - \
 and the skill tool does it. Do NOT plan web searches or research: the user is \
 asking Alfred to acquire a capability, not to look something up.
+- That rule is about the VERB, never the words that follow it. "Open X", \
+"run X", "launch X", "play X" is opening a thing that EXISTS ON THIS PC, \
+even when the thing is named "How To Fish" or "How to draw". A name is not \
+an instruction: only learn/remember/always makes a routine. "Open how to \
+fish" is ONE step - "Open How to Fish" - and open_app finds it.
 - "Remember THAT x" is a FACT to keep, not a routine and not a search. ONE \
 step, the remember tool. "Remember that I hate coriander" is not a sequence \
 of actions, so it can never be a routine.
