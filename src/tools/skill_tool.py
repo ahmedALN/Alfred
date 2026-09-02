@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.tools.arguments import normalise_enum_action
 from src.tools.base import AlfredTool
 
 
@@ -62,6 +63,26 @@ class SkillTool(AlfredTool):
         return None
 
     # ----------------------------------------------------------------
+
+    def normalise_arguments(
+        self, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        """A call with a goal in it is a request to learn that goal.
+
+        "Learn a routine for making a cup of tea" reached this tool
+        eight times without an `action`, was refused eight times, and
+        wrote the refusal into memory each time as though it were a
+        fact about the world.
+        """
+
+        return normalise_enum_action(
+            arguments,
+            valid=("learn", "list", "show", "forget"),
+            tells=(
+                ("learn", ("goal",)),
+                ("show", ("name",)),
+            ),
+        )
 
     def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
         action = str(arguments.get("action") or "").strip().lower()

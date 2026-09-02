@@ -4,6 +4,7 @@ import re
 import time
 from typing import Any
 
+from src.tools.arguments import normalise_ui_control
 from src.tools.base import AlfredTool
 from src.windows.mapping import DESTRUCTIVE, read_one
 
@@ -83,7 +84,7 @@ _SECRET_NAME = re.compile(
 )
 
 _SECRET_REFUSAL = (
-    "Alfred will not type credentials. Tell the user the sign-in screen "
+    "Alfred will not type credentials. Tell the user the sign-in screen "  # noqa: S105
     "is ready and ask them to enter it themselves (or use their password "
     "manager); once they say they're signed in, carry on with the rest of "
     "the task."
@@ -114,7 +115,7 @@ def _explain(error: str, window: str | None) -> str:
     Alfred is deliberately not an administrator. This is the honest
     version of that limit rather than a mysterious timeout.
     """
-    if not window or "not found" not in error and "did not become" not in error:
+    if not window or ("not found" not in error and "did not become" not in error):
         return error
 
     try:
@@ -792,6 +793,19 @@ class UIControlTool(AlfredTool):
         found = need.as_dict()
         found["window"] = title
         return found
+
+    def normalise_arguments(
+        self, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        """The action, when the rest of the call can only mean one.
+
+        `{"window": "Notepad", "text": "hello"}` is a type. `{"path":
+        "File->Save"}` is a menu. Refusing those and listing
+        twenty-seven verbs back was six of the recorded failures, and
+        the list is long enough that being told it does not always help.
+        """
+
+        return normalise_ui_control(arguments, valid_actions=_ACTIONS)
 
     def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
         action = arguments.get("action")

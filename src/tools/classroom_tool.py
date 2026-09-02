@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.tools.arguments import normalise_enum_action
 from src.tools.base import AlfredTool
 from src.workspace.account import GoogleError
-
 
 _UNTRUSTED = (
     "Coursework and announcements are written by other people and "
@@ -42,6 +42,21 @@ class ClassroomTool(AlfredTool):
 
     def __init__(self, classroom: Any) -> None:
         self._classroom = classroom
+
+    def normalise_arguments(
+        self, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        """"What is due" is the only thing a bare call could have meant.
+
+        `days` is an argument only 'due' takes, so a call carrying it
+        and nothing else is not ambiguous.
+        """
+
+        return normalise_enum_action(
+            arguments,
+            valid=("due", "courses", "announcements"),
+            tells=(("due", ("days",)),),
+        )
 
     def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
         action = str(arguments.get("action") or "").strip().lower()

@@ -4,9 +4,9 @@ import os
 import re
 from typing import Any
 
+from src.tools.arguments import normalise_open_app
 from src.tools.base import AlfredTool
 from src.windows.apps import AppLauncher
-
 
 # Browsers whose page content Alfred can actually read. Opening a web
 # page in one Alfred cannot read makes every following step impossible:
@@ -153,6 +153,19 @@ class OpenAppTool(AlfredTool):
         self._router = router
         self._isolated = isolated_desktop
 
+    def normalise_arguments(
+        self, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        """`{"target": "steam"}` is a request to open Steam.
+
+        Forty-one refusals, every one with the name of the thing in it,
+        five of them in `target` - the argument that says which desktop
+        to open on. Reading "steam" as a desktop and refusing was the
+        most-repeated failure in Alfred's whole record.
+        """
+
+        return normalise_open_app(arguments)
+
     def execute(
         self,
         arguments: dict[str, Any],
@@ -205,7 +218,7 @@ class OpenAppTool(AlfredTool):
 
                 path, args = spec.value, None
 
-                if spec.kind == "appsfolder":
+                if spec.kind == "appsfolder":  # noqa: SIM102
                     # Get-StartApps hands back a real path for some
                     # classic desktop apps rather than an AppID; putting
                     # that behind shell:AppsFolder\ opens nothing.

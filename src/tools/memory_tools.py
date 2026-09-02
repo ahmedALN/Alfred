@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.memory.learner import MemoryLearner
+from src.tools.arguments import normalise_named_string
 from src.tools.base import AlfredTool
 
 
@@ -50,6 +51,23 @@ class RememberTool(AlfredTool):
 
     def __init__(self, learner: MemoryLearner) -> None:
         self._learner = learner
+
+    def normalise_arguments(
+        self, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        """The fact, whichever word it arrived under.
+
+        Twice this tool was handed `{"content": {...}}` and once
+        `{"text": ...}`, refused both, and Alfred wrote a note to itself
+        about its own argument names instead of remembering the thing it
+        had been told.
+        """
+
+        return normalise_named_string(
+            arguments,
+            canonical="content",
+            synonyms=("text", "fact", "value", "memory", "statement", "note"),
+        )
 
     def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
         content = arguments.get("content")

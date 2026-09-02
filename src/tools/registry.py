@@ -41,6 +41,16 @@ class ToolRegistry:
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
         tool = self.get(name)
+
+        # A tool that can read past the label on an argument does so
+        # here, once, for every caller - the voice session, the task
+        # agent, a replayed skill and the brain all come through this
+        # door.
+        try:
+            arguments = tool.normalise_arguments(arguments or {})
+        except Exception as exc:  # noqa: BLE001 - forgiving must not break
+            print(f"[Tools] {name}: could not tidy arguments: {exc}")
+
         try:
             return tool.execute(arguments)
         except ValueError as exc:
