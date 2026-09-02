@@ -1750,14 +1750,21 @@ class TaskAgent:
             f"REQUEST: {result.goal}\n\nWHAT CAME BACK:\n{trace}\n\n"
             f"{shape} Use only what is above - do not invent a name "
             "that is not in it.\n"
-            # An empty result is a finding, not the absence of one.
-            # "Is there a folder on my Desktop?" ran a command that
-            # succeeded and listed nothing, which is the whole answer -
-            # no - and Alfred said nothing at all, four times over.
-            "A command that ran fine and returned nothing means there "
-            "are none: say so plainly (\"no, there aren't any\") rather "
-            "than saying nothing.\n"
-            "Only if what came back genuinely cannot answer the "
+            # An empty result is a finding, not the absence of one -
+            # but only when something was ASKED. "Is there a folder on
+            # my Desktop?" ran a command that listed nothing, which is
+            # the whole answer, and Alfred said nothing at all four
+            # times over. Told the same thing about an instruction,
+            # though, it reported "no, there aren't any" as the outcome
+            # of "search the Steam store for Hollow Knight" - which is
+            # not an answer to anything, because nothing was asked.
+            + (
+                "A command that ran fine and returned nothing means "
+                "there are none: say so plainly (\"no, there aren't "
+                "any\") rather than saying nothing.\n"
+                if _was_a_question(result.goal) else ""
+            )
+            + "Only if what came back genuinely cannot answer the "
             "request - it is about something else, or it failed - say "
             "NOTHING.\n\n"
             "Put your answer on its own line after the word ANSWER:"

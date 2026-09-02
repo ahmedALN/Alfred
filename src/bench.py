@@ -265,7 +265,50 @@ BATTERY: list[dict] = [
         "check": ("text_in_window", "Stremio", "breaking bad"),
         "tags": ["in-app", "media", "slow", "multi-step"],
     },
+    # ================================================================
+    # Working inside apps, several steps deep
+    #
+    # The shape that kept failing: open the app, find the thing in it,
+    # act on the thing. Every one of these is read back off the real
+    # window afterwards, not off Alfred's account of it.
+    # ================================================================
+    {
+        "goal": "Open Spotify and play Shabba by Drake.",
+        "check": ("text_in_window", "Spotify", "shabba"),
+        "tags": ["apps", "media", "multi-step", "slow"],
+    },
+    {
+        "goal": "In Spotify, go to my Library.",
+        "check": ("text_in_window", "Spotify", "library"),
+        "tags": ["apps", "media", "slow"],
+    },
+    {
+        "goal": "What playlists do I have in Spotify?",
+        "check": ("answer_says_something",),
+        "tags": ["apps", "media", "read", "slow"],
+    },
+    {
+        "goal": "Open Steam and go to my Library.",
+        "check": ("text_in_window", "Steam", "library"),
+        "tags": ["apps", "gaming", "multi-step", "slow"],
+    },
+    {
+        "goal": "In Steam, search the store for Hollow Knight.",
+        "check": ("text_in_window", "Steam", "hollow"),
+        "tags": ["apps", "gaming", "multi-step", "slow"],
+    },
+    {
+        "goal": "What servers am I in on Discord?",
+        "check": ("answer_says_something",),
+        "tags": ["apps", "read", "slow"],
+    },
+    {
+        "goal": "Open Notepad and type hello from the stress test.",
+        "check": ("text_in_window", "Notepad", "hello from the stress test"),
+        "tags": ["apps", "in-app", "multi-step"],
+    },
 ]
+
 
 QUICK = {
     "Open Notepad.",
@@ -331,18 +374,49 @@ def verify(check, result, ui) -> tuple[bool, str]:
         # restores its old tabs on launch, so "the Notepad window" is
         # routinely several windows, and the one that was typed into is
         # not necessarily the one a scorer picks.
+        wanted = check[2].lower()
         seen = []
+
         for title in _windows(ui):
             if check[1].lower() not in title.lower():
                 continue
+
+            # The root value first - right for Notepad, where the
+            # window IS its text.
             try:
                 got = ui.execute({"action": "get", "window": title})
+                text = str(got.get("value") or got.get("text") or "")
             except Exception:  # noqa: BLE001
-                continue
-            text = str(got.get("value") or got.get("text") or "")
-            seen.append(text)
-            if check[2].lower() in text.lower():
+                text = ""
+
+            if wanted in text.lower():
                 return True, text[:60]
+
+            # ...and then the control names, which is where the visible
+            # content of an Electron app lives. Asking a CEF window for
+            # its value returns the page it is hosting -
+            # "xpui.app.spotify.com/index.html",
+            # "https://steamloopback.host/index.html" - so a check
+            # reading only that scored Spotify and Steam wrong no matter
+            # what was on screen.
+            try:
+                tree = ui.execute(
+                    {"action": "tree", "window": title, "limit": 500}
+                )
+                names = [
+                    str(c.get("name") or "")
+                    for c in (tree.get("controls") or [])
+                ]
+            except Exception:  # noqa: BLE001
+                names = []
+
+            hit = [n for n in names if wanted in n.lower()]
+
+            if hit:
+                return True, hit[0][:60]
+
+            seen.append(text or f"{len(names)} controls, none matching")
+
         return False, (seen[0][:60] if seen else "no " + check[1] + " window")
 
     if kind == "answer_mentions":

@@ -858,11 +858,37 @@ class UIControlTool(AlfredTool):
             action in _NEEDS_WINDOW
             and window
             and ref is None
-            and isinstance(needle := (name or arguments.get("query")), str)
+            and isinstance(
+                needle := (
+                    name
+                    or arguments.get("query")
+                    # `find` takes this spelling too, and leaving it out
+                    # meant a call using it read no window at all and
+                    # searched an empty cache - reporting, with a
+                    # straight face, that Spotify has no playlists.
+                    or arguments.get("contains")
+                ),
+                str,
+            )
             and needle
         ):
             try:
-                ui.tree(window, pid, limit=200, contains=needle)
+                # `find` is a SEARCH of the window, so it gets the whole
+                # window; narrowing the read by the needle first meant it
+                # searched a cache that had already been filtered by the
+                # thing it was looking for. Asked for "Playlists" in
+                # Spotify it found none, while a plain query for the same
+                # word found four and the tree held eighteen.
+                #
+                # For click/type/get the narrowing is right: those want
+                # one named control, and reading 200 of them to reach it
+                # is the waste it was added to avoid.
+                searching = action in ("find", "exists")
+                ui.tree(
+                    window, pid,
+                    limit=500 if searching else 200,
+                    contains=None if searching else needle,
+                )
             except UiaError:
                 pass
 

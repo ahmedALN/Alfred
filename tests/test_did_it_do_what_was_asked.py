@@ -423,3 +423,51 @@ def test_a_request_for_one_fact_is_left_alone(goal):
     from src.brain.agent import _WANTS_THE_THINGS
 
     assert not _WANTS_THE_THINGS.search(goal)
+
+
+# ====================================================================
+# "No, there aren't any" is not the outcome of an instruction
+# ====================================================================
+
+
+def test_an_empty_result_means_none_only_when_something_was_asked():
+    """Both halves of this were real.
+
+    Told nothing about empty results, "is there a folder on my
+    Desktop?" ran four successful commands, listed nothing - which is
+    the whole answer - and said nothing at all.
+
+    Told that an empty result means none, "in Steam, search the store
+    for Hollow Knight" reported "no, there aren't any" as its outcome.
+    Nothing had been asked, so there was nothing for that to be an
+    answer to.
+    """
+    from src.brain.agent import TaskAgent, _was_a_question
+
+    prompts = {}
+
+    class _Chat:
+        def generate(self, prompt, **kw):
+            prompts["last"] = prompt
+            return "ANSWER: something"
+
+    agent = TaskAgent.__new__(TaskAgent)
+    agent._fast_chat = _Chat()
+
+    def _finding_for(goal):
+        r = TaskResult(goal=goal, status="done", summary="")
+        r.steps = [
+            type("S", (), {"ok": True, "tool": "ui_control", "result": {"a": 1},
+                           "args": {}})()
+        ]
+        agent._finding(r)
+        return prompts["last"]
+
+    asked = _finding_for("Are there any .txt files on my Desktop?")
+    told = _finding_for("In Steam, search the store for Hollow Knight.")
+
+    assert "there aren't any" in asked
+    assert "there aren't any" not in told
+
+    assert _was_a_question("Are there any .txt files on my Desktop?")
+    assert not _was_a_question("In Steam, search the store for Hollow Knight.")
