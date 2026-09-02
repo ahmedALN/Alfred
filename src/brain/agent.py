@@ -14,6 +14,7 @@ from src.brain.types import Proposal, ProposalKind, Verdict
 from src.tools.registry import ToolRegistry
 from src.tools.results import summarize_result, tool_succeeded
 from src.ui.live import LIVE
+from src.brain.diagnose import diagnose, supported
 
 _PLAN_SYSTEM = """You are Alfred's task planner on a Windows PC. Turn the goal \
 into the SHORTEST ordered plan a tool-using agent can execute.
@@ -468,6 +469,13 @@ class TaskAgent:
 
             if replans < 2 and total_calls < self._max_steps:
                 replans += 1
+                # Read what actually went wrong before asking for a
+                # different plan. "Not verified" is a fact about the
+                # verifier, not about the world; without a cause the
+                # planner picks its next move by luck.
+                finding = self._diagnose_last(result, goal)
+                if finding:
+                    history.append(f"[why] {finding}")
                 history.append(
                     f"[replan {replans}] step '{pstep['step']}' not verified: "
                     f"{evidence}"
@@ -482,6 +490,7 @@ class TaskAgent:
                     extra=(
                         f"Done so far: {result.verified or 'nothing'}. "
                         f"Stuck on: {pstep['step']} - {evidence}. "
+                        + (f"WHY IT FAILED: {finding} " if finding else "")
                         + (
                             "The user has SINCE SAID:\n" + said
                             + "\nPlan the rest around that - it "
@@ -804,6 +813,21 @@ class TaskAgent:
 
         return learned
 
+    def _diagnose_last(self, result: "TaskResult", goal: str) -> str:
+        """The most recent real failure, read rather than assumed."""
+        for step in reversed(result.steps):
+            if step.ok:
+                continue
+            try:
+                finding = diagnose(
+                    step.tool, step.args, step.result, goal,
+                    chat=self._fast_chat,
+                )
+            except Exception:  # noqa: BLE001
+                return ""
+            return str(finding)
+        return ""
+
     def reflect(self, result: "TaskResult") -> str:
         """One cheap post-mortem call. Turns a concrete failure reason into
         a durable LESSON fact for next time. Returns the reflection line
@@ -811,8 +835,14 @@ class TaskAgent:
         if not result.steps:
             return ""
 
+        # With the error text, not without it. Shown only "FAILED", the
+        # post-mortem invented causes - "the skill tool does not support
+        # list or learn actions" is false, and is one of sixty-nine such
+        # lessons now sitting in memory stopping Alfred trying things.
+        errors = [_why_it_failed(s) for s in result.steps if not s.ok]
         trace = "\n".join(
-            f"- {s.tool}({_short(s.args, 80)}) -> {'ok' if s.ok else 'FAILED'}"
+            f"- {s.tool}({_short(s.args, 80)}) -> "
+            + ("ok" if s.ok else f"FAILED: {_why_it_failed(s)}")
             for s in result.steps
         )
         prompt = (
@@ -832,6 +862,15 @@ class TaskAgent:
         line = line.splitlines()[0].strip() if line else ""
         if line.upper().startswith("LESSON:") and self._learner is not None:
             lesson = line.split(":", 1)[1].strip()
+            if not supported(lesson, errors):
+                # It concluded something the evidence does not say. A
+                # wrong lesson is worse than none: it is permanent, and
+                # it stops Alfred attempting that thing again.
+                print(f"[Task] not storing an unsupported lesson: {lesson[:70]}")
+                self._log("task_reflect",
+                          {"goal": result.goal, "line": line,
+                           "stored": False, "why": "unsupported"}, None)
+                return line
             if len(lesson) > 8:
                 try:
                     self._learner.remember(

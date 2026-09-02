@@ -119,9 +119,14 @@ def test_as_dict_exposes_plan_verified_unverified():
 
 def _result_with_steps():
     r = TaskResult(goal="open the report", status="failed", summary="")
+    # A real error, not a bare "status: error". The post-mortem is only
+    # allowed to learn from a failure that said something, because the
+    # ones that said nothing are exactly where it used to invent causes.
     r.steps.append(
         Step(1, "click it", "ui_control", {"action": "click"}, "auto",
-             {"status": "error"}, False)
+             {"status": "error",
+              "error": "no control matches name='Search' - run 'tree' first"},
+             False)
     )
     return r
 
