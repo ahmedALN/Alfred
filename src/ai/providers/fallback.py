@@ -146,7 +146,7 @@ class FallbackChatProvider(ChatProvider):
                     prompt, system=system, temperature=temperature,
                     max_tokens=max_tokens,
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 raise ProviderError(
                     f"every plan provider failed - {self._providers[-1].name}: {exc}"
                 ) from exc
@@ -165,9 +165,20 @@ class FallbackChatProvider(ChatProvider):
                 # The last rung in the race is the safety net: there is
                 # nothing left to start alongside it, so wait properly.
                 last = position == len(ready) - 1
+
+                # Patience grows as we go down the chain, because the
+                # chain is in preference order and a race run flat lets
+                # the worst model win it. The local 4B answers a
+                # planner prompt in 5.7s and gemini-flash-lite in 1.4s;
+                # started together, the 4B beats it whenever the good
+                # one has a slow second, and Alfred quietly plans with
+                # the fallback while the model it wanted was moments
+                # away. Rung two joins after 12s, rung three after 24s,
+                # the local one after 36s - by which point it really is
+                # the fallback rather than a contender.
                 answer = self._settle(
                     racing, started, errors, now,
-                    patience=None if last else self._patience,
+                    patience=None if last else self._patience * (position + 1),
                     must_answer=last,
                 )
 

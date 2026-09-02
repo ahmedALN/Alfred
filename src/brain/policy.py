@@ -220,6 +220,97 @@ def classify_command(command: str) -> str:
     return "ordinary"
 
 
+# ====================================================================
+# The same thing, done with the mouse
+#
+# Asked to delete everything on the Desktop, Alfred had three
+# Remove-Item commands refused by the gate above - and then did this:
+#
+#   ui_control {"action":"key","window":"Desktop - File Explorer",
+#               "keys":"Ctrl+A"}                              -> ok
+#   ui_control {"action":"key","window":"Desktop - File Explorer",
+#               "keys":"Delete"}                              -> ok
+#
+# Both allowed, because the gate reads shell commands and a keystroke
+# is not one. Select-all-and-Delete in a file window is a bulk delete
+# whatever it is typed into, and the files survived that run by luck of
+# focus rather than by anything stopping it.
+#
+# So the gestures are classified too. Deliberately narrow: this is
+# about deleting and emptying, not about clicking in general, because a
+# gate that asks before every click is a gate that gets turned off.
+# ====================================================================
+
+# Windows that hold files, where a Delete key means those files.
+_FILE_WINDOW = re.compile(
+    r"explorer|desktop|this pc|documents|downloads|pictures|videos|"
+    r"music|recycle bin|onedrive|\bfiles?\b|folder",
+    re.I,
+)
+
+_DELETE_KEY = re.compile(
+    r"\{?(?:del|delete)\}?$|\{?(?:del|delete)\}?\+|shift.{0,3}\+?.{0,3}del",
+    re.I,
+)
+
+# Controls and menu items that remove things.
+_DESTRUCTIVE_CONTROL = re.compile(
+    r"^\s*(?:delete|delete permanently|permanently delete|remove|"
+    r"move to (?:the )?(?:recycle )?bin|empty (?:the )?recycle bin|"
+    r"delete all|clear all|remove all|delete folder|delete file|"
+    r"uninstall|reset|erase|format)\b",
+    re.I,
+)
+
+
+def classify_gesture(tool: str, args: dict) -> str:
+    """'dangerous' or 'ordinary' for a UI action, by what it destroys."""
+
+    if tool not in ("ui_control", "desktop_control"):
+        return "ordinary"
+
+    action = str(args.get("action") or "").strip().lower()
+    window = str(args.get("window") or args.get("app") or "")
+
+    if action == "key":
+        keys = str(args.get("keys") or "")
+
+        if not _DELETE_KEY.search(keys):
+            return "ordinary"
+
+        # Where it lands is what it means. Delete in a file window is
+        # a bulk delete of whatever is selected; Delete in Notepad is
+        # the key next to Backspace, and asking about that would make
+        # the gate something to be switched off.
+        #
+        # An unnamed window is the raw-input case - desktop_control
+        # types into whatever has focus, and we do not know what that
+        # is. Unknown gets the careful answer.
+        if not window or _FILE_WINDOW.search(window):
+            return "dangerous"
+
+        return "ordinary"
+
+    if action in ("click", "double_click", "invoke", "select", "open_item"):
+        target = str(args.get("name") or args.get("item") or "")
+
+        if _DESTRUCTIVE_CONTROL.match(target):
+            return "dangerous"
+
+        return "ordinary"
+
+    if action == "menu":
+        path = str(args.get("path") or "")
+
+        if any(
+            _DESTRUCTIVE_CONTROL.match(part.strip())
+            for part in re.split(r"->|>|\|", path)
+        ):
+            return "dangerous"
+
+    return "ordinary"
+
+
 def _pipeline_is_readonly(command: str) -> bool:
     # Judged on the expanded text, so `gci | sls` is recognised as the
     # read it is and `gci | ri` is recognised as the write it is.
@@ -295,6 +386,16 @@ class Policy:
     def _evaluate_tool(self, proposal: Proposal, tool: str) -> Decision:
         if tool in READONLY_TOOLS:
             return Decision(proposal, Verdict.AUTO, "read-only tool")
+
+        # A gesture can do what a command was refused for.
+        gesture = classify_gesture(tool, proposal.args or {})
+
+        if gesture == "dangerous":
+            return Decision(
+                proposal,
+                Verdict.CONFIRM,
+                "this deletes things through the window rather than the shell",
+            )
 
         reversible = (
             proposal.reversible

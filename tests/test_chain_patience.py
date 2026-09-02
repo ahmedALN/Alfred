@@ -298,3 +298,36 @@ def test_the_local_model_is_always_last(monkeypatch):
     )
 
     assert rungs[-1].startswith("ollama:")
+
+
+def test_the_fallback_is_not_a_contender():
+    """Patience grows down the chain, because the chain is a preference.
+
+    Run flat, the race lets the worst model win it: the local 4B
+    answers a planner prompt in 5.7s and gemini-flash-lite in 1.4s, so
+    started together the 4B takes it whenever the good one has a slow
+    second - and Alfred plans with the fallback while the model it
+    wanted was moments away. That showed up as a live planner test
+    changing its mind about what "play how to draw" means.
+    """
+    good = _Provider("good", "the good plan", delay=0.30)
+    middle = _Provider("middle", "the middling plan", delay=0.02)
+    local = _Provider("local", "the 4B plan", delay=0.02)
+
+    # patience 0.1: middle joins at 0.1s, local would join at 0.2s -
+    # after the good one has already answered at 0.3s... and middle,
+    # started at 0.1 and taking 0.02, answers at 0.12s and wins.
+    answer = _chain(good, middle, local, patience=0.1).generate("hi")
+
+    assert answer == "the middling plan"
+    assert local.calls == 0, "the safety net was raced as though it were a rung"
+
+
+def test_the_local_model_still_gets_there_when_everything_above_is_slow():
+    slow_a = _Provider("a", "from a", delay=5.0)
+    slow_b = _Provider("b", "from b", delay=5.0)
+    local = _Provider("local", "from the local one", delay=0.01)
+
+    assert _chain(slow_a, slow_b, local, patience=0.05).generate("hi") == (
+        "from the local one"
+    )

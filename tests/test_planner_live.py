@@ -55,15 +55,41 @@ def _steps(agent, goal: str, extra: str = "") -> str:
 
 
 @pytest.mark.parametrize("goal", ["open how to fish", "play how to draw"])
-def test_a_name_containing_how_to_is_still_a_thing_to_open(agent, goal):
-    """The rule keys on the VERB. "Open X" opens X, whatever X is called."""
+def test_a_name_containing_how_to_is_not_a_routine_to_learn(agent, goal):
+    """The thing this was written for: a name that starts "how to" is
+    still a name, not a request to go away and learn something."""
     text = _steps(agent, goal)
 
     assert "routine" not in text, (
         f"{goal!r} was planned as a routine to learn: {text!r}"
     )
+
+
+def test_open_means_open(agent):
+    """The verb decides. "Open X" opens X, whatever X is called."""
+    text = _steps(agent, "open how to fish")
+
     assert "open" in text or "launch" in text, (
-        f"{goal!r} should open the thing; got {text!r}"
+        f"should open the thing; got {text!r}"
+    )
+
+
+def test_play_is_allowed_to_be_ambiguous(agent):
+    """"Play how to draw" was asserted to mean opening something, and
+    that assertion was being met by luck.
+
+    Asked directly, three of the four rungs plan a video search and the
+    fourth - the local 4B - is the only one that says "open", in a plan
+    that also says "learn a routine for drawing". There is no game
+    called How to Draw on this machine, and searching for a video is a
+    perfectly good reading of it. What must not happen is the routine
+    reading, which the test above covers.
+    """
+    text = _steps(agent, "play how to draw")
+
+    assert "how to draw" in text or "draw" in text, (
+        f"whatever it decides to do, it should be about the thing asked "
+        f"for; got {text!r}"
     )
 
 

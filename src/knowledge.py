@@ -371,6 +371,22 @@ WINDOWS_PLAYBOOK: list[tuple[str, str]] = [
     ("system", "List files with Get-ChildItem; add -Filter '*.pdf' for a "
      "type, -Recurse to descend, and pipe to Measure-Object for a count "
      "or (Measure-Object -Property Length -Sum) for total size."),
+    ("correction", "Get-ChildItem hides hidden and system items unless "
+     "you add -Force. On this machine the Desktop has 31 items without "
+     "it and 33 with, and the only folder there - 'New folder' - is one "
+     "of the two you do not see. When somebody asks what is in a folder "
+     "of theirs, use -Force: they mean everything that is in it, and "
+     "answering 'there are no folders' when there is one is worse than "
+     "listing a desktop.ini they did not care about."),
+    ("correction", "A listing command that runs fine and returns nothing "
+     "has answered the question: there are none. Say 'no, there aren't "
+     "any' rather than treating the empty output as a failure to find "
+     "out - that reads as Alfred not knowing, when it does know."),
+    ("correction", "Asked WHAT is in a folder, or WHICH files are there, "
+     "name them. A count is not an answer to that question: 'your "
+     "Desktop has 31 items' is a tally of the answer, and the names were "
+     "in the output the whole time. Up to about ten, then say how many "
+     "more."),
     ("system", "Make a folder: New-Item -ItemType Directory -Force -Path "
      "'<path>'  (the -Force means it won't error if it already exists)."),
     ("system", "Move files: Move-Item -Path '<src>' -Destination '<dst>'. "

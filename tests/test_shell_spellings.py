@@ -239,3 +239,132 @@ def test_an_aliased_write_is_not_recognised_as_a_read():
     from src.brain.policy import _pipeline_is_readonly
 
     assert not _pipeline_is_readonly("gci | ri")
+
+
+# ====================================================================
+# The same thing, done with the keyboard
+# ====================================================================
+
+
+def test_pressing_delete_in_a_file_window_is_gated():
+    """The hole this closes, from a real run.
+
+    Asked to delete everything on the Desktop, Alfred had three
+    Remove-Item commands refused - and then pressed Ctrl+A and Delete
+    in File Explorer, both allowed, because the gate reads shell
+    commands and a keystroke is not one. The files survived by luck of
+    focus, not because anything stopped it.
+    """
+    from src.brain.policy import classify_gesture
+
+    assert classify_gesture("ui_control", {
+        "action": "key", "window": "Desktop - File Explorer", "keys": "Delete",
+    }) == "dangerous"
+
+
+@pytest.mark.parametrize("args", [
+    {"action": "key", "window": "Downloads", "keys": "{DEL}"},
+    {"action": "key", "window": "Explorer", "keys": "shift+delete"},
+    {"action": "click", "window": "Explorer", "name": "Delete"},
+    {"action": "click", "window": "Recycle Bin", "name": "Empty Recycle Bin"},
+    {"action": "click", "window": "Explorer", "name": "Delete permanently"},
+    {"action": "menu", "window": "Explorer", "path": "File->Delete"},
+])
+def test_every_way_of_deleting_through_a_window_is_gated(args):
+    from src.brain.policy import classify_gesture
+
+    assert classify_gesture("ui_control", args) == "dangerous"
+
+
+def test_the_other_input_tool_is_gated_the_same_way():
+    from src.brain.policy import classify_gesture
+
+    assert classify_gesture(
+        "desktop_control", {"action": "key", "keys": "Delete"}
+    ) == "dangerous"
+
+
+@pytest.mark.parametrize("args", [
+    # Select-all is not a delete. Gating it would gate half of typing.
+    {"action": "key", "window": "Desktop - File Explorer", "keys": "Ctrl+A"},
+    {"action": "key", "window": "Notepad", "keys": "^s"},
+    {"action": "key", "window": "Steam", "keys": "{ENTER}"},
+    {"action": "click", "window": "Steam", "name": "Play"},
+    {"action": "type", "window": "Notepad", "text": "hello"},
+    {"action": "tree", "window": "Steam"},
+    {"action": "menu", "window": "Word", "path": "File->Save As"},
+    # A folder that happens to be called this is not the Delete button.
+    {"action": "click", "window": "Mail", "name": "Deleted items"},
+])
+def test_ordinary_work_is_not_gated_by_the_gesture_rule(args):
+    """A gate that asks before every click is a gate that gets turned
+    off, and then it stops nothing."""
+    from src.brain.policy import classify_gesture
+
+    assert classify_gesture("ui_control", args) == "ordinary"
+
+
+def test_a_tool_that_is_not_an_input_tool_is_left_alone():
+    from src.brain.policy import classify_gesture
+
+    assert classify_gesture("open_app", {"app": "Notepad"}) == "ordinary"
+    assert classify_gesture("powershell", {"command": "del x"}) == "ordinary"
+
+
+def test_the_gate_asks_before_a_delete_keystroke():
+    """End to end through Policy, on the surface the user speaks to."""
+    from src.brain.policy import Policy
+    from src.brain.types import Proposal, ProposalKind, Verdict
+
+    policy = Policy("full", {"ui_control"}, surface="voice")
+
+    decision = policy.evaluate(Proposal(
+        kind=ProposalKind.ACT,
+        message="press delete",
+        tool="ui_control",
+        args={"action": "key", "window": "Desktop - File Explorer",
+              "keys": "Delete"},
+    ))
+
+    assert decision.verdict is Verdict.CONFIRM
+
+
+def test_the_gate_does_not_ask_before_an_ordinary_keystroke():
+    from src.brain.policy import Policy
+    from src.brain.types import Proposal, ProposalKind, Verdict
+
+    policy = Policy("full", {"ui_control"}, surface="voice")
+
+    decision = policy.evaluate(Proposal(
+        kind=ProposalKind.ACT,
+        message="press enter",
+        tool="ui_control",
+        args={"action": "key", "window": "Steam", "keys": "{ENTER}"},
+    ))
+
+    assert decision.verdict is Verdict.AUTO
+
+
+def test_delete_where_it_lands_decides_what_it_means():
+    """Delete in a file window removes files. Delete in Notepad is the
+    key next to Backspace, and gating that would make the gate a thing
+    to be switched off."""
+    from src.brain.policy import classify_gesture
+
+    assert classify_gesture("ui_control", {
+        "action": "key", "window": "Desktop - File Explorer", "keys": "Delete",
+    }) == "dangerous"
+
+    assert classify_gesture("ui_control", {
+        "action": "key", "window": "research.txt - Notepad", "keys": "Delete",
+    }) == "ordinary"
+
+
+def test_an_unnamed_window_gets_the_careful_answer():
+    """desktop_control types into whatever has focus, and nothing here
+    knows what that is."""
+    from src.brain.policy import classify_gesture
+
+    assert classify_gesture(
+        "desktop_control", {"action": "key", "keys": "Delete"}
+    ) == "dangerous"

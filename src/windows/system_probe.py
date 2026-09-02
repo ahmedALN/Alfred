@@ -45,10 +45,95 @@ SYSTEM_QUERIES: dict[str, str] = {
         "@{N='MemoryMB';E={[math]::Round($_.WorkingSet64/1MB,1)}}, CPU | "
         "ConvertTo-Json"
     ),
+    # ----------------------------------------------------------------
+    # Everything below was a question Alfred was asked, had no query
+    # for, and answered by writing PowerShell from scratch each time.
+    # The bench caught two of them coming back as non-answers - "The
+    # provided information does not include the graphics card" - and
+    # the skill library had banked five separate learned routines that
+    # exist only because there was nothing to just ask.
+    # ----------------------------------------------------------------
+    "graphics": (
+        "Get-CimInstance Win32_VideoController | "
+        "Select-Object Name, DriverVersion, "
+        "@{N='MemoryGB';E={[math]::Round($_.AdapterRAM/1GB,1)}}, "
+        "CurrentHorizontalResolution, CurrentVerticalResolution | "
+        "ConvertTo-Json"
+    ),
+    "windows_version": (
+        "$os = Get-CimInstance Win32_OperatingSystem; "
+        "[PSCustomObject]@{ "
+        "Caption = $os.Caption; "
+        "Version = $os.Version; "
+        "Build = $os.BuildNumber; "
+        "DisplayVersion = (Get-ItemProperty "
+        r"'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' "
+        "-ErrorAction SilentlyContinue).DisplayVersion; "
+        "Architecture = $os.OSArchitecture; "
+        "InstalledOn = $os.InstallDate "
+        "} | ConvertTo-Json"
+    ),
+    "computer": (
+        "$cs = Get-CimInstance Win32_ComputerSystem; "
+        "$bios = Get-CimInstance Win32_BIOS; "
+        "[PSCustomObject]@{ "
+        "Name = $env:COMPUTERNAME; "
+        "Manufacturer = $cs.Manufacturer; "
+        "Model = $cs.Model; "
+        "TotalMemoryGB = [math]::Round($cs.TotalPhysicalMemory/1GB,1); "
+        "Serial = $bios.SerialNumber "
+        "} | ConvertTo-Json"
+    ),
+    "battery": (
+        "$b = Get-CimInstance Win32_Battery; "
+        "if ($null -eq $b) { '{\"OnBattery\": false, "
+        "\"Note\": \"no battery - this is a desktop\"}' } "
+        "else { [PSCustomObject]@{ "
+        "Percent = $b.EstimatedChargeRemaining; "
+        "MinutesRemaining = $b.EstimatedRunTime; "
+        "Status = $b.BatteryStatus "
+        "} | ConvertTo-Json }"
+    ),
+    "last_boot": (
+        "$os = Get-CimInstance Win32_OperatingSystem; "
+        "[PSCustomObject]@{ "
+        "LastBoot = $os.LastBootUpTime.ToString('yyyy-MM-dd HH:mm'); "
+        "UptimeHours = [math]::Round(((Get-Date) - "
+        "$os.LastBootUpTime).TotalHours,1) "
+        "} | ConvertTo-Json"
+    ),
+    "startup_apps": (
+        "Get-CimInstance Win32_StartupCommand | "
+        "Select-Object Name, Command, Location, User | ConvertTo-Json"
+    ),
 }
 
 
 NETWORK_QUERIES: dict[str, str] = {
+    # "What is my IP address?" is one of the most ordinary questions
+    # anybody asks a computer, and there was no query for it - the four
+    # here were ports and firewall rules. Alfred answered it by writing
+    # PowerShell from scratch each time, and the bench caught it getting
+    # that wrong: "Your local IP address is not provided in the output."
+    #
+    # Loopback and the link-local 169.254 block are filtered out: both
+    # are addresses the machine gave itself, and neither is the answer
+    # to the question.
+    "ip_addresses": (
+        "Get-NetIPAddress -AddressFamily IPv4 | "
+        "Where-Object { $_.IPAddress -notlike '127.*' "
+        "-and $_.IPAddress -notlike '169.254.*' } | "
+        "Select-Object IPAddress, InterfaceAlias, PrefixLength | "
+        "ConvertTo-Json"
+    ),
+    "adapters": (
+        "Get-NetAdapter | Where-Object Status -eq 'Up' | "
+        "Select-Object Name, InterfaceDescription, Status, "
+        "LinkSpeed, MacAddress | ConvertTo-Json"
+    ),
+    "wifi": (
+        "netsh wlan show interfaces"
+    ),
     "listening_ports": (
         "Get-NetTCPConnection -State Listen | "
         "Select-Object LocalAddress, LocalPort, "

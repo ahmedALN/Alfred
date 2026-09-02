@@ -166,6 +166,69 @@ CURRICULUM: list[dict] = [
         "goal": "Look up who won the last Formula 1 race.",
         "check": ("answer_says_something",),
     },
+    # -- media, which is most of what this machine is for ---------
+    #
+    # Everything below came out of running real requests at the real
+    # desktop. Alfred could already do them; what it could not do was
+    # do them twice without planning both times.
+    {
+        "goal": "Open Stremio.",
+        "check": ("window", "Stremio"),
+    },
+    {
+        "goal": "Open Stremio and open Breaking Bad from my continue watching list.",
+        "check": ("text_in_window", "Stremio", "breaking bad"),
+    },
+    {
+        "goal": "In Stremio, go to my Library.",
+        "check": ("text_in_window", "Stremio", "library"),
+    },
+    {
+        "goal": "Open Stremio and search for Interstellar.",
+        "check": ("text_in_window", "Stremio", "interstellar"),
+    },
+    {
+        "goal": "What is in my Stremio continue watching list?",
+        "check": ("answer_says_something",),
+    },
+    # -- games ----------------------------------------------------
+    {
+        "goal": "Open Steam and go to my Library.",
+        "check": ("window", "Steam"),
+    },
+    {
+        "goal": "Open Steam and search the store for Stardew Valley.",
+        "check": ("window", "Steam"),
+    },
+    # -- doing sums without reaching for the shell ----------------
+    {
+        "goal": "In Calculator, work out 128 times 64.",
+        "check": ("text_in_window", "Calculator", "8192"),
+        "before": ("open", "calc.exe"),
+        "after": ("close", "Calculator"),
+    },
+    # -- files ----------------------------------------------------
+    {
+        "goal": "How many files are in my Downloads folder?",
+        "check": ("answer_says_something",),
+    },
+    {
+        "goal": "What is the biggest file in my Downloads folder?",
+        "check": ("answer_says_something",),
+    },
+    # -- the machine, asked the way somebody actually asks --------
+    {
+        "goal": "Is my firewall on?",
+        "check": ("answer_says_something",),
+    },
+    {
+        "goal": "What ports are listening?",
+        "check": ("answer_says_something",),
+    },
+    {
+        "goal": "What version of Windows is this?",
+        "check": ("answer_says_something",),
+    },
 ]
 
 

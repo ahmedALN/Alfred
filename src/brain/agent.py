@@ -1470,7 +1470,7 @@ class TaskAgent:
         narrow = sub_hist if sub_hist is not None else history
         probe = self._deterministic_verify(done_when, narrow)
         if probe is not None:
-            return True, probe
+            return probe
 
         # --- model check ---------------------------------------------
         log_lines = scope[-18:]
@@ -1519,15 +1519,53 @@ class TaskAgent:
 
     def _deterministic_verify(
         self, done_when: str, history: list[str]
-    ) -> str | None:
+    ) -> tuple[bool, str] | None:
+        """Yes, no, or don't know - checked against the world where it can be.
+
+        Returns None for don't know, which sends the step to the model
+        verifier. A definite no matters as much as a definite yes: it is
+        what stops the lenient word-overlap check below agreeing with a
+        step that did something else.
+        """
         low = done_when.lower()
 
-        # file / folder existence
+        # ---- is it open? go and look -------------------------------
+        #
+        # "Open research.txt from my Desktop" was reported done after
+        # Alfred ran ui_control find, saw the filename in File
+        # Explorer's listing, and never opened anything. The words
+        # matched. The window was never there. Nothing had looked.
+        if any(
+            w in low for w in
+            ("is open", "opens", "opened", "window", "visible", "showing",
+             "on screen", "launched", "running", "in the foreground")
+        ):
+            wanted = _names_in(done_when)
+
+            if wanted:
+                titles = self._open_windows()
+
+                # Only trust an empty result as "no" if the window list
+                # itself worked - no windows at all means the reading
+                # failed, not that the desktop is empty.
+                if titles:
+                    for name in wanted:
+                        hit = [t for t in titles if name.lower() in t.lower()]
+
+                        if hit:
+                            return True, f"the window is there: {hit[0][:80]}"
+
+                    return False, (
+                        f"no window matching {', '.join(sorted(wanted))} - "
+                        "nothing was opened"
+                    )
+
+        # ---- file / folder existence -------------------------------
         if any(w in low for w in ("exist", "file", "folder", "directory", "created")):
             import re as _re
             for m in _re.findall(r"[A-Za-z]:\\[^\s'\"]+", done_when):
                 if os.path.exists(m):
-                    return f"path exists on disk: {m}"
+                    return True, f"path exists on disk: {m}"
 
         # signal-word overlap with a recent successful tool result
         signals = {
@@ -1542,8 +1580,24 @@ class TaskAgent:
                 hl = h.lower()
                 hit = sum(1 for s in signals if s in hl)
                 if hit >= max(2, len(signals) // 2):
-                    return f"a successful tool result matches: {h[:160]}"
+                    return True, f"a successful tool result matches: {h[:160]}"
         return None
+
+    def _open_windows(self) -> list[str]:
+        """The titles on screen right now, or nothing if that failed."""
+        try:
+            out = self._registry.execute("ui_control", {"action": "windows"})
+        except Exception:  # noqa: BLE001
+            return []
+
+        if not isinstance(out, dict) or out.get("status") == "error":
+            return []
+
+        return [
+            str(w.get("title") or "")
+            for w in (out.get("windows") or [])
+            if isinstance(w, dict)
+        ]
 
     def _finalize(self, result: TaskResult) -> None:
         # Compare what was verified against the CURRENT plan (replans can
@@ -1573,6 +1627,14 @@ class TaskAgent:
                     f"the last thing I tried ({acted[-1].tool}) failed"
                 )
 
+        # Read the finding out of the tool output BEFORE deciding how
+        # the task went, because for a question the finding is how it
+        # went. This used to run last, so "is there a folder on my
+        # Desktop, and what is in it?" could run four successful
+        # PowerShell calls, produce no answer whatsoever, and be
+        # reported as done.
+        result.answer = self._finding(result)
+
         if result.status in ("cancelled", "exhausted", "error"):
             base = {
                 "cancelled": "Stopped at your request",
@@ -1585,6 +1647,7 @@ class TaskAgent:
             and not shrank
             and not _ended_badly(result)
             and _answers_the_goal(result)
+            and _answered_the_question(result)
         ):
             result.status = "done"
             base = "Done"
@@ -1599,6 +1662,10 @@ class TaskAgent:
                 result.unverified.append(
                     "every step worked, but none of them was about what you "
                     "asked for - say it again and I will plan it properly"
+                )
+            if not _answered_the_question(result):
+                result.unverified.append(
+                    "I did the looking but could not get an answer out of it"
                 )
         else:
             result.status = "failed"
@@ -1616,7 +1683,6 @@ class TaskAgent:
                 "Left for you: " + "; ".join(result.skipped_confirmations) + "."
             )
         result.summary = " ".join(parts)
-        result.answer = self._finding(result)
 
     # ----------------------------------------------------------------
 
@@ -1640,21 +1706,66 @@ class TaskAgent:
         if not useful:
             return ""
 
+        # Room enough for the answer to be in there.
+        #
+        # Every step used to get 400 characters. "What is on my
+        # Desktop?" runs one Get-ChildItem over thirty-three items,
+        # which is several thousand - so the model was handed a listing
+        # cut off partway through the Bs and, correctly, said it could
+        # not answer from that. The task reported done with no finding
+        # at all: Alfred had the answer in its hand and read out the
+        # first tenth of it.
+        #
+        # The last step is the one that was asked about, so it gets the
+        # room; anything before it is context.
+        budget = 3000
+        earlier = min(len(useful) - 1, 3)
+        for_last = budget - earlier * 500
+
         trace = "\n".join(
-            f"- {s.tool}: {_short(s.result, 400)}" for s in useful
+            f"- {s.tool}: {_short(s.result, for_last if s is useful[-1] else 500)}"
+            for s in useful
         )
+        # A question that asks WHAT wants the things, not the count of
+        # them. "One short sentence" turned "what is on my Desktop?"
+        # into "your desktop has 31 items", "are there any .txt files?"
+        # into "yes, there are 2", and - because it was summarising a
+        # listing it had been told to compress - "is there a folder on
+        # my Desktop?" into a folder called Desktop, which there is not.
+        # The names were all sitting in the tool output.
+        wants_a_list = _WANTS_THE_THINGS.search(result.goal or "")
+
+        shape = (
+            "Answer with the things themselves, named. Up to ten of "
+            "them, comma-separated, most relevant first; if there are "
+            "more say how many more. Do not answer with only a count - "
+            "the count is not what was asked for."
+            if wants_a_list else
+            "Answer the request in one short sentence, as if replying "
+            "to a text message. Lead with the answer itself - yes, no, "
+            "the number, the name."
+        )
+
         prompt = (
             f"REQUEST: {result.goal}\n\nWHAT CAME BACK:\n{trace}\n\n"
-            "Answer the request in one short sentence, as if replying to "
-            "a text message. Lead with the answer itself - yes, no, the "
-            "number, the name. If what came back does not answer it, say "
-            "NOTHING." + "\n\n"
-            "Put your sentence on its own line after the word ANSWER:"
+            f"{shape} Use only what is above - do not invent a name "
+            "that is not in it.\n"
+            # An empty result is a finding, not the absence of one.
+            # "Is there a folder on my Desktop?" ran a command that
+            # succeeded and listed nothing, which is the whole answer -
+            # no - and Alfred said nothing at all, four times over.
+            "A command that ran fine and returned nothing means there "
+            "are none: say so plainly (\"no, there aren't any\") rather "
+            "than saying nothing.\n"
+            "Only if what came back genuinely cannot answer the "
+            "request - it is about something else, or it failed - say "
+            "NOTHING.\n\n"
+            "Put your answer on its own line after the word ANSWER:"
         )
         try:
             line = self._fast_chat.generate(
                 prompt, system=_THINKING_OFF, temperature=0.2,
-                max_tokens=200,
+                max_tokens=400 if wants_a_list else 200,
             ).strip()
         except Exception:  # noqa: BLE001
             return ""
@@ -1994,6 +2105,80 @@ def _answers_the_goal(result: TaskResult) -> bool:
     )
 
     return bool(wanted & _words(haystack))
+
+
+# Capitalised words that begin a sentence rather than name a program.
+_NOT_A_NAME = {
+    "the", "then", "when", "and", "but", "this", "that", "these", "those",
+    "open", "opens", "opened", "window", "windows", "visible", "showing",
+    "running", "launched", "file", "folder", "there", "after", "once",
+    "user", "alfred", "desktop", "screen", "text", "content", "contents",
+    "its", "should", "must", "will", "shows", "displayed", "confirm",
+}
+
+
+# A request that wants the things, not a tally of them.
+_WANTS_THE_THINGS = re.compile(
+    r"\bwhat(?:'s| is| are)?\s+(?:on|in|inside|under|there)\b|"
+    r"\bwhat\s+\w*\s*(?:files?|folders?|apps?|programs?|shortcuts?|"
+    r"windows?|items?|documents?|photos?|videos?)\b|"
+    r"\bwhich\b|\blist\b|\bshow me\b|\bname the\b|"
+    r"\bare there any\b|\banything\b|\bwhat else\b|"
+    r"\bcontents? of\b|\bwhat do I have\b",
+    re.I,
+)
+
+
+def _names_in(text: str) -> set[str]:
+    """The things a done_when sentence names, for looking up on screen.
+
+    Quoted names, filenames with an extension, and Capitalised words -
+    between them that covers "research.txt is open", "the 'Save As'
+    window appears" and "Notepad is showing the text".
+    """
+
+    names: set[str] = set()
+
+    names.update(re.findall(r"['\"]([^'\"]{2,40})['\"]", text))
+    names.update(re.findall(r"\b([\w-]+\.[a-z]{2,4})\b", text, re.I))
+    names.update(
+        word for word in re.findall(r"\b([A-Z][\w+.-]{2,25})\b", text)
+        if word.lower() not in _NOT_A_NAME
+    )
+
+    return {name.strip() for name in names if name.strip()}
+
+
+# A goal that is asking something, rather than telling Alfred to do
+# something.
+_A_QUESTION = re.compile(
+    r"^\s*(what|which|who|whose|where|when|why|how|is|are|was|were|do|"
+    r"does|did|can|could|will|would|should|have|has|am|any)\b",
+    re.I,
+)
+
+
+def _was_a_question(goal: str) -> bool:
+    text = (goal or "").strip()
+    return text.endswith("?") or bool(_A_QUESTION.match(text))
+
+
+def _answered_the_question(result: TaskResult) -> bool:
+    """If it was asked something, did it come back with anything?
+
+    "Is there a folder on my Desktop, and what is in it?" ran four
+    PowerShell calls, every one of them successful, produced no finding
+    at all, and reported done. Every step verified, so nothing
+    downstream had any reason to doubt it - and the user is told the
+    question has been looked into and not what the answer is.
+
+    Done is for a question that got an answer.
+    """
+
+    if not _was_a_question(result.goal):
+        return True
+
+    return bool((result.answer or "").strip())
 
 
 def _ended_badly(result: TaskResult) -> bool:

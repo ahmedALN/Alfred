@@ -205,3 +205,221 @@ def test_a_tool_name_comes_apart_into_words():
     from src.brain.agent import _words
 
     assert {"system", "info"} <= _words("Run system_info to get RAM.")
+
+
+# ====================================================================
+# Finding a thing is not opening it
+# ====================================================================
+
+
+class _Screen:
+    """A registry that answers ui_control windows and nothing else."""
+
+    def __init__(self, titles):
+        self.titles = list(titles)
+        self.asked = 0
+
+    def execute(self, name, args):
+        assert name == "ui_control"
+        self.asked += 1
+        return {
+            "status": "success",
+            "windows": [{"title": t} for t in self.titles],
+        }
+
+
+def _verifier(titles):
+    from src.brain.agent import TaskAgent
+
+    agent = TaskAgent.__new__(TaskAgent)
+    agent._registry = _Screen(titles)
+    agent._VERIFY_STOP = TaskAgent._VERIFY_STOP
+    return agent
+
+
+def test_a_window_that_is_not_there_is_a_definite_no():
+    """The real run: "Open research.txt from my Desktop." Alfred ran
+    ui_control find, saw the filename inside File Explorer's listing,
+    opened nothing, and reported done. The words matched; the window
+    was never there; nothing had looked."""
+    agent = _verifier(["Desktop - File Explorer", "Alfred"])
+
+    ok, why = agent._deterministic_verify(
+        "research.txt is open in a text editor",
+        ["ui_control({'action': 'find'}) -> ok: found research.txt"],
+    )
+
+    assert ok is False
+    assert "nothing was opened" in why
+
+
+def test_a_window_that_is_there_is_a_definite_yes():
+    agent = _verifier(["research.txt - Notepad", "Alfred"])
+
+    ok, why = agent._deterministic_verify("research.txt is open", [])
+
+    assert ok is True
+    assert "research.txt - Notepad" in why
+
+
+def test_it_looks_for_a_program_by_name_too():
+    agent = _verifier(["Spotify Premium"])
+
+    ok, _why = agent._deterministic_verify("the Spotify window is open", [])
+    assert ok is True
+
+    agent = _verifier(["Desktop - File Explorer"])
+    ok, _why = agent._deterministic_verify("the Spotify window is open", [])
+    assert ok is False
+
+
+def test_an_unreadable_screen_is_not_read_as_an_empty_one():
+    """No windows at all means the reading failed, not that the
+    desktop is bare - and a failed reading must not become a verdict."""
+
+    class _Broken:
+        def execute(self, name, args):
+            raise RuntimeError("the accessibility layer is down")
+
+    from src.brain.agent import TaskAgent
+
+    agent = TaskAgent.__new__(TaskAgent)
+    agent._registry = _Broken()
+    agent._VERIFY_STOP = TaskAgent._VERIFY_STOP
+
+    assert agent._deterministic_verify("Notepad is open", []) is None
+
+
+def test_a_done_when_naming_nothing_is_left_to_the_model():
+    agent = _verifier(["Notepad"])
+
+    assert agent._deterministic_verify("the window is open", []) is None
+
+
+def test_a_step_that_is_not_about_opening_does_not_go_looking():
+    agent = _verifier(["Notepad"])
+
+    agent._deterministic_verify("the total is written down", [])
+
+    assert agent._registry.asked == 0
+
+
+# ====================================================================
+# Asked a question, done means answered
+# ====================================================================
+
+
+def _finalized(goal, verified, answer, steps=()):
+    from src.brain.agent import TaskAgent, TaskResult
+
+    agent = TaskAgent.__new__(TaskAgent)
+    agent._limitations = None
+    agent._plan_chat = None
+    agent._first_plan_len = len(verified)
+    agent._finding = lambda _r: answer
+
+    r = TaskResult(
+        goal=goal, status="running", summary="",
+        plan=list(verified), verified=list(verified), steps=list(steps),
+    )
+    agent._finalize(r)
+    return r
+
+
+def test_a_question_with_no_answer_is_not_done():
+    """The real run. "Is there a folder on my Desktop, and what is in
+    it?" ran four PowerShell calls, every one successful, produced no
+    finding at all, and was reported as done - so the user is told the
+    question has been looked into, and never what the answer is."""
+    r = _finalized(
+        "Is there a folder on my Desktop, and what is in it?",
+        ["Run PowerShell to list folders on Desktop and their contents"],
+        answer="",
+    )
+
+    assert r.status == "partial"
+    assert any("could not get an answer" in u for u in r.unverified)
+
+
+def test_a_question_with_an_answer_is_done():
+    r = _finalized(
+        "Is there a folder on my Desktop, and what is in it?",
+        ["Run PowerShell to list folders on Desktop"],
+        answer='Yes - "New folder", which is empty.',
+    )
+
+    assert r.status == "done"
+
+
+def test_an_instruction_needs_no_answer_to_be_done():
+    """"Open Notepad" is finished when Notepad is open, and has no
+    finding to report."""
+    r = _finalized("Open Notepad.", ["Open Notepad."], answer="")
+
+    assert r.status == "done"
+
+
+@pytest.mark.parametrize("goal", [
+    "What is on my Desktop?",
+    "Is there a folder on my Desktop?",
+    "How many files are in Downloads",
+    "Are there any .txt files on my Desktop?",
+    "which games do I have",
+    "Does Steam start with Windows?",
+])
+def test_these_read_as_questions(goal):
+    from src.brain.agent import _was_a_question
+
+    assert _was_a_question(goal)
+
+
+@pytest.mark.parametrize("goal", [
+    "Open Notepad.",
+    "Make a folder called Projects on my Desktop.",
+    "Close Notepad without saving.",
+    "Move the screenshots into a folder.",
+    "Play a Drake song on Spotify.",
+])
+def test_these_read_as_instructions(goal):
+    from src.brain.agent import _was_a_question
+
+    assert not _was_a_question(goal)
+
+
+# ====================================================================
+# A question that asks WHAT wants the things, not the count
+# ====================================================================
+
+
+@pytest.mark.parametrize("goal", [
+    "What is on my Desktop?",
+    "Are there any .txt files on my Desktop?",
+    "Is there a folder on my Desktop, and what is in it?",
+    "What files are in my Downloads folder?",
+    "Which games are on my Desktop?",
+    "List the shortcuts on my Desktop",
+    "Show me what is in that folder",
+    "What apps start automatically with Windows?",
+])
+def test_a_request_for_the_things_is_recognised(goal):
+    """Answered as one short sentence, "what is on my Desktop?" came
+    back as "your desktop has 31 items" - a tally of the answer instead
+    of the answer, with every name sitting in the tool output."""
+    from src.brain.agent import _WANTS_THE_THINGS
+
+    assert _WANTS_THE_THINGS.search(goal)
+
+
+@pytest.mark.parametrize("goal", [
+    "How many files are on my Desktop?",
+    "What is the biggest file on my Desktop?",
+    "How much space is my Desktop folder using?",
+    "What version of Windows is this?",
+    "What is my local IP address?",
+    "What did I most recently add to my Desktop?",
+    "Open Notepad.",
+])
+def test_a_request_for_one_fact_is_left_alone(goal):
+    from src.brain.agent import _WANTS_THE_THINGS
+
+    assert not _WANTS_THE_THINGS.search(goal)

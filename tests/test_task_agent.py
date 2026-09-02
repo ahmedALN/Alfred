@@ -56,7 +56,16 @@ def test_plans_then_executes_then_verifies_every_step():
     assert result.verified == ["open Spotify", "play the top track"]
     assert result.unverified == []
     assert "Done" in result.summary
-    assert [c[0] for c in reg.executed] == ["ui_control", "ui_control"]
+
+    # Two steps' worth of work, and the verifier going to look at the
+    # screen for the one whose done_when says a window exists. Checking
+    # "Spotify window exists" by reading the log rather than the
+    # desktop is how "open research.txt" came to be reported done after
+    # merely finding the filename in a folder listing.
+    assert [s.tool for s in result.steps if s.tool] == [
+        "ui_control", "ui_control"
+    ]
+    assert {"action": "windows"} in [c[1] for c in reg.executed]
 
 
 def test_unverified_step_is_never_reported_done():

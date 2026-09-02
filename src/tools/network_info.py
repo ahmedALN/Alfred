@@ -15,14 +15,19 @@ class NetworkInfoTool(AlfredTool):
     name = "network_info"
 
     description = (
-        "Get structured information about this machine's network and "
-        "firewall state. Use 'blocked_inbound_rules' for questions "
-        "like 'what ports are blocked on my firewall', "
-        "'allowed_inbound_rules' for what's explicitly allowed in, "
-        "'listening_ports' for what's actually open and listening "
-        "right now (with the owning process), and "
-        "'firewall_profile_status' for whether the firewall itself "
-        "is on and its default policy per network profile."
+        "This machine's network and firewall state, structured. "
+        "'ip_addresses' for 'what is my IP' / 'what is my local "
+        "address' - IPv4 per adapter, with loopback and self-assigned "
+        "addresses left out. 'adapters' for which network connections "
+        "are up, and how fast. 'wifi' for whether wifi is connected "
+        "and to which network, with signal strength. "
+        "'listening_ports' for what is actually open and listening "
+        "right now, with the process that owns it. "
+        "'blocked_inbound_rules' for 'what ports are blocked on my "
+        "firewall', 'allowed_inbound_rules' for what is explicitly "
+        "allowed in, and 'firewall_profile_status' for whether the "
+        "firewall is on and its default policy per profile. "
+        "Prefer this over writing PowerShell for any of them."
     )
 
     @property
