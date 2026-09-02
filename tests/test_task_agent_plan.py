@@ -242,3 +242,52 @@ def test_rejects_tool_syntax_and_micro_actions_as_plan_steps():
          "done_when": "ui_control get shows 'hello' in the editor"},
     ]
     assert agent._plan_ok(good, "type hello in notepad") is True
+
+
+def test_a_steer_redoes_the_plan_rather_than_advising_the_next_step():
+    """Told "on my desktop" mid-search, Alfred kept searching the web.
+
+    The plan was "search the web for how to fish". The steer arrived,
+    was accepted - "Right, on the desktop instead" - and the task then
+    ran the REST OF THE OLD PLAN anyway and handed back a fishing guide
+    from Angling Times. The person had to ask again from scratch.
+
+    A steer only forced a replan when a step FAILED. A job that was
+    working fine ran to the end answering the question the person had
+    already moved on from.
+    """
+    chat = DispatchChat(
+        plan=[
+            [{"step": "Search the web for how to fish",
+              "done_when": "results come back"},
+             {"step": "Read the fishing guide back out",
+              "done_when": "the text is returned"}],
+            [{"step": "Open How to Fish from the desktop",
+              "done_when": "open_app returns success"}],
+        ],
+        steps={
+            "Search the web": [_use("powershell", {"command": "lookup"})],
+            "Read the fishing guide": [_use("system_info", {})],
+            "Open How to Fish": [_use("open_app", {"app": "How to Fish"})],
+        },
+        verify=True,
+    )
+    reg = FakeRegistry()
+
+    # Silence while step 1 runs, then the correction - exactly when it
+    # arrived in the real conversation.
+    pending = [[], ["on my desktop"]]
+    agent = _agent2(chat, reg)
+    agent.run("open how to fish", source="voice",
+              steers=lambda: pending.pop(0) if pending else [])
+
+    tools = [name for name, _ in reg.executed]
+
+    assert "open_app" in tools, (
+        "after being told 'on my desktop' it should have opened the "
+        f"desktop item; it ran {tools}"
+    )
+    assert "system_info" not in tools, (
+        "the rest of the old plan answers the question the person had "
+        f"already moved on from; it ran {tools}"
+    )

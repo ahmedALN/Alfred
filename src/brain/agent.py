@@ -451,11 +451,46 @@ class TaskAgent:
         pi = 0
         total_calls = 0
         dead_streak = 0  # consecutive steps that made zero progress
+        heard_at_plan = len(self._said_since)
+        steer_replans = 0
 
         while pi < len(plan):
             if self._cancel_check():
                 result.status = "cancelled"
                 break
+
+            # Someone spoke while this was running. Until now that only
+            # reached a replan if a step FAILED - so a job that was
+            # working fine ran to the end answering the question the
+            # person had already moved on from. "open how to fish" ->
+            # "on my desktop" still returned a fishing article, because
+            # the search step succeeded and nothing reconsidered it.
+            self._heard()
+            if len(self._said_since) > heard_at_plan and steer_replans < 2:
+                steer_replans += 1
+                heard_at_plan = len(self._said_since)
+                said = chr(10).join(self._said_since[-3:])
+                self._log(
+                    "task_steered",
+                    {"goal": goal, "said": said, "was_on_step": pi},
+                    session_id,
+                )
+                remainder = self._make_plan(goal, extra=(
+                    f"Done so far: {result.verified or 'nothing'}. "
+                    f"THE USER HAS SINCE SAID: {said} "
+                    "They said it while this was running, so it comes "
+                    "AFTER the plan and overrides it. Re-plan what is "
+                    "left around what they said - if the remaining "
+                    "steps answer the wrong question now, drop them."))
+                if remainder:
+                    plan = remainder
+                    pi = 0
+                    dead_streak = 0
+                    result.plan = [st["step"] for st in plan]
+                    self._log(
+                        "task_plan", {"goal": goal, "plan": plan}, session_id
+                    )
+                    continue
             if time.monotonic() > self._deadline:
                 result.status = "exhausted"
                 break

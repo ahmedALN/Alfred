@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import shlex
 import subprocess
@@ -103,6 +104,24 @@ class AppLaunchResult:
         return asdict(self)
 
 
+
+# Words that carry no identity. "how to fish" and "Click to Do" share
+# only "to", and that was once enough to call them the same app.
+_NOISE = {
+    "the", "a", "an", "to", "of", "for", "and", "or", "my", "your",
+    "in", "on", "at", "it", "is", "app", "application", "exe",
+    "shortcut", "launcher", "game",
+}
+
+
+def _meaningful(text: str) -> set[str]:
+    """The words in a name that actually identify it."""
+    return {
+        w for w in re.split(r"[^a-z0-9]+", (text or "").lower())
+        if w and w not in _NOISE
+    }
+
+
 class AppLauncher:
     """
     Resolve an app by natural name and launch it, fast.
@@ -197,7 +216,9 @@ class AppLauncher:
         self._start_apps_cache = apps
         return apps
 
-    def _match_start_app(self, query: str) -> dict[str, str] | None:
+    def _match_start_app(
+        self, query: str, strong_only: bool = False
+    ) -> dict[str, str] | None:
         q = query.strip().lower()
         apps = self._get_start_apps()
         if not apps:
@@ -215,14 +236,29 @@ class AppLauncher:
         if contains:
             return min(contains, key=lambda a: len(a["name"]))
 
-        # token overlap (e.g. "vs code" -> "Visual Studio Code")
-        q_tokens = set(q.split())
+        if strong_only:
+            return None
+
+        # Token overlap, e.g. "vs code" -> "Visual Studio Code". This is
+        # the weakest rule and used to be the loosest thing in Alfred:
+        # any ONE shared word was a match, so "how to fish" matched
+        # "Click to Do" on the word "to" and Alfred tried to launch a
+        # Windows AI feature instead of the game on the desktop. The
+        # user got "Click to Do isn't available on this device".
+        q_tokens = _meaningful(q)
+        if not q_tokens:
+            return None
+
         scored = [
-            (len(q_tokens & set(a["name"].lower().split())), a)
+            (len(q_tokens & _meaningful(a["name"])), a)
             for a in apps
         ]
         best_score, best = max(scored, key=lambda p: p[0])
-        return best if best_score else None
+
+        # Most of what was asked for has to be there, not a stray word.
+        if best_score < max(1, (len(q_tokens) + 1) // 2):
+            return None
+        return best
 
     def _find_shortcut(self, query: str) -> Path | None:
         q = query.strip().lower()
@@ -279,14 +315,24 @@ class AppLauncher:
             if aliased.lower() in _SYSTEM_EXES:
                 return LaunchSpec("exe", aliased, raw)
 
-        # Everything else: ask Windows what it can launch.
-        match = self._match_start_app(raw)
+        # Ask Windows what it can launch - but only on a match worth
+        # having: exact, prefix, or substring.
+        match = self._match_start_app(raw, strong_only=True)
         if match:
             return LaunchSpec("appsfolder", match["appid"], match["name"])
 
+        # Then the desktop and Start menu shortcuts. This comes BEFORE
+        # the fuzzy fallback now: a game sitting on the desktop under
+        # very nearly the name that was asked for should not lose to a
+        # Start-menu entry that happens to share a preposition.
         shortcut = self._find_shortcut(raw)
         if shortcut:
             return LaunchSpec("shortcut", str(shortcut), shortcut.stem)
+
+        # Last: the loose token match.
+        match = self._match_start_app(raw)
+        if match:
+            return LaunchSpec("appsfolder", match["appid"], match["name"])
 
         which = shutil.which(raw) or shutil.which(raw + ".exe")
         if which:
