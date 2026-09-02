@@ -494,6 +494,18 @@ function drawTasks() {
   })).join("") : empty("nothing has been asked of it yet");
 }
 
+
+/** "every weekdays" is not a thing anybody says. */
+function howOften(a) {
+  const r = (a.repeat || "").toLowerCase();
+  if (!r) return "once";
+  if (r === "weekdays") return "every weekday";
+  if (r === "daily" || r === "day") return "every day";
+  if (r === "weekly" || r === "week") return "every week";
+  if (r === "hourly" || r === "hour") return "every hour";
+  return `every ${r}`;
+}
+
 function drawAutos() {
   const autos = app.data.automations || [];
 
@@ -501,9 +513,10 @@ function drawAutos() {
     id: `auto-${a.id}`,
     title: esc(a.goal || a.said),
     meta: bits(
-      a.repeat ? `every ${esc(a.repeat)}` : "once",
+      esc(howOften(a)),
       when(a.due),
-      a.runs ? `run ${a.runs} times` : "not run yet",
+      a.runs === 1 ? "run once"
+        : a.runs ? `run ${a.runs} times` : "not run yet",
       a.enabled ? null : '<span class="tag">off</span>',
     ),
     detail: a.said && a.said !== a.goal ? `you said: ${esc(a.said)}` : "",
