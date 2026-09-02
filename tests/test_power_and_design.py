@@ -212,3 +212,83 @@ def test_a_line_is_scrubbed_wherever_the_number_sits():
 def test_things_that_are_not_phone_numbers_are_left_alone():
     assert mask("") == ""
     assert mask("1234") == "1234"
+
+
+# ----------------------------------------------------------------- weather
+
+
+class _Sky:
+    """Open-Meteo, without the internet."""
+
+    def __init__(self, found=True):
+        self.found = found
+        self.asked: list[str] = []
+
+    def __call__(self, url, params, timeout=15.0):
+        if "geocoding" in url:
+            self.asked.append(params["name"])
+            if not self.found or params["name"].lower() not in ("sana'a", "bangkok"):
+                return {"results": []}
+            return {"results": [{"name": "Sana'a", "country": "Yemen",
+                                 "latitude": 15.35, "longitude": 44.2}]}
+        return {"current": {"temperature_2m": 22.6, "apparent_temperature": 21.0,
+                            "relative_humidity_2m": 40, "wind_speed_10m": 4.3,
+                            "weather_code": 0}}
+
+
+def test_the_weather_comes_back_as_a_number():
+    """Searching for it returned a page of navigation.
+
+    "Bangkok Thailand degC degF Bangkok ForecastDaily forecastToday" is
+    what a plain fetch gets from a weather site, because the numbers
+    arrive by JavaScript. So this asks somewhere that answers in JSON.
+    """
+    from src.tools.weather import WeatherTool
+
+    out = WeatherTool(fetch=_Sky()).execute({"action": "now", "place": "Sana'a"})
+    assert out["status"] == "success"
+    assert out["temperature_c"] == 23
+    assert out["sky"] == "clear"
+    assert "23" in out["said"]
+
+
+def test_a_country_said_with_the_city_still_finds_it():
+    """The user typed "yemen sana'a" and was told it does not exist."""
+    from src.tools.weather import WeatherTool
+
+    sky = _Sky()
+    out = WeatherTool(fetch=sky).execute({"action": "now", "place": "yemen sana'a"})
+
+    assert out["status"] == "success"
+    # It tried the whole thing first, then dropped the leading word.
+    assert sky.asked[0] == "yemen sana'a"
+    assert "sana'a" in [a.lower() for a in sky.asked]
+
+
+def test_the_city_is_looked_for_before_the_country():
+    from src.tools.weather import _candidates
+
+    tries = _candidates("yemen sana'a")
+    assert tries[0] == "yemen sana'a"
+    assert tries.index("sana'a") < tries.index("yemen")
+
+
+def test_a_place_that_does_not_exist_says_so():
+    from src.tools.weather import WeatherTool
+
+    out = WeatherTool(fetch=_Sky(found=False)).execute(
+        {"action": "now", "place": "Xyzzyville"})
+    assert out["status"] == "not_found"
+
+
+def test_it_needs_somewhere_to_look():
+    from src.tools.weather import WeatherTool
+
+    assert WeatherTool(fetch=_Sky()).execute({"action": "now"})["status"] == "error"
+
+
+def test_the_sky_is_described_in_words_not_wmo_codes():
+    from src.tools.weather import _SKY
+
+    assert _SKY[0] == "clear"
+    assert _SKY[95] == "thunderstorms"

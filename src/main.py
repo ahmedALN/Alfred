@@ -23,6 +23,7 @@ from src.brain.audit import AuditLog
 from src.brain.deliberation import Deliberator
 from src.tools.interface_tool import InterfaceTool
 from src.tools.power import PowerTool
+from src.tools.weather import WeatherTool
 from src.tools.skill_tool import SkillTool
 from src.brain.orchestrator import BrainLoop
 from src.brain.agent import TaskAgent
@@ -432,6 +433,7 @@ async def main() -> None:
         task_status_tool,
         InterfaceTool(),
         PowerTool(),
+        WeatherTool(),
         EpisodesTool(episode_store),
         ResourceModeTool(resource_mode),
         WhatCanYouDoTool(

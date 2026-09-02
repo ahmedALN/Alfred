@@ -126,7 +126,12 @@ class WebTool(AlfredTool):
                     }
 
                 read: dict[str, Any] = {}
-                for hit in hits[:2]:
+                # Four, not two. Weather and news sites at the top of a
+                # result list are exactly the ones that turn away a
+                # plain fetch, and giving up after two left Alfred
+                # holding snippets that answered the question while it
+                # reported that it could not find anything.
+                for hit in hits[:4]:
                     try:
                         page = web.fetch(hit["url"], max_chars=4000)
                     except Exception:  # noqa: BLE001
@@ -147,6 +152,17 @@ class WebTool(AlfredTool):
                          "snippet": h["snippet"]}
                         for h in hits if h["url"] != read.get("from")
                     ][:4],
+                    # Said out loud when no page could be opened, because
+                    # an empty "page" read as "nothing found" - and the
+                    # snippets underneath it often hold the answer.
+                    "note": (
+                        ""
+                        if read else
+                        "No page could be read - several sites refuse "
+                        "automated fetches. Answer from the snippets in "
+                        "other_results if they say enough; only say you "
+                        "could not find it if they do not."
+                    ),
                     "instruction": _UNTRUSTED,
                 }
 
