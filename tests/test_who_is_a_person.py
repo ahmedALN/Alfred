@@ -90,3 +90,44 @@ def test_a_deadline_that_has_passed_stops_being_part_of_your_life(tmp_path):
                       due=now - timedelta(days=40)), now - timedelta(days=40))
     assert world.forget_stale(days=30, now=now) == 1
     assert world.all_open() == []
+
+
+def test_the_world_is_a_picture_of_now_and_actually_forgets(tmp_path):
+    """forget_stale existed from day one and nothing ever called it.
+
+    Every passed deadline and every person who went quiet stayed for
+    good, so the brief that makes Alfred proactive slowly filled with
+    things that had stopped being true.
+    """
+    from src.main import _refresh_world_and_forget
+
+    world = World(tmp_path / "w.sqlite3")
+    long_ago = datetime(2026, 1, 1, 12, 0)
+
+    world.note(Matter(kind="person", name="Someone Forgotten",
+                      source="mail"), long_ago)
+    world.note(Matter(kind="due", name="an essay from January",
+                      source="classroom", due=long_ago), long_ago)
+    assert len(world.all_open()) == 2
+
+    # A refresh with no sources at all: nothing new arrives, and the
+    # stale things should still go.
+    _refresh_world_and_forget(world, None, None, None, None)
+
+    assert world.all_open() == []
+
+
+def test_forgetting_does_not_touch_something_still_due(tmp_path):
+    from src.main import _refresh_world_and_forget
+
+    world = World(tmp_path / "w.sqlite3")
+    old_but_pending = datetime.now() + timedelta(days=5)
+
+    world.note(Matter(kind="due", name="a deadline next week",
+                      source="calendar", due=old_but_pending),
+               datetime.now() - timedelta(days=90))
+
+    _refresh_world_and_forget(world, None, None, None, None)
+
+    # Quiet for ninety days, but it has not happened yet.
+    assert [m["name"] for m in world.all_open()] == ["a deadline next week"]

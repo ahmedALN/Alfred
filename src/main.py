@@ -239,6 +239,30 @@ def _build_phone_channel(
     return router
 
 
+
+def _refresh_world_and_forget(world, classroom, diary, mail, activity) -> dict:
+    """Take a new picture, and drop what is no longer in it.
+
+    World.forget_stale existed from the day the world model did, with a
+    docstring explaining that this is a picture of now rather than an
+    archive - and nothing ever called it. Every deadline that passed
+    and every person who went quiet stayed for good, so the brief that
+    makes Alfred proactive slowly filled with things that had stopped
+    being true.
+    """
+    counted = refresh_world(
+        world, classroom=classroom, calendar=diary,
+        mail=mail, activity=activity,
+    )
+    try:
+        gone = world.forget_stale()
+        if gone:
+            print(f"[World] forgot {gone} thing(s) nobody has mentioned in a month.")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[World] could not forget stale things: {exc}")
+    return counted
+
+
 async def main() -> None:
     configure_logging()
     settings = load_settings()
@@ -759,9 +783,8 @@ async def main() -> None:
         watchers.append(MailCollector(mail))
         watchers.append(WorldCollector(
             world,
-            refresh=lambda: refresh_world(
-                world, classroom=classroom, calendar=diary,
-                mail=mail, activity=activity,
+            refresh=lambda: _refresh_world_and_forget(
+                world, classroom, diary, mail, activity
             ),
         ))
         if watching():

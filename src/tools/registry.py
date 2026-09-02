@@ -41,7 +41,20 @@ class ToolRegistry:
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
         tool = self.get(name)
-        return tool.execute(arguments)
+        try:
+            return tool.execute(arguments)
+        except ValueError as exc:
+            # Most tools answer a bad argument with an error dict; three
+            # of the most-used ones - powershell, system_info,
+            # network_info - raise instead. The caller then reads
+            # "ValueError: 'query' must be one of [...]", where the type
+            # name is noise in front of the only useful part.
+            #
+            # A ValueError from a tool is the tool complaining about its
+            # arguments, which is something the model can act on. Any
+            # other exception is a fault, and keeps its type so it is
+            # not mistaken for one.
+            return {"status": "error", "error": str(exc)}
 
     def gemini_declarations(self) -> list[dict[str, Any]]:
         """
