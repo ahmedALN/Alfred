@@ -7,7 +7,12 @@ from pathlib import Path
 
 from src.logging_setup import configure_logging
 
-configure_logging()
+# NOT called here. configure_logging() replaces the process's stdout
+# with a tee into logs/alfred.log, and doing that at import time meant
+# every test run, every CLI tool and every "import src.main" to check
+# something appended its output to the running Alfred's log - which is
+# how a lint check ended up in the middle of a voice session's record.
+# Importing a module should not redirect the program's output.
 
 _ROOT = Path(__file__).resolve().parent.parent
 
@@ -235,6 +240,7 @@ def _build_phone_channel(
 
 
 async def main() -> None:
+    configure_logging()
     settings = load_settings()
 
     # Alfred already narrates itself to the terminal in detail, and

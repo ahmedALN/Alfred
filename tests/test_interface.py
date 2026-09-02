@@ -440,3 +440,69 @@ def test_hiding_a_window_that_is_not_there_is_not_an_error(monkeypatch):
     out = opener.hide_interface()
     assert out["status"] == "success"
     assert out["what"] == "was not open"
+
+
+# ------------------------------------------------------------- escaping
+
+
+def test_model_written_content_is_never_dropped_into_the_page_raw():
+    """The window renders text Alfred wrote, and has full API access.
+
+    Memories, skill templates, task goals, limitation details and log
+    lines are all written by a model or copied from the machine. Any
+    one of them reaching innerHTML unescaped is stored XSS on a page
+    that can read the user's mail and delete what Alfred believes.
+
+    Verified live once with an <img onerror> payload - it rendered as
+    text. This keeps it that way: the risky fields must never appear
+    inside a template literal without esc() around them.
+    """
+    import pathlib
+    import re
+
+    source = (
+        pathlib.Path(__file__).resolve().parent.parent
+        / "src" / "ui" / "static" / "app.js"
+    ).read_text(encoding="utf-8")
+
+    risky = [
+        "f.content", "s.template", "s.name", "t.goal", "t.summary",
+        "l.detail", "l.signature", "m.name", "m.detail", "l.line",
+        "a.goal", "a.said", "m.text", "w.title",
+    ]
+
+    def emits_the_value(expr: str) -> bool:
+        """Would this interpolation put the field's own text on the page?
+
+        Two shapes provably would not, and both are in use: a regex
+        .test() choosing a CSS class, and a ternary between two string
+        literals. Neither carries the field's characters through.
+        """
+        if "esc(" in expr:
+            return False
+        if ".test(" in expr or ".includes(" in expr:
+            return False
+        return True
+
+    unescaped = []
+    for field in risky:
+        for match in re.finditer(r"\$\{([^}]*" + re.escape(field) + r"[^}]*)\}",
+                                 source):
+            expr = match.group(1)
+            # row() escapes whatever it is handed as an id, so building
+            # one out of a field is safe - but only the id line itself.
+            # Looking backwards a fixed number of characters caught the
+            # PREVIOUS property (`id: `fact-${f.id}`,`) and skipped the
+            # real mistake on the line after it.
+            start = source.rfind("\n", 0, match.start()) + 1
+            this_line = source[start:source.find("\n", match.start())]
+            if this_line.lstrip().startswith("id:"):
+                continue
+            if emits_the_value(expr):
+                line = source[:match.start()].count("\n") + 1
+                unescaped.append(f"{field} at line {line}: ${{{expr[:60]}}}")
+
+    assert not unescaped, (
+        "content Alfred wrote is being put into the page unescaped:\n  "
+        + "\n  ".join(unescaped)
+    )
