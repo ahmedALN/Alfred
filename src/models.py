@@ -7,21 +7,33 @@ any good" is a question about models, and it changes every time a free
 tier is spent or a provider has a bad afternoon.
 
     python -m src.models              time the chain Alfred is using
+    python -m src.models add groq <key>
+                                      measure a provider's models, keep
+                                      the best, and wire it in
     python -m src.models try <base_url> <key> <model>
-                                      time a provider you are thinking
-                                      about, before wiring it in
+                                      time one model, change nothing
 
-Both send the same planner-sized prompt Alfred really sends - a tool
-catalogue, an environment block and a goal - because a model that
+All of them send the same planner-sized prompt Alfred really sends - a
+tool catalogue, an environment block and a goal - because a model that
 answers "say ready" in half a second may take thirty on the real thing.
 gemini-flash-lite did exactly that here: 1.4s at the median and 31.8s
 on the first call after a pause.
 
-Nothing here is written down and nothing is changed. It prints numbers.
+`add` knows the endpoints for groq, cerebras, openrouter, together,
+mistral and nvidia, and takes a base URL for anything else. It asks the
+provider what models it serves rather than trusting a name written down
+months ago, times the plausible ones, and keeps the fastest that
+produces an actual plan - a model that answers instantly by echoing the
+template back is not a fast model, and one of NVIDIA's does exactly
+that. It writes ALFRED_OPENAI<N>_* into .env and puts the new rung in
+the chain; a key that does not work changes nothing.
+
+`add` is the only one that writes anything. The rest print numbers.
 """
 
 from __future__ import annotations
 
+import re
 import sys
 import time
 
@@ -151,12 +163,232 @@ def time_a_candidate(base_url: str, key: str, model: str) -> int:
     return 0
 
 
+# ====================================================================
+# Adding a provider
+#
+# The endpoints are stable and public; which models each one serves is
+# not, and neither is which of them is any good at planning. So this
+# asks the provider what it has, times the plausible ones on the real
+# prompt, and keeps the fastest that produces an actual plan - rather
+# than trusting a model name written down months ago.
+# ====================================================================
+
+KNOWN_PROVIDERS: dict[str, str] = {
+    "groq": "https://api.groq.com/openai/v1",
+    "cerebras": "https://api.cerebras.ai/v1",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "together": "https://api.together.xyz/v1",
+    "mistral": "https://api.mistral.ai/v1",
+    "nvidia": "https://integrate.api.nvidia.com/v1",
+}
+
+# Models that are not for this. Planning wants an instruction-following
+# chat model; everything here is a different job wearing the same API.
+_NOT_A_PLANNER = re.compile(
+    r"whisper|tts|audio|speech|embed|rerank|moderat|guard|safety|"
+    r"vision|image|diffus|video|code(?!stral)|prompt-guard|"
+    r"nemoguard|parse|reward",
+    re.I,
+)
+
+# Preferred when choosing what to time first: small and instant beats
+# large and thorough for a planner, and a name saying so is a good clue.
+_LOOKS_QUICK = re.compile(r"instant|fast|lite|mini|flash|8b|7b|9b|small", re.I)
+
+
+def _list_models(base_url: str, key: str) -> list[str]:
+    import json
+    import urllib.request
+
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}/models",
+        headers={"Authorization": f"Bearer {key}"},
+    )
+
+    with urllib.request.urlopen(request, timeout=30) as response:
+        payload = json.loads(response.read())
+
+    return sorted(
+        str(entry.get("id", ""))
+        for entry in payload.get("data", [])
+        if entry.get("id")
+    )
+
+
+def _worth_timing(models: list[str], limit: int = 6) -> list[str]:
+    """The handful worth spending a measurement on."""
+    usable = [m for m in models if not _NOT_A_PLANNER.search(m)]
+
+    # Quick-sounding ones first, then the rest, because a planner that
+    # answers in under a second is the whole point of adding one.
+    quick = [m for m in usable if _LOOKS_QUICK.search(m)]
+    rest = [m for m in usable if m not in quick]
+
+    return (quick + rest)[:limit]
+
+
+def _slot_for(name: str) -> str:
+    """Which ALFRED_OPENAI<N>_* slot to use.
+
+    The first free one, so adding a second provider does not quietly
+    overwrite the first.
+    """
+    import os
+
+    from dotenv import dotenv_values
+
+    existing = dotenv_values(".env")
+
+    for number in range(2, 10):
+        slot = f"OPENAI{number}"
+
+        if not (existing.get(f"ALFRED_{slot}_API_KEY") or "").strip():
+            return slot.lower()
+
+        # Already ours: reuse it rather than piling up duplicates.
+        if (existing.get(f"ALFRED_{slot}_BASE_URL") or "") == KNOWN_PROVIDERS.get(
+            name, ""
+        ):
+            return slot.lower()
+
+    assert os  # keeps the import honest if the loop is ever changed
+    return "openai9"
+
+
+def _write_env(values: dict[str, str], fallbacks: str) -> None:
+    """Update .env in place, leaving everything else exactly as it was."""
+    import pathlib
+
+    path = pathlib.Path(".env")
+    lines = path.read_text(encoding="utf-8").splitlines()
+    wanted = dict(values)
+    wanted["ALFRED_AI_PLAN_FALLBACKS"] = fallbacks
+
+    out: list[str] = []
+    seen: set[str] = set()
+
+    for line in lines:
+        key = line.split("=", 1)[0].strip() if "=" in line else ""
+
+        if key in wanted:
+            out.append(f"{key}={wanted[key]}")
+            seen.add(key)
+        else:
+            out.append(line)
+
+    missing = [k for k in wanted if k not in seen]
+
+    if missing:
+        out.append("")
+        out.append("# Added by: python -m src.models add")
+        out.extend(f"{k}={wanted[k]}" for k in missing)
+
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
+def add_provider(name: str, key: str, base_url: str = "") -> int:
+    """Measure a provider's models, keep the best, and wire it in."""
+    from src.ai.providers.openai_provider import OpenAICompatibleChatProvider
+
+    name = name.strip().lower()
+    base = (base_url or KNOWN_PROVIDERS.get(name, "")).strip()
+
+    if not base:
+        print(f"no endpoint known for {name!r}. Either use one of:")
+        print("   " + ", ".join(sorted(KNOWN_PROVIDERS)))
+        print("or give the base URL:")
+        print(f"   python -m src.models add {name} <key> <base_url>")
+        return 2
+
+    print(f"{name} at {base}")
+    print("=" * 88)
+
+    try:
+        models = _list_models(base, key)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  could not list models: {str(exc)[:120]}")
+        print("  (a 401 here means the key is wrong; nothing was written)")
+        return 1
+
+    shortlist = _worth_timing(models)
+
+    if not shortlist:
+        print(f"  {len(models)} models listed, none of them a planner")
+        return 1
+
+    print(f"  {len(models)} models listed; timing {len(shortlist)} of them\n")
+
+    results: list[tuple[float, str, str]] = []
+
+    for model in shortlist:
+        provider = OpenAICompatibleChatProvider(
+            model=model, base_url=base, api_key=key,
+        )
+        times, sample, error = _time(provider, runs=2)
+        _report(model, times, sample, error)
+
+        if not error and _looks_like_a_plan(sample):
+            results.append((sorted(times)[len(times) // 2], model, sample))
+
+    if not results:
+        print("\n  nothing here produced a usable plan; nothing written")
+        return 1
+
+    results.sort()
+    best_time, best_model, _sample = results[0]
+
+    slot = _slot_for(name)
+    print(f"\n  best: {best_model} at {best_time:.2f}s   -> ALFRED_{slot.upper()}_*")
+
+    # Where it goes in the chain. Faster than what is already there and
+    # it goes first; otherwise it slots in behind the fast rung and
+    # ahead of the slow ones.
+    from src.config import load_settings
+
+    settings = load_settings()
+    current = [f for f in settings.ai_plan_fallbacks if f != slot]
+
+    if slot in current:
+        current.remove(slot)
+
+    # Always ahead of "openai" (the big slow one) and "ollama" (the net).
+    where = 0 if best_time < 3.0 else max(
+        0, min(
+            [i for i, f in enumerate(current) if f in ("openai", "ollama")]
+            or [len(current)]
+        )
+    )
+    current.insert(where, slot)
+
+    _write_env(
+        {
+            f"ALFRED_{slot.upper()}_BASE_URL": base,
+            f"ALFRED_{slot.upper()}_API_KEY": key,
+            f"ALFRED_{slot.upper()}_MODEL": best_model,
+        },
+        ",".join(current),
+    )
+
+    print(f"  written to .env; plan chain is now: {','.join(current)}")
+    print("\n  Restart Alfred to pick it up, then check with:")
+    print("      python -m src.models")
+
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if argv and argv[0] == "try":
         if len(argv) < 4:
             print("usage: python -m src.models try <base_url> <key> <model>")
             return 2
         return time_a_candidate(argv[1], argv[2], argv[3])
+
+    if argv and argv[0] == "add":
+        if len(argv) < 3:
+            print("usage: python -m src.models add <groq|cerebras|openrouter> <key>")
+            print("       python -m src.models add <name> <key> <base_url>")
+            return 2
+        return add_provider(argv[1], argv[2], argv[3] if len(argv) > 3 else "")
 
     if argv:
         print(__doc__)
