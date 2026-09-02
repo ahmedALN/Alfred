@@ -1263,6 +1263,30 @@ class TaskAgent:
                 decision.get("args"), dict
             ) else {}
 
+            # The envelope's verb is called `action` and so is
+            # ui_control's, and a model that has both in front of it
+            # will sooner or later put one inside the other. It did:
+            #
+            #   {"action":"use_tool","tool":"ui_control",
+            #    "args":{"action":"give_up","reason":"..."}}
+            #
+            # ui_control answered with its list of twenty-seven verbs,
+            # the executor learned nothing, and a step that was
+            # correctly being abandoned carried on. Read it as what it
+            # plainly says.
+            buried = str(dargs.get("action") or "").lower()
+
+            if buried in ("give_up", "done"):
+                why = str(
+                    dargs.get("reason") or dargs.get("evidence") or ""
+                )[:160]
+                history.append(
+                    f"[step {pi + 1} executor "
+                    + ("claims done" if buried == "done" else "gave up")
+                    + f"] {why}"
+                )
+                break
+
             # Already-open guard: re-launching an app that HISTORY shows
             # is open is the weak model's favourite wheel-spin.
             if dtool == "open_app":

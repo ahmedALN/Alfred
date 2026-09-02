@@ -173,12 +173,10 @@ def normalise_ui_control(
 
     if action:
         out["action"] = action.strip().lower().replace(" ", "_").replace("-", "_")
-
-        if not valid_actions or out["action"] in valid_actions:
-            return out
+        _keys_for_the_key_action(out)
 
         # A named action nobody recognises is a mistake to report, not
-        # one to paper over with a guess.
+        # one to paper over with a guess - so this returns either way.
         return out
 
     for candidate, required in _UI_ACTION_TELLS:
@@ -190,9 +188,35 @@ def normalise_ui_control(
             for field in required
         ):
             out["action"] = candidate
+            _keys_for_the_key_action(out)
             return out
 
     return out
+
+
+def _keys_for_the_key_action(out: dict[str, Any]) -> None:
+    """`{"action": "key", "name": "Return"}` means press Return.
+
+    `name` is the control to act on for every other action, so it
+    cannot be a general synonym for `keys` - but a `key` press has no
+    control, and the only thing a name could be naming there is the
+    key. Seen live driving Stremio: the call was refused, the step was
+    retried, and the retry cost more than the press would have.
+    """
+
+    if str(out.get("action") or "").lower() != "key":
+        return
+
+    if str(out.get("keys") or "").strip():
+        return
+
+    for source in ("name", "item", "text", "query"):
+        borrowed = out.get(source)
+
+        if isinstance(borrowed, str) and borrowed.strip():
+            out["keys"] = borrowed.strip()
+            out.pop(source, None)
+            return
 
 
 # ------------------------------------------------------- single-string tools
