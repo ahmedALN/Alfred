@@ -411,9 +411,20 @@ class TaskAgent:
                 break
             if total_calls >= self._max_steps:
                 break
-            if dead_streak >= 3:
-                # Three steps tried and got nowhere - grinding the rest of
-                # the budget won't help. Record the rest as unverified.
+            # Two dead steps with nothing EVER having worked is a task
+            # that never got off the ground - a wrong app name, a
+            # missing permission, a plan built on a false assumption.
+            # Grinding out a third costs a minute and a model call to
+            # learn what the first two already said.
+            #
+            # Three is right when earlier steps DID work: that is one
+            # hard step in a job that is otherwise going fine, and
+            # giving up early there throws away real progress.
+            limit = 3 if result.verified else 2
+
+            if dead_streak >= limit:
+                # Tried and got nowhere - grinding the rest of the
+                # budget won't help. Record the rest as unverified.
                 for p in plan[pi:]:
                     result.unverified.append(f"{p['step']} (gave up - no progress)")
                 break
@@ -436,7 +447,6 @@ class TaskAgent:
             sub_hist = history[hist_before:]
             sub_steps = result.steps[before:]
             progressed_here = any(s.ok for s in sub_steps)
-            progressed_ever = any("-> ok:" in h for h in history)
 
             if progressed_here:
                 ok, evidence = self._verify(pstep, history, sub_hist)

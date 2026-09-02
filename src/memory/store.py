@@ -197,6 +197,19 @@ class MemoryStore:
             self._conn.commit()
             self._invalidate_facts()
 
+    def set_embedding(self, fact_id: int, embedding: list[float]) -> None:
+        """Replace one fact's vector, leaving its words alone.
+
+        Needed when the embedding model changes: the old vectors are a
+        different width, so nothing matches them and memory looks empty.
+        """
+        with self._lock:
+            self._conn.execute(
+                "UPDATE facts SET embedding = ? WHERE id = ?",
+                (json.dumps(embedding), int(fact_id)),
+            )
+            self._conn.commit()
+
     def update_fact(self, fact_id: int, content: str) -> None:
         with self._lock:
             self._conn.execute(

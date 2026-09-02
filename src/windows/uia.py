@@ -1140,7 +1140,7 @@ def normalise_keys(keys: Any) -> str:
         if any(ch in text for ch in "^%+{}") and "+" not in text.strip("+"):
             return text
         if re.fullmatch(r"[^\s+\-]+", text) and text.lower() not in _NAMED_KEYS:
-            return text if len(text) > 1 else text
+            return text
         parts = [p for p in re.split(r"[+\-]", text) if p.strip()]
     else:
         return ""

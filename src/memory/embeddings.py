@@ -5,11 +5,30 @@ import math
 from google import genai
 
 
+_warned_about_dimensions = False
+
+
 def cosine_similarity(a: list[float], b: list[float]) -> float:
-    if not a or not b or len(a) != len(b):
+    if not a or not b:
         return 0.0
 
-    dot = sum(x * y for x, y in zip(a, b))
+    if len(a) != len(b):
+        # Vectors of different lengths mean the embedding model changed
+        # since these were stored. Returning 0.0 is right - they are not
+        # comparable - but doing it silently makes every recall come back
+        # empty and looks exactly like Alfred having forgotten everything.
+        global _warned_about_dimensions
+        if not _warned_about_dimensions:
+            _warned_about_dimensions = True
+            print(
+                f"[Memory] stored vectors are {len(b)} numbers wide and new "
+                f"ones are {len(a)} - the embedding model has changed, so "
+                "older memories cannot be searched. Re-embed them with: "
+                "python -m src.memory_cli reembed"
+            )
+        return 0.0
+
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
 
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(y * y for y in b))

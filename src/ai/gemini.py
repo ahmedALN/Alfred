@@ -182,6 +182,8 @@ class AlfredLiveSession:
 
         self._audio_output: sd.RawOutputStream | None = None
         self._level_sent = 0.0
+        # Background tasks live here until they are done.
+        self._background: set[asyncio.Task] = set()
 
         self._speaker_queue: queue.Queue[
             bytes | None
@@ -239,14 +241,18 @@ class AlfredLiveSession:
             return
 
         def _schedule() -> None:
-            asyncio.create_task(
+            # Kept in a set until it finishes. asyncio holds only a weak
+            # reference to a running task, so one nobody keeps can be
+            # collected mid-flight - and the symptom is not an error,
+            # it is work that silently never happened.
+            self._keep(asyncio.create_task(
                 self.inject_system_prompt(
                     "(System: the user just activated you with the wake "
                     "word or hotkey. Reply with a very short "
                     "acknowledgement - 'Yes?' or 'Go ahead.' - then wait "
                     "for their request.)"
                 )
-            )
+            ))
 
         try:
             loop.call_soon_threadsafe(_schedule)
@@ -664,6 +670,13 @@ class AlfredLiveSession:
         except Exception:  # noqa: BLE001
             return
         LIVE.set_level(min(1.0, peak * 2.2))
+
+
+    def _keep(self, task: "asyncio.Task") -> "asyncio.Task":
+        """Hold a reference until the task finishes."""
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
+        return task
 
     def _alfred_is_speaking(self) -> bool:
         """True while Alfred's own audio is playing (or just finished)."""
@@ -1140,9 +1153,9 @@ class AlfredLiveSession:
                             )
 
                     if user_utterance and self._learner is not None:
-                        asyncio.create_task(
+                        self._keep(asyncio.create_task(
                             self._surface_relevant_memory(user_utterance)
-                        )
+                        ))
 
                     if user_utterance and response_text:
                         self._turns_since_distill += 1
@@ -1151,7 +1164,9 @@ class AlfredLiveSession:
                             >= self._distill_every_turns
                         ):
                             self._turns_since_distill = 0
-                            asyncio.create_task(self._distill_incremental())
+                            self._keep(
+                                asyncio.create_task(self._distill_incremental())
+                            )
 
             await asyncio.sleep(0)
 

@@ -6,6 +6,8 @@ python -m src.memory_cli  -  inspect and prune Alfred's long-term memory.
     forget <id> [<id>..] delete facts by id
     edit <id> <text>     rewrite a fact
     dedupe               merge near-duplicate facts (needs embeddings)
+    reembed              re-encode every fact after an embedding
+                         model change (recall goes empty without it)
     export [path]        dump all facts to JSON
 """
 
@@ -81,6 +83,72 @@ def cmd_edit(args: list[str]) -> int:
     return 0
 
 
+def cmd_reembed(_args: list[str]) -> int:
+    """Re-encode every fact with the current embedding model.
+
+    Vectors are only comparable to others of the same width, so
+    changing the embedding model silently orphans everything stored
+    before it - recall returns nothing and Alfred looks like it has
+    forgotten you. This puts that right.
+    """
+    try:
+        from google import genai
+
+        from src.ai.providers import build_providers
+        from src.config import load_settings
+
+        settings = load_settings()
+        providers = build_providers(
+            settings, genai.Client(api_key=settings.gemini_api_key)
+        )
+        store = _store()
+        facts = store.all_facts()
+        if not facts:
+            print("nothing stored yet.")
+            return 0
+
+        # What width the current model produces. Anything already that
+        # wide is fine and is skipped, so a second run costs nothing and
+        # an interrupted first run can simply be repeated.
+        probe = providers.embedder.embed("width check")
+        if not probe:
+            print("the embedding provider returned nothing - is it running?")
+            return 1
+        width = len(probe)
+
+        stale = [f for f in facts if not f.embedding or len(f.embedding) != width]
+        print(f"{len(facts)} fact(s); {len(stale)} need re-encoding at "
+              f"{width} numbers wide.")
+        if not stale:
+            print("nothing to do.")
+            store.close()
+            return 0
+
+        done = failed = 0
+        for i, fact in enumerate(stale, 1):
+            try:
+                vector = providers.embedder.embed(fact.content)
+            except Exception as exc:  # noqa: BLE001
+                failed += 1
+                if failed == 1:
+                    print(f"  embedding failed: {exc}")
+                continue
+            if vector:
+                store.set_embedding(fact.id, vector)
+                done += 1
+            # A command that says nothing for two minutes looks hung.
+            if i % 10 == 0 or i == len(stale):
+                print(f"  {i}/{len(stale)}...", flush=True)
+
+        print(f"re-embedded {done} of {len(stale)} fact(s)"
+              + (f"; {failed} failed" if failed else "."))
+        store.close()
+        return 0 if done else 1
+    except Exception as exc:  # noqa: BLE001
+        print(f"reembed needs a working embedding provider: {exc}")
+        return 1
+
+
 def cmd_dedupe(_args: list[str]) -> int:
     try:
         from google import genai
@@ -128,6 +196,7 @@ def main(argv: list[str]) -> int:
     handler = {
         "list": cmd_list, "search": cmd_search, "forget": cmd_forget,
         "edit": cmd_edit, "dedupe": cmd_dedupe, "export": cmd_export,
+        "reembed": cmd_reembed,
     }.get(cmd)
 
     if handler is None:
