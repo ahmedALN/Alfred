@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
-
 load_dotenv()
 
 
@@ -165,8 +164,16 @@ def load_settings() -> Settings:
             "alfred_apps.sqlite3",
         ),
         brain_enabled=_get_bool("ALFRED_BRAIN_ENABLED", True),
+        # On. It was off because the only thing the brain ever had to
+        # say was the free-RAM figure, and hearing that every ten
+        # minutes is worse than silence. Now that it can see what is
+        # overdue, that you have been in one window for two hours, and
+        # that the mailbox link has lapsed, silence is the worse of the
+        # two. The rate limit, quiet hours, do-not-disturb and the
+        # startup grace all still apply, and "do not disturb" still
+        # stops it for the session.
         brain_speak_proactive=_get_bool(
-            "ALFRED_BRAIN_SPEAK_PROACTIVE", False
+            "ALFRED_BRAIN_SPEAK_PROACTIVE", True
         ),
         brain_autonomy=autonomy,
         brain_tick_seconds=_get_float("ALFRED_BRAIN_TICK_SECONDS", 90.0),

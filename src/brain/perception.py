@@ -19,6 +19,71 @@ class PerceptionThresholds:
     critical_battery_pct: int = 10
 
 
+# ====================================================================
+# What a reading is allowed to be for
+#
+# Every collector's observation ends up in one of three places: a check
+# below turns it into a Notable, it is listed here as context the
+# reasoner reads without it being news in itself, or it is a reading
+# nothing consumes.
+#
+# The third case is not hypothetical. Three collectors were written to
+# give the brain something personal to be proactive about - what you
+# have been doing, what is overdue, whether the mailbox link has
+# lapsed - they were wired into main.py, they ran every ninety seconds,
+# and `_diff` had no branch for any of their keys. Their readings were
+# collected and dropped on the floor. Across 1,338 ticks the brain
+# produced five proposals, all of them the same sentence about free
+# RAM, because free RAM was the only thing anything downstream could
+# see.
+#
+# So the set is declared, and `unhandled_keys` reports anything that
+# falls outside it. A collector added without a check is now a test
+# failure rather than a silence.
+# ====================================================================
+
+# Read for context - the situation the reasoner is given, and the
+# do-not-disturb decision - rather than raised as events of their own.
+CONTEXT_ONLY_KEYS: frozenset[str] = frozenset({
+    "process.top_cpu",
+    "session.foreground_app",
+    "session.idle_seconds",
+    "session.fullscreen",
+    "activity.where",
+})
+
+# Keys whose exact name a check looks for.
+_HANDLED_EXACT: frozenset[str] = frozenset({
+    "memory.free_pct",
+    "cpu.load_pct",
+    "system.uptime_hours",
+    "updates.pending_reboot",
+    "power.on_battery",
+    "power.percent",
+    "network.listening_ports",
+    "activity.long_stretch",
+    "world.overdue",
+    "world.due_soon",
+    "mail.linked",
+})
+
+# Keys whose name carries a device or profile in the middle.
+_HANDLED_SHAPES: tuple[tuple[str, str], ...] = (
+    ("disk.", ".free_gb"),
+    ("firewall.", ".enabled"),
+)
+
+
+def _is_handled(key: str) -> bool:
+    if key in _HANDLED_EXACT or key in CONTEXT_ONLY_KEYS:
+        return True
+
+    return any(
+        key.startswith(prefix) and key.endswith(suffix)
+        for prefix, suffix in _HANDLED_SHAPES
+    )
+
+
 @dataclass
 class _Snapshot:
     values: dict[str, Any] = field(default_factory=dict)
@@ -47,6 +112,9 @@ class Perception:
         self._previous: _Snapshot | None = None
         self._active_conditions: set[str] = set()
         self._high_cpu_streak = 0
+        self._unhandled: set[str] = set()
+        self._ports_pending: set[str] = set()
+        self._seen_matters: dict[str, set[str]] = {}
 
     # ----------------------------------------------------------------
 
@@ -62,11 +130,24 @@ class Perception:
             snapshot.values[obs.key] = obs.value
             snapshot.summaries[obs.key] = obs.summary
 
+            if not _is_handled(obs.key):
+                self._unhandled.add(obs.key)
+
         notables = self._diff(snapshot)
 
         self._previous = snapshot
 
         return notables, observations
+
+    def unhandled_keys(self) -> set[str]:
+        """Readings seen so far that no check and no context list claims.
+
+        A collector wired in without a check is a collector whose work
+        is thrown away every ninety seconds, silently. This is how that
+        becomes visible - to a test, and to `python -m src.doctor`.
+        """
+
+        return set(self._unhandled)
 
     # ----------------------------------------------------------------
 
@@ -84,6 +165,11 @@ class Perception:
         self._check_power(snap, prev_values, notables)
         self._check_uptime(snap, notables)
         self._check_new_ports(snap, prev_values, notables)
+
+        # The reason any of this is worth doing.
+        self._check_long_stretch(snap, prev_values, notables)
+        self._check_world(snap, prev_values, notables)
+        self._check_mail_link(snap, prev_values, notables)
 
         return notables
 
@@ -184,7 +270,7 @@ class Perception:
             self._high_cpu_streak = 0
             self._clear("high_cpu")
 
-        if self._high_cpu_streak >= self._t.high_cpu_ticks:
+        if self._high_cpu_streak >= self._t.high_cpu_ticks:  # noqa: SIM102
             if self._enter("high_cpu"):
                 top = snap.summaries.get("process.top_cpu", "")
                 out.append(
@@ -346,19 +432,138 @@ class Perception:
         if not isinstance(current, list) or not isinstance(previous, list):
             return
 
-        new_ports = sorted(set(current) - set(previous))
+        appeared = set(current) - set(previous)
 
-        if new_ports:
+        # A port that opened and closed inside three minutes was an app
+        # starting up, and saying so was 148 of the brain's 210 notables
+        # - seven times more than everything else combined, all of it
+        # "Spotify opened a port". Only a port still there on the next
+        # look is worth a sentence.
+        confirmed = sorted(self._ports_pending & set(current))
+        self._ports_pending = appeared - set(confirmed)
+
+        if confirmed:
             out.append(
                 Notable(
                     source="network",
                     key="network.listening_ports",
                     summary=(
                         "New listening TCP port(s): "
-                        + ", ".join(new_ports)
+                        + ", ".join(confirmed)
                     ),
                     severity="info",
                     previous=previous,
-                    current=new_ports,
+                    current=confirmed,
+                )
+            )
+
+    # ---- and the reason any of this is worth doing -----------------
+
+    def _check_long_stretch(
+        self,
+        snap: _Snapshot,
+        prev: dict[str, Any],
+        out: list[Notable],
+    ) -> None:
+        """You have been in the same window for a very long time."""
+
+        value = snap.values.get("activity.long_stretch")
+
+        if value is not True:
+            self._clear("long_stretch")
+            return
+
+        # Only on the crossing. Every tick after it is the same fact.
+        if prev.get("activity.long_stretch") is True:
+            return
+
+        if self._enter("long_stretch"):
+            out.append(
+                Notable(
+                    source="activity",
+                    key="activity.long_stretch",
+                    summary=snap.summaries.get(
+                        "activity.long_stretch",
+                        "You have been in the same window a long time.",
+                    ),
+                    severity="info",
+                    previous=prev.get("activity.long_stretch"),
+                    current=value,
+                )
+            )
+
+    def _check_world(
+        self,
+        snap: _Snapshot,
+        prev: dict[str, Any],
+        out: list[Notable],
+    ) -> None:
+        """Something of yours came due, or went past due."""
+
+        for key, severity in (
+            ("world.overdue", "warn"),
+            ("world.due_soon", "info"),
+        ):
+            current = snap.values.get(key)
+
+            if not isinstance(current, list) or not current:
+                # Nothing due is not news, and it lets the same item be
+                # news again if it comes back.
+                self._seen_matters.pop(key, None)
+                continue
+
+            previously = self._seen_matters.get(key, set())
+            fresh = sorted(set(current) - previously)
+
+            # Remember the whole current list, not just what was
+            # announced: an item that stays overdue must not be
+            # announced again tomorrow.
+            self._seen_matters[key] = set(current)
+
+            if not fresh:
+                continue
+
+            out.append(
+                Notable(
+                    source="world",
+                    key=key,
+                    summary=(
+                        ("Overdue: " if key == "world.overdue"
+                         else "Due in the next day or two: ")
+                        + "; ".join(fresh[:4])
+                        + (f" (+{len(fresh) - 4} more)" if len(fresh) > 4 else "")
+                    ),
+                    severity=severity,
+                    previous=sorted(previously),
+                    current=fresh,
+                )
+            )
+
+    def _check_mail_link(
+        self,
+        snap: _Snapshot,
+        prev: dict[str, Any],
+        out: list[Notable],
+    ) -> None:
+        """The Google link lapsed - which is Alfred's problem to raise."""
+
+        value = snap.values.get("mail.linked")
+
+        if value is not False:
+            self._clear("mail_unlinked")
+            return
+
+        if self._enter("mail_unlinked"):
+            out.append(
+                Notable(
+                    source="mail",
+                    key="mail.linked",
+                    summary=snap.summaries.get(
+                        "mail.linked",
+                        "Alfred has lost access to your Google account.",
+                    ),
+                    severity="warn",
+                    previous=prev.get("mail.linked"),
+                    current=value,
                 )
             )

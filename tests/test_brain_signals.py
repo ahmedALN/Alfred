@@ -98,17 +98,38 @@ def test_single_off_glitch_does_not_alarm():
     assert [len(perception.sense()[0]) for _ in range(3)] == [0, 0, 0]
 
 
-def test_new_listening_port_is_notable():
+def test_a_port_that_stays_open_is_notable():
+    """Reported on the second sighting, not the first.
+
+    A port seen once was an app starting up. Saying so was 148 of the
+    brain's 210 notables - seven times everything else put together,
+    and none of it anything anybody wanted told.
+    """
     collector = ScriptedCollector([
         [_ports(["80/nginx", "443/nginx"])],
+        [_ports(["80/nginx", "443/nginx", "3389/svchost"])],
         [_ports(["80/nginx", "443/nginx", "3389/svchost"])],
     ])
     perception = Perception(collectors=[collector])
 
     assert perception.sense()[0] == []
+    assert perception.sense()[0] == []      # seen once: wait and see
+
     notables = perception.sense()[0]
     assert len(notables) == 1
     assert "3389/svchost" in notables[0].summary
+
+
+def test_a_port_that_came_and_went_is_never_mentioned():
+    collector = ScriptedCollector([
+        [_ports(["80/nginx"])],
+        [_ports(["80/nginx", "57621/Spotify"])],   # Spotify starting
+        [_ports(["80/nginx"])],                     # and settled
+        [_ports(["80/nginx"])],
+    ])
+    perception = Perception(collectors=[collector])
+
+    assert [len(perception.sense()[0]) for _ in range(4)] == [0, 0, 0, 0]
 
 
 def test_parse_enabled_never_guesses_off():
