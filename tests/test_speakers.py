@@ -48,6 +48,9 @@ def audio(monkeypatch):
             raise ValueError("Invalid sample rate [PaErrorCode -9997]")
 
     fake = type("sd", (), {
+        # MME's default (index 1) is the monitor here, so the override
+        # genuinely buys something and is used.
+        "default": type("d", (), {"device": [0, 5]}),
         "query_devices": staticmethod(
             lambda index=None: DEVICES if index is None else DEVICES[index]
         ),
@@ -127,3 +130,43 @@ def test_mme_is_preferred_because_it_resamples():
     assert speakers._api_rank("Windows DirectSound") < speakers._api_rank(
         "Windows WDM-KS"
     )
+
+
+def test_it_does_not_override_a_default_that_is_already_right(audio, monkeypatch):
+    """The regression that made Alfred mute.
+
+    Passing device=None lets PortAudio resolve the default when the
+    stream opens. Passing an index binds to an entry from enumeration
+    time, and a stale one opens cleanly then fails every write with
+    "There is no driver installed on your system" [MME error 6] -
+    Alfred heard, understood and answered four questions in a row
+    without a sound coming out.
+
+    The index it had been pinned to was the SAME speaker device=None
+    had been using for months. An override that changes nothing is not
+    free.
+    """
+    monkeypatch.setattr(
+        audio, "default", type("d", (), {"device": [0, 1]}), raising=False
+    )
+
+    assert speakers.chosen_output(samplerate=24000) is None
+
+
+def test_it_does_override_when_the_default_is_the_wrong_speaker(audio):
+    """Which is the case that started all this."""
+    picked = speakers.chosen_output(samplerate=24000)
+
+    assert picked is not None
+    assert DEVICES[picked]["name"] == "Speakers (Realtek(R) Audio)"
+
+
+def test_a_pinned_device_is_used_even_if_the_default_matches(audio, monkeypatch):
+    monkeypatch.setattr(
+        audio, "default", type("d", (), {"device": [0, 1]}), raising=False
+    )
+    monkeypatch.setenv("ALFRED_AUDIO_OUTPUT", "HD Audio Speaker")
+
+    picked = speakers.chosen_output(samplerate=48000)
+
+    assert DEVICES[picked]["name"] == "Speakers (HD Audio Speaker)"

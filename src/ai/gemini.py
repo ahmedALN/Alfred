@@ -600,6 +600,61 @@ class AlfredLiveSession:
                     f"[Speaker] playback error: {exc}"
                 )
 
+                # Silence is the one outcome worse than the wrong
+                # speaker, and this is how it happened: pinning a device
+                # index made every write fail with "There is no driver
+                # installed on your system" [MME error 6], and Alfred
+                # heard, understood and answered four questions in a row
+                # without a sound coming out. It said nothing about it
+                # either - the error went to the log, and the person
+                # asking just got ignored.
+                #
+                # One reopen on whatever the system will give us, then
+                # carry on. A chosen device that will not play is not a
+                # preference worth keeping.
+                if self._reopen_on_default():
+                    try:
+                        self._audio_output.write(chunk)
+                    except Exception as second:  # noqa: BLE001
+                        print(f"[Speaker] still cannot play: {second}")
+
+    def _open_output(self, device):
+        """A started-able output stream on `device`, or None.
+
+        Proving it plays, not just that it opens: a silent stream that
+        raises on the first write is the failure this exists to catch,
+        and one frame of silence is cheap.
+        """
+        from src.voice.speakers import describe
+
+        try:
+            stream = sd.RawOutputStream(
+                samplerate=self.OUTPUT_SAMPLE_RATE,
+                channels=self.OUTPUT_CHANNELS,
+                dtype="int16",
+                device=device,
+            )
+            stream.start()
+            stream.write(b"\x00\x00" * 240)   # 10ms of nothing
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Speaker] {describe(device)} will not play: {exc}")
+            return None
+
+        print(f"[Speaker] out through: {describe(device)}")
+        return stream
+
+    def _reopen_on_default(self) -> bool:
+        """Give up on the chosen speaker and take any that works."""
+        try:
+            if self._audio_output is not None:
+                self._audio_output.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+        self._audio_output = self._open_output(None)
+
+        return self._audio_output is not None
+
     def _start_audio_output(self) -> None:
         if self._audio_output is not None:
             return
@@ -618,20 +673,27 @@ class AlfredLiveSession:
         # is MME's, which is fixed at enumeration and is not the device
         # Windows is set to - this machine has twenty output endpoints
         # and Alfred was coming out of the monitor.
-        from src.voice.speakers import chosen_output, describe
+        from src.voice.speakers import chosen_output
 
         device = chosen_output(
             samplerate=self.OUTPUT_SAMPLE_RATE,
             channels=self.OUTPUT_CHANNELS,
         )
-        print(f"[Speaker] out through: {describe(device)}")
 
-        self._audio_output = sd.RawOutputStream(
-            samplerate=self.OUTPUT_SAMPLE_RATE,
-            channels=self.OUTPUT_CHANNELS,
-            dtype="int16",
-            device=device,
-        )
+        # The chosen one, and then whatever will actually play. Opening
+        # a device that answers check_output_settings is not the same as
+        # one that works: a pinned MME index opened cleanly here and
+        # failed on every write with "There is no driver installed on
+        # your system", so Alfred answered four questions in a row in
+        # total silence.
+        self._audio_output = self._open_output(device)
+
+        if self._audio_output is None:
+            self._audio_output = self._open_output(None)
+
+        if self._audio_output is None:
+            print("[Speaker] no usable output device - Alfred cannot speak")
+            return
 
         self._audio_output.start()
 

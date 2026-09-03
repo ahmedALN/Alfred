@@ -104,6 +104,22 @@ def chosen_output(samplerate: int | None = None, channels: int = 1) -> int | Non
             print(f"[Speaker] no output device matching {wanted!r}; using default")
         return None
 
+    # If the default would land on this speaker anyway, say nothing and
+    # let it.
+    #
+    # This is not tidiness. Passing device=None lets PortAudio resolve
+    # the default when the stream opens; passing an index binds to an
+    # entry from enumeration time, and a stale one opens cleanly and
+    # then fails every write with "There is no driver installed on your
+    # system" [MME error 6]. Alfred answered four questions in a row in
+    # silence that way - and the index it was pinned to was the SAME
+    # speaker device=None had been using for months.
+    #
+    # So the override is spent only where it buys something: when the
+    # speaker Windows is set to is not the one sounddevice would pick.
+    if not wanted and _default_is_already(name):
+        return None
+
     if samplerate is None:
         return matches[0]
 
@@ -128,6 +144,22 @@ def chosen_output(samplerate: int | None = None, channels: int = 1) -> int | Non
         "using the system default"
     )
     return None
+
+
+def _default_is_already(name: str) -> bool:
+    """Would sounddevice's own default land on this speaker anyway?"""
+
+    import sounddevice as sd
+
+    try:
+        index = sd.default.device[1]
+
+        if index is None or index < 0:
+            return False
+
+        return name.lower() in str(sd.query_devices(index)["name"]).lower()
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _api_rank(api: str) -> int:
