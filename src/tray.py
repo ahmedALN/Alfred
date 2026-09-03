@@ -18,6 +18,12 @@ except Exception:  # noqa: BLE001
 
 _WM_TRAY = win32con.WM_USER + 20 if _WIN32 else 0
 
+# Its own mark rather than a generic Windows icon, which is what the
+# tray showed otherwise - the one icon of Alfred's that is on screen
+# the entire time it runs, in the one place a name in a tooltip does
+# not make up for looking like every other background process.
+_ICON_PATH = Path(__file__).resolve().parent.parent / "assets" / "alfred.ico"
+
 _ID_STATUS = 1000
 _ID_TOGGLE_BRAIN = 1001
 _ID_OPEN_LOGS = 1002
@@ -100,6 +106,15 @@ class TrayIcon:
         win32gui.UpdateWindow(self._hwnd)
 
     def _icon_handle(self):
+        if _ICON_PATH.exists():
+            try:
+                return win32gui.LoadImage(
+                    0, str(_ICON_PATH), win32con.IMAGE_ICON, 0, 0,
+                    win32con.LR_LOADFROMFILE | win32con.LR_DEFAULTSIZE,
+                )
+            except Exception:  # noqa: BLE001
+                pass  # fall through to the generic one below
+
         try:
             return win32gui.LoadIcon(0, win32con.IDI_APPLICATION)
         except Exception:  # noqa: BLE001

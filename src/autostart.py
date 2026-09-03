@@ -38,14 +38,18 @@ def _shortcut() -> Path:
     return _startup_folder() / SHORTCUT_NAME
 
 
-def _install_shortcut() -> dict[str, object]:
-    """Start Alfred from the user's own Startup folder.
-
-    A one-line script rather than a shortcut file, because a .lnk needs
-    COM to write and this needs nothing. VBScript is used for one
-    property a batch file does not have: it can start a program with no
-    console window, so Alfred comes up at logon without a black box
-    flashing across the screen.
+def _write_vbs_launcher() -> Path:
+    """The one hidden-launch mechanism, shared by the scheduled task
+    and the Startup-folder fallback below. A one-line script rather
+    than a .lnk shortcut, because a .lnk needs COM to write and this
+    needs nothing - and VBScript is used at all for one property
+    neither a shortcut nor a batch file has: ``WScript.Shell.Run``'s
+    window style argument. ``0`` there is what actually suppresses a
+    console window; Task Scheduler's own action has no such setting of
+    its own, and a bare ``cmd /c`` has no equivalent either, which is
+    how a black box ends up flashing - or, worse, sitting there the
+    whole time Alfred runs, since cmd waits on whatever it launched -
+    across every boot instead.
     """
     root = _project_root()
     lines = [
@@ -58,13 +62,20 @@ def _install_shortcut() -> dict[str, object]:
     target = _shortcut()
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(script, encoding="utf-8")
+    return target
+
+
+def _install_shortcut() -> dict[str, object]:
+    """Start Alfred from the user's own Startup folder - needs no
+    administrator rights, unlike the scheduled task above it."""
+    target = _write_vbs_launcher()
 
     return {
         "status": "installed",
         "how": "startup folder",
         "at": str(target),
         "runs": _launch_command(),
-        "working_dir": str(root),
+        "working_dir": str(_project_root()),
     }
 
 
@@ -93,14 +104,25 @@ def _install_task() -> dict[str, object]:
     """
     Register a Scheduled Task that starts Alfred at logon. Runs in the
     user's own context, hidden, and does not stop on battery.
+
+    /TR used to be a raw ``cmd /c "cd /d ... && pythonw ..."`` - which
+    needed cmd to set the working directory, and cmd.exe always owns a
+    console. Task Scheduler has no setting to hide that console short
+    of a full XML task definition, so at every boot it either flashed
+    briefly or - since cmd was waiting on pythonw the entire time
+    Alfred ran, not backgrounding it - sat there visibly for the whole
+    session. Pointing /TR at the same hidden VBScript launcher the
+    Startup-folder fallback uses (wscript.exe has no console at all,
+    and WScript.Shell.Run's own window-style argument handles both the
+    working directory and hiding pythonw) fixes both at once.
     """
 
-    root = _project_root()
+    vbs = _write_vbs_launcher()
 
     args = [
         "schtasks", "/Create", "/TN", TASK_NAME,
         "/SC", "ONLOGON",
-        "/TR", f'cmd /c "cd /d {root} && {_launch_command()}"',
+        "/TR", f'wscript.exe //B "{vbs}"',
         "/RL", "LIMITED",
         "/F",
     ]
@@ -117,7 +139,7 @@ def _install_task() -> dict[str, object]:
         "status": "installed",
         "task": TASK_NAME,
         "runs": _launch_command(),
-        "working_dir": str(root),
+        "working_dir": str(_project_root()),
     }
 
 

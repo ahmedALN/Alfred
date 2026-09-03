@@ -31,6 +31,45 @@ ICON = Path(__file__).resolve().parent.parent.parent / "assets" / "alfred.ico"
 _window: Any = None
 
 
+def _apply_taskbar_icon() -> None:
+    """Belt-and-suspenders on top of the ``icon=`` passed to
+    webview.start() below: pywebview's own docs claim icon support is
+    "GTK/QT only", even though its WinForms backend's own source reads
+    and applies it regardless - one undocumented code path is not
+    something to hang the whole fix on. Sets it directly instead, the
+    same WM_SETICON call any Win32 window answers to, found the same
+    way opener.py already finds this exact window (by its exact
+    title) to hide and show it."""
+    if sys.platform != "win32" or not ICON.exists():
+        return
+    try:
+        import win32api
+        import win32con
+        import win32gui
+
+        hwnd = win32gui.FindWindow(None, TITLE)
+        if not hwnd:
+            return
+
+        loadflags = win32con.LR_LOADFROMFILE
+        big = win32gui.LoadImage(
+            0, str(ICON), win32con.IMAGE_ICON, 0, 0,
+            loadflags | win32con.LR_DEFAULTSIZE,
+        )
+        small = win32gui.LoadImage(
+            0, str(ICON), win32con.IMAGE_ICON,
+            win32api.GetSystemMetrics(win32con.SM_CXSMICON),
+            win32api.GetSystemMetrics(win32con.SM_CYSMICON),
+            loadflags,
+        )
+        if big:
+            win32gui.SendMessage(hwnd, win32con.WM_SETICON, 1, big)
+        if small:
+            win32gui.SendMessage(hwnd, win32con.WM_SETICON, 0, small)
+    except Exception:  # noqa: BLE001
+        pass  # the icon= kwarg below is still a real attempt on its own
+
+
 class Api:
     """What the page can ask the window to do.
 
@@ -104,6 +143,7 @@ def run(url: str) -> int:
         return False
 
     window.events.closing += closing
+    window.events.shown += _apply_taskbar_icon
 
     # EdgeChromium is WebView2, which is present on Windows 11 and is a
     # current Chromium - so the canvas, the backdrop filters and the

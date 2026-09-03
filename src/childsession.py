@@ -481,6 +481,44 @@ def _agent_exe() -> str | None:
     return None
 
 
+def _agent_log() -> str:
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    return str(root / "logs" / "child-agent.log")
+
+
+def _write_agent_launcher(exe: str) -> str:
+    """ChildInputAgent.exe is a real console app - OutputType is Exe,
+    not WinExe, and Program.cs writes to Console throughout for its
+    own diagnostics - so registering it under Run directly would open
+    a visible console at every logon, the exact thing a stray
+    scheduled task set up outside this codebase was already doing
+    before anyone noticed. Routes through the same
+    WScript.Shell.Run(..., 0, False) hidden-window technique
+    src/autostart.py uses for Alfred itself, with the console output
+    still captured to logs/child-agent.log rather than just lost.
+    """
+    import os as _os
+    from pathlib import Path
+
+    target = Path(_os.environ["LOCALAPPDATA"]) / "Alfred" / "launch_child_agent.vbs"
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    log = _agent_log()
+    Path(log).parent.mkdir(parents=True, exist_ok=True)
+
+    # A doubled "" is VBScript's own escape for a literal " inside a
+    # string literal - this is the exact same technique autostart.py
+    # uses, just with an extra quoted redirect target.
+    lines = [
+        'Set sh = CreateObject("WScript.Shell")',
+        'sh.Run "cmd.exe /c ""' + exe + '"" >> ""' + log + '"" 2>&1", 0, False',
+    ]
+    target.write_text('\r\n'.join(lines) + '\r\n', encoding="utf-8")
+    return str(target)
+
+
 def cmd_install_agent(_args: list[str]) -> int:
     exe = _agent_exe()
     if exe is None:
@@ -488,24 +526,28 @@ def cmd_install_agent(_args: list[str]) -> int:
         print("  dotnet build src/windows/native/ChildInputAgent -c Release")
         return 1
 
+    vbs = _write_agent_launcher(exe)
+    run_value = f'wscript.exe //B "{vbs}"'
+
     print("This adds ONE startup entry, for the current user only:")
     print(f"  {_RUN_KEY}")
-    print(f"    {_RUN_VALUE} = {exe}")
+    print(f"    {_RUN_VALUE} = {run_value}")
     print()
     print("Windows then starts it inside Alfred's child session whenever")
     print("that session is created - which is the whole point. It also")
-    print("starts in your own session, where Alfred already uses it.")
+    print("starts in your own session, where Alfred already uses it -")
+    print(f"hidden, with its own console output going to {_agent_log()}.")
     print()
     print("Undo any time:  python -m src.childsession uninstall-agent")
     print()
 
     out = _ps(
         f"Set-ItemProperty -Path 'Registry::{_RUN_KEY}' "
-        f"-Name '{_RUN_VALUE}' -Value '\"{exe}\"' -Type String; "
+        f"-Name '{_RUN_VALUE}' -Value '{run_value}' -Type String; "
         f"(Get-ItemProperty -Path 'Registry::{_RUN_KEY}' "
         f"-Name '{_RUN_VALUE}').'{_RUN_VALUE}'"
     )
-    if exe.lower() in out.lower():
+    if vbs.lower() in out.lower():
         print(f"Registered. -> {out}")
         return 0
     print(f"Could not confirm the entry. PowerShell said: {out!r}")

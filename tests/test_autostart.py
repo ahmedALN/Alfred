@@ -81,3 +81,84 @@ def test_status_says_which_way_it_is_set_up(monkeypatch, tmp_path):
     assert autostart.status()["status"] == "not_installed"
     autostart.install()
     assert autostart.status()["how"] == ["startup folder"]
+
+
+# ====================================================================
+# The scheduled task itself must not route through cmd.exe.
+#
+# A raw `cmd /c "cd /d ... && pythonw ..."` needs cmd to set the
+# working directory, and cmd.exe always owns a console - one Task
+# Scheduler has no setting to hide. Worse, cmd was WAITING on pythonw
+# (nothing backgrounded it), so it was not a flash, it was a visible
+# window for as long as Alfred ran, every boot.
+# ====================================================================
+
+
+def test_the_scheduled_task_never_routes_through_cmd(monkeypatch, tmp_path):
+    monkeypatch.setattr(autostart, "_startup_folder", lambda: tmp_path)
+
+    calls = []
+
+    class _Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return _Result()
+
+    monkeypatch.setattr(autostart.subprocess, "run", fake_run)
+
+    result = autostart._install_task()
+
+    assert result["status"] == "installed"
+    tr_index = calls[0].index("/TR") + 1
+    tr_value = calls[0][tr_index]
+    assert "cmd" not in tr_value.lower()
+    assert tr_value.lower().startswith("wscript.exe")
+
+
+def test_the_scheduled_task_points_at_a_hidden_vbs_launcher(monkeypatch, tmp_path):
+    monkeypatch.setattr(autostart, "_startup_folder", lambda: tmp_path)
+
+    calls = []
+
+    class _Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return _Result()
+
+    monkeypatch.setattr(autostart.subprocess, "run", fake_run)
+
+    autostart._install_task()
+
+    vbs_path = tmp_path / autostart.SHORTCUT_NAME
+    assert vbs_path.exists()  # written before schtasks was ever invoked
+
+    tr_index = calls[0].index("/TR") + 1
+    assert str(vbs_path) in calls[0][tr_index]
+
+    script = vbs_path.read_text(encoding="utf-8")
+    assert script.rstrip().endswith("0, False")  # hidden window
+    assert "pythonw" in script
+
+
+def test_a_failed_task_creation_still_reports_the_real_error(monkeypatch, tmp_path):
+    monkeypatch.setattr(autostart, "_startup_folder", lambda: tmp_path)
+
+    class _Result:
+        returncode = 1
+        stdout = ""
+        stderr = "ERROR: Access is denied."
+
+    monkeypatch.setattr(autostart.subprocess, "run", lambda *a, **k: _Result())
+
+    result = autostart._install_task()
+
+    assert result["status"] == "error"
+    assert "denied" in result["error"].lower()
