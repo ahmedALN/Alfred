@@ -4,7 +4,7 @@ Alfred narrates itself to a log file, and that narration is also the
 interface's log panel. Both said the owner's full number on every
 start:
 
-    [Message] WhatsApp linked to +447435589157 - messaging your own chat
+    [Message] WhatsApp linked to +447700900000 - messaging your own chat
 
 The log is gitignored, so this was never going to be published. It is
 still the wrong shape: a number sitting in a file that gets pasted into
@@ -25,7 +25,7 @@ _NUMBER = re.compile(r"\+?\d[\d\s().-]{7,}\d")
 
 
 def mask(number: str) -> str:
-    """"+447435589157" -> "+44...9157". Recognisable, not readable."""
+    """"+447700900000" -> "+44...0000". Recognisable, not readable."""
     text = (number or "").strip()
     if not text:
         return ""

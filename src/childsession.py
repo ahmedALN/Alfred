@@ -481,23 +481,28 @@ def _agent_exe() -> str | None:
     return None
 
 
-def _agent_log() -> str:
-    from pathlib import Path
-
-    root = Path(__file__).resolve().parent.parent
-    return str(root / "logs" / "child-agent.log")
-
-
 def _write_agent_launcher(exe: str) -> str:
     """ChildInputAgent.exe is a real console app - OutputType is Exe,
-    not WinExe, and Program.cs writes to Console throughout for its
-    own diagnostics - so registering it under Run directly would open
-    a visible console at every logon, the exact thing a stray
-    scheduled task set up outside this codebase was already doing
-    before anyone noticed. Routes through the same
-    WScript.Shell.Run(..., 0, False) hidden-window technique
-    src/autostart.py uses for Alfred itself, with the console output
-    still captured to logs/child-agent.log rather than just lost.
+    not WinExe, and it writes to Console throughout for its own
+    diagnostics - so registering it under Run directly would open a
+    visible console at every logon, the exact thing a stray scheduled
+    task set up outside this codebase was already doing before anyone
+    noticed. Routes through the same WScript.Shell.Run(..., 0, False)
+    hidden-window technique src/autostart.py uses for Alfred itself.
+
+    No cmd.exe wrapper, and deliberately no '>> log' redirect either -
+    that was tried once already (see scripts/install-child-agent-
+    task.ps1 and windows/native/ChildInputAgent/Logging.cs) and
+    broken exactly the way that PowerShell script's own comment
+    describes: two agents are the normal case, one in the user's
+    session and one in Alfred's isolated one, and whichever started
+    first held the shared log file - the second's redirect failed,
+    cmd exited 1, no agent started, and isolation failed with "session
+    did not become ready" for a reason nowhere near where it looked.
+    The agent now owns its own per-session log file
+    (logs/child-agent.s<session>.log, opened FileShare.ReadWrite) for
+    exactly that reason - a shell wrapper here would only reintroduce
+    the bug that per-session log file exists to prevent.
     """
     import os as _os
     from pathlib import Path
@@ -505,15 +510,9 @@ def _write_agent_launcher(exe: str) -> str:
     target = Path(_os.environ["LOCALAPPDATA"]) / "Alfred" / "launch_child_agent.vbs"
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    log = _agent_log()
-    Path(log).parent.mkdir(parents=True, exist_ok=True)
-
-    # A doubled "" is VBScript's own escape for a literal " inside a
-    # string literal - this is the exact same technique autostart.py
-    # uses, just with an extra quoted redirect target.
     lines = [
         'Set sh = CreateObject("WScript.Shell")',
-        'sh.Run "cmd.exe /c ""' + exe + '"" >> ""' + log + '"" 2>&1", 0, False',
+        'sh.Run """' + exe + '""", 0, False',
     ]
     target.write_text('\r\n'.join(lines) + '\r\n', encoding="utf-8")
     return str(target)
@@ -536,7 +535,7 @@ def cmd_install_agent(_args: list[str]) -> int:
     print("Windows then starts it inside Alfred's child session whenever")
     print("that session is created - which is the whole point. It also")
     print("starts in your own session, where Alfred already uses it -")
-    print(f"hidden, with its own console output going to {_agent_log()}.")
+    print("hidden, and it keeps its own log under logs/child-agent.s<session>.log.")
     print()
     print("Undo any time:  python -m src.childsession uninstall-agent")
     print()

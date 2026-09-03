@@ -9,8 +9,15 @@ not guessed.
 
 The fix routes the same WScript.Shell.Run(..., 0, False) hidden-window
 technique src/autostart.py already uses for Alfred itself through the
-Run-key entry too, keeping the console output redirected to a log file
-rather than either lost or flashed on screen.
+Run-key entry too - deliberately with NO cmd.exe wrapper and no '>>
+log' redirect. That exact combination was tried once already
+(scripts/install-child-agent-task.ps1's own comments, and
+windows/native/ChildInputAgent/Logging.cs) and broke isolation: two
+agents is the normal case, one in the user's session and one in
+Alfred's, and whichever started first held the shared log file - the
+second's redirect failed, cmd exited 1, no agent started. The agent
+now keeps its own per-session log file for exactly that reason, so
+this launcher's only job is opening it hidden.
 """
 
 from __future__ import annotations
@@ -29,19 +36,23 @@ def test_write_agent_launcher_produces_a_hidden_vbs(tmp_path, monkeypatch):
 
     assert target.endswith("launch_child_agent.vbs")
     assert os.path.exists(target)
-    assert 'sh.Run "cmd.exe /c ""C:\\fake\\ChildInputAgent.exe""' in script
+    assert 'sh.Run """C:\\fake\\ChildInputAgent.exe"""' in script
     assert script.rstrip().endswith("0, False")  # hidden window style
 
 
-def test_write_agent_launcher_redirects_console_output_to_a_log(tmp_path, monkeypatch):
+def test_write_agent_launcher_never_wraps_in_cmd_or_redirects_a_log(tmp_path, monkeypatch):
+    """That exact combination is what broke isolation before - see the
+    module docstring. The agent owns its own per-session log now; a
+    shell wrapper here has no job left to do except reintroduce that
+    bug."""
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
 
     target = childsession._write_agent_launcher(r"C:\fake\ChildInputAgent.exe")
     script = Path(target).read_text(encoding="utf-8")
 
-    assert ">>" in script  # append-redirect, not a lost console
-    assert "child-agent.log" in script
-    assert "2>&1" in script  # stderr captured too, not just stdout
+    assert "cmd" not in script.lower()
+    assert ">>" not in script
+    assert "2>&1" not in script
 
 
 def test_write_agent_launcher_quotes_survive_a_path_with_spaces(tmp_path, monkeypatch):

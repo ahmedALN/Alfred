@@ -194,17 +194,17 @@ def test_an_empty_goal_is_not_designed_for(registry):
 
 def test_the_owners_number_is_not_written_down_in_full():
     """It was printed on every start, into a log that gets pasted about."""
-    assert mask("+447435589157") == "+44...9157"
-    assert "7435589" not in mask("+447435589157")
+    assert mask("+447700900000") == "+44...0000"
+    assert "7700900" not in mask("+447700900000")
 
 
 def test_enough_is_kept_to_tell_two_numbers_apart():
-    assert mask("+447435589157") != mask("+447435580000")
+    assert mask("+447700900000") != mask("+447700900001")
 
 
 def test_a_line_is_scrubbed_wherever_the_number_sits():
-    line = "[Message] WhatsApp linked to +447435589157 - your own chat."
-    assert "589157" not in scrub(line)
+    line = "[Message] WhatsApp linked to +447700900000 - your own chat."
+    assert "900000" not in scrub(line)
     assert "WhatsApp linked to" in scrub(line)
 
 

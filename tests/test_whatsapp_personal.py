@@ -389,13 +389,13 @@ def test_it_is_reported_as_coming_from_me_not_from_a_lid():
     """Everything downstream - the allowlist, the reply - is written in
     terms of the number, and reaching that point proves whose account
     it was."""
-    channel = _channel(owner="+447435589157")
+    channel = _channel(owner="+447700900000")
     heard = []
     channel._on_message = heard.append
 
     channel._deliver(_event("Hello"))
 
-    assert heard[0].sender == "447435589157"
+    assert heard[0].sender == "447700900000"
 
 
 def test_what_i_say_to_other_people_is_not_an_instruction_to_alfred():
