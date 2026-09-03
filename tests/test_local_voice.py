@@ -96,53 +96,129 @@ def test_respond_caps_iterations():
     assert isinstance(out, str)
 
 
-# ---------------------------------------------------------------- speak_only
+# -------------------------------------------------------------- synthesize_pcm
 #
 # A dead turn on the live session (src/ai/gemini.py's watchdog) needs a
-# fallback line said FAST - the full offline loop's _load() also pulls
-# in faster-whisper, which nobody asked for just to say one sentence.
+# fallback line said FAST, without pulling in faster-whisper just to
+# say one sentence - and, critically, without opening a second,
+# independent PortAudio stream of its own. That was the first version
+# (speak_only(), via sd.play()) and it was enough to starve the live
+# session's microphone callback thread: "[Microphone] input overflow"
+# landed right as the fallback line tried to play, every time.
+# synthesize_pcm() returns raw bytes instead, meant to be queued into
+# an already-open stream - nothing here plays anything.
 
 
-def test_speak_only_loads_piper_without_whisper(monkeypatch):
+def test_synthesize_pcm_loads_piper_without_whisper(monkeypatch):
     lv, _ = _lv(ScriptChat([]))
     seen = {}
 
     def fake_load(need_stt=True):
         seen["need_stt"] = need_stt
-        lv._piper = object()
-        return True
+        return False  # short-circuits before any real synthesis is attempted
 
     monkeypatch.setattr(lv, "_load", fake_load)
-    monkeypatch.setattr(lv, "speak", lambda text: seen.setdefault("spoke", text))
 
-    assert lv.speak_only("try again?") is True
+    assert lv.synthesize_pcm("try again?", target_rate=24000) is None
     assert seen["need_stt"] is False
-    assert seen["spoke"] == "try again?"
 
 
-def test_speak_only_returns_false_if_it_cannot_load(monkeypatch):
+def test_synthesize_pcm_returns_none_if_it_cannot_load(monkeypatch):
     lv, _ = _lv(ScriptChat([]))
     monkeypatch.setattr(lv, "_load", lambda need_stt=True: False)
-    spoke = []
-    monkeypatch.setattr(lv, "speak", lambda text: spoke.append(text))
 
-    assert lv.speak_only("hello?") is False
-    assert spoke == []  # never got as far as trying to speak
+    assert lv.synthesize_pcm("hello?", target_rate=24000) is None
 
 
-def test_speak_only_does_not_reload_once_piper_is_already_up(monkeypatch):
+def test_synthesize_pcm_does_not_reload_once_piper_is_already_up(monkeypatch):
     lv, _ = _lv(ScriptChat([]))
-    lv._piper = object()  # as if a previous speak_only() already loaded it
+    lv._piper = object()  # as if a previous call already loaded it
 
     def _boom(need_stt=True):
         raise AssertionError("_load() should not be called again")
 
     monkeypatch.setattr(lv, "_load", _boom)
-    spoke = []
-    monkeypatch.setattr(lv, "speak", lambda text: spoke.append(text))
 
-    assert lv.speak_only("still there?") is True
-    assert spoke == ["still there?"]
+    # The fake _piper has no real synthesize_wav, so this fails past
+    # the reload check - proving _load() genuinely wasn't the thing
+    # that stopped it.
+    assert lv.synthesize_pcm("still there?", target_rate=24000) is None
+
+
+def test_synthesize_pcm_is_none_for_empty_text():
+    lv, _ = _lv(ScriptChat([]))
+    assert lv.synthesize_pcm("   ", target_rate=24000) is None
+
+
+def test_synthesize_pcm_never_touches_sounddevice(monkeypatch):
+    """The whole point: no playback, no second stream. If this ever
+    imports sounddevice again, the fix it exists for has regressed."""
+    import sys
+
+    lv, _ = _lv(ScriptChat([]))
+    monkeypatch.setattr(lv, "_load", lambda need_stt=True: False)
+    monkeypatch.delitem(sys.modules, "sounddevice", raising=False)
+
+    lv.synthesize_pcm("hello?", target_rate=24000)
+
+    assert "sounddevice" not in sys.modules
+
+
+def test_synthesize_pcm_end_to_end_with_the_real_piper_voice():
+    """The real Piper voice already on disk for this repo (no network
+    call), resampled from its native 22050 Hz to a different target -
+    proves the whole pipeline, not just the load-skip logic."""
+    lv, _ = _lv(ScriptChat([]))
+
+    pcm = lv.synthesize_pcm("Testing, one two three.", target_rate=24000)
+
+    assert pcm is not None
+    assert len(pcm) > 0
+    assert len(pcm) % 2 == 0  # whole int16 samples, nothing truncated oddly
+
+
+def test_synthesize_pcm_at_the_native_rate_needs_no_resampling():
+    lv, _ = _lv(ScriptChat([]))
+
+    pcm = lv.synthesize_pcm("Hi.", target_rate=22050)
+
+    assert pcm is not None
+    assert len(pcm) > 0
+
+
+# ---------------------------------------------------------------- _resample_int16
+
+
+def test_resample_int16_is_a_no_op_at_the_same_rate():
+    import numpy as np
+
+    from src.voice.local_voice import _resample_int16
+
+    pcm = np.array([1, 2, 3, 4, 5], dtype=np.int16)
+    out = _resample_int16(pcm, 22050, 22050)
+
+    assert out is pcm  # returned unchanged, not merely equal
+
+
+def test_resample_int16_preserves_duration_not_sample_count():
+    import numpy as np
+
+    from src.voice.local_voice import _resample_int16
+
+    one_second = np.zeros(22050, dtype=np.int16)
+    out = _resample_int16(one_second, 22050, 24000)
+
+    assert out.dtype == np.int16
+    assert abs(len(out) - 24000) <= 1  # still ~one second, at the new rate
+
+
+def test_resample_int16_handles_an_empty_array():
+    import numpy as np
+
+    from src.voice.local_voice import _resample_int16
+
+    empty = np.array([], dtype=np.int16)
+    assert len(_resample_int16(empty, 22050, 24000)) == 0
 
 
 def test_load_with_need_stt_false_never_touches_whisper():

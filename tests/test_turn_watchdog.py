@@ -53,11 +53,11 @@ class _FakeActivation:
 class _FakeLocalVoice:
     def __init__(self, ok: bool = True):
         self._ok = ok
-        self.said: list[str] = []
+        self.asked: list[tuple[str, int]] = []
 
-    def speak_only(self, text: str) -> bool:
-        self.said.append(text)
-        return self._ok
+    def synthesize_pcm(self, text: str, target_rate: int) -> bytes | None:
+        self.asked.append((text, target_rate))
+        return b"\x01\x00\x02\x00" if self._ok else None
 
 
 # ====================================================================
@@ -273,6 +273,14 @@ def test_timed_out_with_no_activation_does_not_crash():
 
 
 def test_timed_out_speaks_a_fallback_through_local_voice():
+    """Synthesis only - no playback of its own. A second, independent
+    PortAudio stream (sd.play(), the first version of this) running
+    alongside the live session's own microphone capture was enough to
+    starve its real-time callback thread: "[Microphone] input
+    overflow" landed right as the fallback line tried to play, every
+    time. The fix queues the synthesized PCM into the session's own
+    ALREADY-OPEN speaker queue instead, at the session's own output
+    rate - nothing here opens anything of its own."""
     local = _FakeLocalVoice(ok=True)
     session = _session(
         _activation=_FakeActivation(),
@@ -281,8 +289,13 @@ def test_timed_out_speaks_a_fallback_through_local_voice():
 
     asyncio.run(session._turn_timed_out())
 
-    assert len(local.said) == 1
-    assert local.said[0].strip() != ""
+    assert len(local.asked) == 1
+    text, target_rate = local.asked[0]
+    assert text.strip() != ""
+    assert target_rate == session.OUTPUT_SAMPLE_RATE
+
+    queued = session._speaker_queue.get_nowait()
+    assert queued == b"\x01\x00\x02\x00"
 
 
 def test_timed_out_with_no_local_voice_factory_just_logs(capsys):
@@ -308,5 +321,6 @@ def test_timed_out_survives_local_voice_reporting_failure(capsys):
 
     asyncio.run(session._turn_timed_out())
 
-    assert local.said  # it tried
+    assert local.asked  # it tried
     assert "unavailable" in capsys.readouterr().out
+    assert session._speaker_queue.empty()  # nothing to play, nothing queued

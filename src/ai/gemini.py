@@ -1165,13 +1165,25 @@ class AlfredLiveSession:
             return
         try:
             local = self._local_voice_factory()
-            ok = await asyncio.to_thread(
-                local.speak_only,
+            # Synthesis only, no playback of its own - a second,
+            # independent PortAudio stream (what the first version of
+            # this did, via sd.play()) running alongside the live
+            # session's own microphone capture was enough to starve
+            # its real-time callback thread: "[Microphone] input
+            # overflow" landed right as the fallback line tried to
+            # play, every time. Queuing the resampled PCM into the
+            # ALREADY-OPEN output stream this session already uses for
+            # Gemini's own audio has nothing to contend with.
+            pcm = await asyncio.to_thread(
+                local.synthesize_pcm,
                 "Sorry, I didn't catch a response through there - "
                 "could you say that again?",
+                self.OUTPUT_SAMPLE_RATE,
             )
-            if not ok:
+            if pcm is None:
                 print("[Alfred] fallback speech unavailable too.")
+            else:
+                self._queue_audio(pcm)
         except Exception as exc:  # noqa: BLE001
             print(f"[Alfred] turn-watchdog fallback speech failed: {exc}")
 

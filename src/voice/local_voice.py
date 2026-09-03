@@ -39,6 +39,24 @@ __TOOLS__
 """
 
 
+def _resample_int16(pcm: Any, orig_rate: int, target_rate: int) -> Any:
+    """Linear-interpolation resample, mono int16 in, mono int16 out.
+    No scipy/librosa - numpy is already a hard dependency and this
+    project deliberately keeps that footprint. Good enough for a short
+    spoken sentence; not meant for music."""
+    import numpy as np
+
+    if orig_rate == target_rate or pcm.size == 0:
+        return pcm
+
+    duration = pcm.size / orig_rate
+    n_target = max(1, round(duration * target_rate))
+    x_orig = np.linspace(0.0, duration, num=pcm.size, endpoint=False)
+    x_target = np.linspace(0.0, duration, num=n_target, endpoint=False)
+    resampled = np.interp(x_target, x_orig, pcm.astype(np.float32))
+    return np.clip(resampled, -32768, 32767).astype(np.int16)
+
+
 def ensure_piper_voice() -> bool:
     if _PIPER_VOICE.exists():
         return True
@@ -115,15 +133,49 @@ class LocalVoiceSession:
 
     # ----------------------------------------------------------------
 
-    def speak_only(self, text: str) -> bool:
-        """TTS with nothing else loaded - for a quick fallback line
-        when there's no time (or need) for the full offline-chat
-        loop's STT/chat model. Cheap to call repeatedly: Piper stays
-        loaded after the first successful call."""
+    def synthesize_pcm(self, text: str, target_rate: int) -> bytes | None:
+        """Piper only (no whisper) and no playback of its own - just
+        the raw resampled int16 PCM bytes, meant to be fed into an
+        ALREADY-OPEN output stream (src/ai/gemini.py's turn watchdog
+        queues this straight into the live session's own speaker
+        queue) rather than played through a second, independent one.
+
+        That distinction is not cosmetic: sd.play() opens its own
+        PortAudio stream, and having that running concurrently with
+        the live session's microphone capture was enough to starve
+        the mic's real-time callback thread - "[Microphone] input
+        overflow" showed up right as the fallback line tried to play,
+        every time. Piper's own voice is 22050 Hz; whatever the live
+        session's output stream actually runs at (24000 Hz for
+        Gemini's own audio) is what target_rate should be, so the
+        caller can queue this into that exact stream with nothing
+        left to reconcile.
+        """
+        text = text.strip()
+        if not text:
+            return None
         if self._piper is None and not self._load(need_stt=False):
-            return False
-        self.speak(text)
-        return True
+            return None
+
+        try:
+            import numpy as np
+
+            buf = io.BytesIO()
+            with wave.open(buf, "wb") as wf:
+                self._piper.synthesize_wav(text, wf)
+            buf.seek(0)
+            with wave.open(buf, "rb") as wf:
+                rate = wf.getframerate()
+                pcm = np.frombuffer(
+                    wf.readframes(wf.getnframes()), dtype=np.int16
+                )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[LocalVoice] synthesis failed: {exc}")
+            return None
+
+        if rate != target_rate:
+            pcm = _resample_int16(pcm, rate, target_rate)
+        return pcm.tobytes()
 
     def speak(self, text: str) -> None:
         text = text.strip()
