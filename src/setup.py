@@ -45,7 +45,11 @@ def check_python_deps() -> None:
             __import__(mod)
         except ImportError:
             missing.append(mod)
-    for mod, pkg in (("openwakeword", "openwakeword"), ("onnxruntime", "onnxruntime")):
+    for mod, pkg in (
+        ("openwakeword", "openwakeword"),
+        ("onnxruntime", "onnxruntime"),
+        ("kaldi_native_fbank", "kaldi-native-fbank"),
+    ):
         try:
             __import__(mod)
         except ImportError:

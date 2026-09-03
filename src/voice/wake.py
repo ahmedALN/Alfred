@@ -3,11 +3,18 @@ from __future__ import annotations
 import json
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 
 _SAMPLE_RATE = 16_000
 _CHUNK = 1280  # 80 ms
+
+# How much recent audio is kept around a detected phrase for the
+# speaker check - long enough to comfortably hold a short wake phrase
+# plus some lead-in, short enough that most of it isn't dead air.
+_BUFFER_SECONDS = 3.0
+_BUFFER_CHUNKS = max(1, int(_BUFFER_SECONDS * _SAMPLE_RATE / _CHUNK))
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 _VOSK_DIR = _ROOT / "models" / "vosk-model-small-en-us-0.15"
@@ -25,7 +32,12 @@ class WakeListener:
       - otherwise openWakeWord: a custom ``model_path`` .onnx, else the
         bundled "hey jarvis".
 
-    Any failure degrades to "no wake word" rather than raising.
+    Any failure degrades to "no wake word" rather than raising - with
+    one deliberate exception: if you've enrolled your voice
+    (``python -m src.voice.enroll_voice``), a wake-phrase match from
+    someone else's voice does not fire, and a speaker check that
+    cannot run at all is treated as a mismatch rather than let through.
+    See src/voice/speaker_id.py.
     """
 
     def __init__(
@@ -36,17 +48,22 @@ class WakeListener:
         model_path: str | None = None,
         threshold: float = 0.5,
         debounce_seconds: float = 2.5,
+        speaker_verify: bool = True,
+        speaker_threshold: float = 0.42,
     ) -> None:
         self._on_detect = on_detect
         self._phrase = (phrase or "").strip().lower() or None
         self._model_path = model_path or None
         self._threshold = threshold
         self._debounce = debounce_seconds
+        self._speaker_verify = speaker_verify
+        self._speaker_threshold = speaker_threshold
 
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._paused = threading.Event()
         self._last_fire = 0.0
+        self._buffer: deque = deque(maxlen=_BUFFER_CHUNKS)
         self.label = self._phrase or "hey_jarvis"
 
     # ----------------------------------------------------------------
@@ -99,17 +116,59 @@ class WakeListener:
         now = time.monotonic()
         if now - self._last_fire < self._debounce:
             return
-        self._last_fire = now
+        self._last_fire = now  # covers a real fire and a rejected one alike
+
+        if self._speaker_verify and not self._speaker_ok():
+            print(f"[Wake] '{self.label}' heard ({score:.2f}) but the voice did not match - ignoring.")
+            return
+
         print(f"[Wake] '{self.label}' detected ({score:.2f})")
         try:
             self._on_detect(score)
         except Exception as exc:  # noqa: BLE001
             print(f"[Wake] on_detect failed: {exc}")
 
+    def _captured_audio(self):
+        import numpy as np
+
+        if not self._buffer:
+            return np.array([], dtype=np.int16)
+        return np.concatenate(list(self._buffer))
+
+    def _speaker_ok(self) -> bool:
+        """True unless someone has actually enrolled and this specific
+        utterance failed to match them. Only ever narrows who can wake
+        Alfred - never breaks the wake word for someone who has not
+        enrolled, even if this whole check fails to run.
+
+        A genuine exception here is a bug, not "can't check right
+        now" - speaker_id.matches() already catches its own expected
+        failure modes (missing model, missing dependency, unreadable
+        voiceprint) and returns None for those, which IS the
+        deliberate fail-closed path below. Anything that still raises
+        is unexpected, and one such bug should not be able to silently
+        brick the wake word - so that case fails open instead, loudly.
+        """
+        try:
+            from src.voice import speaker_id
+
+            if not speaker_id.is_enrolled():
+                return True
+            result = speaker_id.matches(self._captured_audio(), self._speaker_threshold)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Wake] voice check errored ({exc}); allowing this once.")
+            return True
+
+        if result is None:
+            print("[Wake] enrolled, but the voice check could not run this time.")
+            return False
+        return result
+
     # ---- Vosk (custom phrase) -------------------------------------
 
     def _run_vosk(self) -> None:
         try:
+            import numpy as np
             import sounddevice as sd
             from vosk import KaldiRecognizer, Model, SetLogLevel
         except Exception as exc:  # noqa: BLE001
@@ -147,6 +206,7 @@ class WakeListener:
                         continue
 
                     raw = bytes(data)
+                    self._buffer.append(np.frombuffer(raw, dtype=np.int16))
                     final = rec.AcceptWaveform(raw)
                     text = json.loads(
                         rec.Result() if final else rec.PartialResult()
@@ -199,6 +259,7 @@ class WakeListener:
                         continue
 
                     samples = np.frombuffer(bytes(data), dtype=np.int16)
+                    self._buffer.append(samples)
                     scores = model.predict(samples)
                     score = max(scores.values()) if scores else 0.0
 

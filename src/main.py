@@ -555,6 +555,8 @@ async def main() -> None:
                 phrase=settings.wake_phrase or None,
                 model_path=settings.wake_model or None,
                 threshold=settings.wake_threshold,
+                speaker_verify=settings.speaker_verify_enabled,
+                speaker_threshold=settings.speaker_verify_threshold,
             )
             wake_listener.start()
 

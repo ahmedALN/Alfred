@@ -24,6 +24,11 @@ openwakeword>=0.6.0,<1            # tested: 0.6.0
 onnxruntime>=1.16,<2              # tested: 1.29.0
 vosk>=0.3.45,<1                   # tested: 0.3.45
 
+# --- Speaker verification (only your voice wakes it, once enrolled) --
+# Kaldi-compatible fbank features for the ECAPA-TDNN voiceprint model -
+# a small, dependency-free C++ extension, not torch/torchaudio.
+kaldi-native-fbank>=1.18,<2       # tested: 1.18.3
+
 # --- Local voice, for when the Gemini quota is hit ----------------
 faster-whisper>=1.0,<2            # tested: 1.2.1
 piper-tts>=1.2,<2                 # tested: 1.7.0

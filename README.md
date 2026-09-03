@@ -61,6 +61,13 @@ back to sleep after ~30 s of silence.
 For a custom **"Hey Alfred"**: `python -m src.voice.setup_wakeword` once, then
 put `ALFRED_WAKE_PHRASE=hey alfred` in `.env`.
 
+Want the wake word to only work for *your* voice — not a housemate, a TV, or
+a podcast saying it? `python -m src.voice.enroll_voice` records a few takes
+and enrolls a voiceprint (192 numbers, stored locally, never your actual
+voice); once that file exists, a phrase match from anyone else is ignored.
+`--test` checks a take against it without changing anything, and
+`ALFRED_SPEAKER_VERIFY_ENABLED=false` in `.env` turns the check back off.
+
 | Say | What happens |
 |---|---|
 | "open Spotify" / "open youtube" | launches it on Alfred's own desktop |
@@ -122,6 +129,7 @@ python -m src.workspace status       # is Google linked, and what may it do
 python -m src.ui                     # the interface on its own, without Alfred running
 python -m src.watchdog               # run Alfred with crash-restart supervision
 python -m src.voice.setup_wakeword   # download the model for a custom wake phrase
+python -m src.voice.enroll_voice     # only your voice wakes it  (--test / --reset)
 ```
 
 **Planning model:** multi-step tasks are planned (and re-planned) by

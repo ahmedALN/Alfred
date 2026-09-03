@@ -55,6 +55,10 @@ class Settings:
     wake_phrase: str
     wake_model: str
     wake_threshold: float
+    # Only fires the wake word for the enrolled voice
+    # (python -m src.voice.enroll_voice); a no-op until you enroll.
+    speaker_verify_enabled: bool
+    speaker_verify_threshold: float
     hotkey: str
     # The interface is opt-in: this summons it, nothing else does.
     interface_hotkey: str
@@ -194,6 +198,8 @@ def load_settings() -> Settings:
         wake_phrase=os.getenv("ALFRED_WAKE_PHRASE", "").strip().lower(),
         wake_model=os.getenv("ALFRED_WAKE_MODEL", "").strip(),
         wake_threshold=_get_float("ALFRED_WAKE_THRESHOLD", 0.5),
+        speaker_verify_enabled=_get_bool("ALFRED_SPEAKER_VERIFY_ENABLED", True),
+        speaker_verify_threshold=_get_float("ALFRED_SPEAKER_VERIFY_THRESHOLD", 0.42),
         hotkey=os.getenv("ALFRED_HOTKEY", "ctrl+alt+k").strip().lower(),
         interface_hotkey=os.getenv(
             "ALFRED_INTERFACE_HOTKEY", "ctrl+alt+i"
