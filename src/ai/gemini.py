@@ -40,6 +40,13 @@ def _is_session_limit(lived: float, exc: BaseException) -> bool:
     )
 
 
+def _vad_silence_ms() -> int:
+    try:
+        return int(os.getenv("ALFRED_VAD_SILENCE_MS", "700"))
+    except ValueError:
+        return 700
+
+
 def _is_muted() -> bool:
     return os.getenv("ALFRED_QUIET", "").strip().lower() in ("1", "true", "yes", "on")
 
@@ -474,10 +481,24 @@ class AlfredLiveSession:
             "one short sentence. "
 
             "For a job that needs several steps in sequence (organizing "
-            "files, auditing and fixing settings, setting something up), "
-            "call run_task with a clear goal and let the background agent "
-            "do it; tell the user you've started and don't wait. Do quick "
-            "single actions yourself. "
+            "files, auditing and fixing settings, setting something up, "
+            "OR working inside an app beyond one click - opening it, "
+            "finding something, then acting on it), call run_task with a "
+            "clear goal and let the background agent do it; tell the user "
+            "you've started and don't wait. 'Open Spotify and play a "
+            "song' is not one quick action - it is open, wait, search, "
+            "pick a result: send it to run_task, the same turn you hear "
+            "it, and say so out loud immediately. Do quick single actions "
+            "- opening one thing, answering a question, one click - "
+            "yourself. "
+
+            "Never let more than one tool call go by without having said "
+            "something out loud first. If what the user asked needs "
+            "several tool calls before you can answer properly, your "
+            "FIRST move is a short spoken line - 'On it, one moment' is "
+            "enough - and only then the tool calls. Going quiet while "
+            "you work reads as not having heard them at all, and they "
+            "will repeat themselves to a silence. "
 
             "Alfred has a second, private Windows desktop the user "
             "cannot see. When they ask for something 'without disturbing "
@@ -534,6 +555,29 @@ class AlfredLiveSession:
                     automatic_activity_detection=(
                         types.AutomaticActivityDetection(
                             disabled=False,
+                            # How long a silence has to run before the
+                            # model decides you have stopped talking.
+                            # Left unset, this is Google's server-side
+                            # default, and the user's own account of it
+                            # ("keeps listening for like 5 seconds
+                            # more") suggests it is on the generous
+                            # side - fine for a dictation tool, slow for
+                            # a conversation. 700ms is a deliberate
+                            # middle ground: quick enough that a pause
+                            # for a breath doesn't feel like being cut
+                            # off, short enough that "how are you"
+                            # doesn't sit waiting for a sentence that
+                            # is not coming.
+                            #
+                            # Not verified by ear from here - this is an
+                            # audio-timing parameter that only a real
+                            # spoken exchange can confirm feels right.
+                            # ALFRED_VAD_SILENCE_MS overrides it if 700
+                            # turns out wrong in either direction.
+                            silence_duration_ms=_vad_silence_ms(),
+                            end_of_speech_sensitivity=(
+                                types.EndSensitivity.END_SENSITIVITY_HIGH
+                            ),
                         )
                     )
                 )
