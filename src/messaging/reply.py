@@ -22,6 +22,7 @@ meant, and you say it again.
 
 from __future__ import annotations
 
+import re
 from collections import deque
 from collections.abc import Callable
 
@@ -112,6 +113,31 @@ Examples:
     "no not that one"      -> STEER: not that one - pick a different result
     "make it 1.21.11"      -> STEER: use the 1.21.11 instance instead
 """
+
+# Reasoning-tuned models (nemotron and its family, which the plan chain
+# falls to whenever the fast rung is spent or having a bad minute)
+# default to a "let me think this through" preamble unless told not to.
+# That preamble is what went out as the "unreadable answer": asked to
+# steer a running Spotify job, the model that answered was nemotron, and
+# what it produced was "We need to interpret the user's message..." -
+# the reasoning itself, not the SAY:/DO:/STEER: line after it. Nothing
+# had told it to skip the reasoning, because src/brain/agent.py's
+# equivalent line was never reused here.
+_THINKING_OFF = (
+    "detailed thinking off. Output only what the user's message asks for - "
+    "no analysis, no preamble, no explanation."
+)
+
+# 200 was chosen for a one-line reply and never revisited for what a
+# reasoning model actually needs. Measured against the exact call that
+# failed live - steering a running Spotify job - nemotron spent the
+# WHOLE budget on "We need to interpret the user's message..." every
+# time at 200 tokens (0/4) and at 300 (0/1), because the reasoning
+# consumes whatever room it is given rather than racing to finish
+# early. At 700 it reliably finishes and reaches the marker (6/6).
+# The fast rungs answer this in under 200 anyway; the cost lands only
+# on the slow path that was already failing.
+_TOKENS = 700
 
 _MAX_REPLY = 900
 
@@ -243,8 +269,8 @@ class Conversation:
 
         try:
             raw = self._chat.generate(
-                self._prompt(text), system=_SYSTEM, temperature=0.3,
-                max_tokens=200,
+                self._prompt(text), system=_THINKING_OFF + "\n\n" + _SYSTEM,
+                temperature=0.3, max_tokens=_TOKENS,
             )
         except Exception as exc:  # noqa: BLE001
             print(f"[Message] could not think of a reply: {exc}")
@@ -551,11 +577,49 @@ def _read(raw: str) -> tuple[str, str]:
 
 
 def _is_reasoning(text: str) -> bool:
-    """Is this the model working out what to say, rather than saying it?"""
+    """Is this the model working out what to say, rather than saying it?
+
+    The check used to be "does it mention a marker, or say THE
+    INSTRUCTION" - which is what a model does WHILE reasoning about the
+    format, but not what it does at the very start of reasoning about
+    anything else. Sent "nevermind, learn how to play songs of
+    spotify" while a job was running, nemotron opened with "We need to
+    interpret the user's message: ..." - no marker mentioned, "THE
+    INSTRUCTION" nowhere in it - and fell through to the "unmarked text
+    is just talk" branch, which then read out the FIRST LINE OF THE
+    MODEL'S OWN REASONING as if it were Alfred speaking.
+    """
     upper = text.upper()
     # Anchored and wrapped markers were already taken, so one still
     # sitting in here is being talked about rather than used.
     if any(marker in upper for marker, _ in _MARKERS):
         return True
-    return "THE INSTRUCTION" in upper
+    if "THE INSTRUCTION" in upper:
+        return True
+    # The stock openings a reasoning model reaches for before it has
+    # decided anything - restating the task to itself rather than
+    # answering it.
+    return bool(_REASONING_OPENING.match(text.strip()))
+
+
+# "We need to work out...", "Let's figure out...", "I need to
+# understand...", "We should decide...", "Let me think about..." - the
+# shapes a model uses when it is talking TO ITSELF about the problem,
+# not answering it. Anchored at the start: a real answer can mention
+# "the user" in passing without being this.
+#
+# Three grammars, because English modals do not all take the verb the
+# same way: "need/have/want" take it through "to" ("need to decide"),
+# "should/must/will" take it bare ("should decide", no "to"), and
+# "let's"/"let me" take it bare too ("let's figure out").
+_REASONING_OPENING = re.compile(
+    r"^(?:"
+    r"(?:we|i)\s+(?:need|have|want)\s+to\s+"
+    r"|(?:we|i)\s+(?:should|must|will)\s+"
+    r"|(?:let'?s|let\s+me)\s+"
+    r")"
+    r"(?:interpret|parse|decide|work\s+out|figure\s+out|understand|"
+    r"determine|analyze|analyse|think|consider|check)\b",
+    re.I,
+)
 
