@@ -87,11 +87,13 @@ class LocalVoiceSession:
 
     # ----------------------------------------------------------------
 
-    def _load(self) -> bool:
+    def _load(self, need_stt: bool = True) -> bool:
         try:
             import sounddevice  # noqa: F401
-            from faster_whisper import WhisperModel
             from piper import PiperVoice
+
+            if need_stt:
+                from faster_whisper import WhisperModel
         except Exception as exc:  # noqa: BLE001
             print(f"[LocalVoice] unavailable: {exc}")
             return False
@@ -100,9 +102,10 @@ class LocalVoiceSession:
             return False
 
         try:
-            self._whisper = WhisperModel(
-                self._stt_model_name, device="cpu", compute_type="int8"
-            )
+            if need_stt:
+                self._whisper = WhisperModel(
+                    self._stt_model_name, device="cpu", compute_type="int8"
+                )
             self._piper = PiperVoice.load(str(_PIPER_VOICE))
         except Exception as exc:  # noqa: BLE001
             print(f"[LocalVoice] model load failed: {exc}")
@@ -111,6 +114,16 @@ class LocalVoiceSession:
         return True
 
     # ----------------------------------------------------------------
+
+    def speak_only(self, text: str) -> bool:
+        """TTS with nothing else loaded - for a quick fallback line
+        when there's no time (or need) for the full offline-chat
+        loop's STT/chat model. Cheap to call repeatedly: Piper stays
+        loaded after the first successful call."""
+        if self._piper is None and not self._load(need_stt=False):
+            return False
+        self.speak(text)
+        return True
 
     def speak(self, text: str) -> None:
         text = text.strip()

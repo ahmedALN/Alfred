@@ -94,3 +94,64 @@ def test_respond_caps_iterations():
     out = lv._respond("loop")
     assert len(reg.executed) <= 3
     assert isinstance(out, str)
+
+
+# ---------------------------------------------------------------- speak_only
+#
+# A dead turn on the live session (src/ai/gemini.py's watchdog) needs a
+# fallback line said FAST - the full offline loop's _load() also pulls
+# in faster-whisper, which nobody asked for just to say one sentence.
+
+
+def test_speak_only_loads_piper_without_whisper(monkeypatch):
+    lv, _ = _lv(ScriptChat([]))
+    seen = {}
+
+    def fake_load(need_stt=True):
+        seen["need_stt"] = need_stt
+        lv._piper = object()
+        return True
+
+    monkeypatch.setattr(lv, "_load", fake_load)
+    monkeypatch.setattr(lv, "speak", lambda text: seen.setdefault("spoke", text))
+
+    assert lv.speak_only("try again?") is True
+    assert seen["need_stt"] is False
+    assert seen["spoke"] == "try again?"
+
+
+def test_speak_only_returns_false_if_it_cannot_load(monkeypatch):
+    lv, _ = _lv(ScriptChat([]))
+    monkeypatch.setattr(lv, "_load", lambda need_stt=True: False)
+    spoke = []
+    monkeypatch.setattr(lv, "speak", lambda text: spoke.append(text))
+
+    assert lv.speak_only("hello?") is False
+    assert spoke == []  # never got as far as trying to speak
+
+
+def test_speak_only_does_not_reload_once_piper_is_already_up(monkeypatch):
+    lv, _ = _lv(ScriptChat([]))
+    lv._piper = object()  # as if a previous speak_only() already loaded it
+
+    def _boom(need_stt=True):
+        raise AssertionError("_load() should not be called again")
+
+    monkeypatch.setattr(lv, "_load", _boom)
+    spoke = []
+    monkeypatch.setattr(lv, "speak", lambda text: spoke.append(text))
+
+    assert lv.speak_only("still there?") is True
+    assert spoke == ["still there?"]
+
+
+def test_load_with_need_stt_false_never_touches_whisper():
+    """The real _load(), not a stub - proves need_stt=False actually
+    skips the whisper import/model rather than just being an unused
+    parameter. Uses the Piper voice already on disk for this repo, so
+    no network call and no whisper download either."""
+    lv, _ = _lv(ScriptChat([]))
+    ok = lv._load(need_stt=False)
+    assert ok is True
+    assert lv._whisper is None
+    assert lv._piper is not None

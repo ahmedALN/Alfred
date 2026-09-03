@@ -47,6 +47,21 @@ def _vad_silence_ms() -> int:
         return 700
 
 
+def _turn_watchdog_seconds() -> float:
+    """A turn that goes this long with no progress at all - no tool
+    call, no reply text, no output audio, and the user not still
+    talking - almost certainly died silently rather than is just
+    slow: a tool has its own 90s timeout and reports back either way,
+    so this only ever fires on something that was never going to
+    report back on its own. Comfortably longer than a normal
+    tool-call round trip, comfortably shorter than the 30s idle
+    timeout it exists to keep someone from silently waiting out."""
+    try:
+        return float(os.getenv("ALFRED_TURN_WATCHDOG_SECONDS", "12"))
+    except ValueError:
+        return 12.0
+
+
 def _is_muted() -> bool:
     return os.getenv("ALFRED_QUIET", "").strip().lower() in ("1", "true", "yes", "on")
 
@@ -168,6 +183,20 @@ class AlfredLiveSession:
         # Partial input-transcription fragments for the current user
         # turn, joined and handed to the brain on turn completion.
         self._input_transcript_parts: list[str] = []
+
+        # Turn watchdog: "heard you, then nothing" should never just
+        # sit there until the 30s idle timeout - see _turn_watchdog().
+        # True from the first word of a turn until turn_complete;
+        # _turn_started_at resets on every sign of progress, so the
+        # watchdog only fires once EVERYTHING has gone quiet, not
+        # merely because a reply is taking a while.
+        self._turn_pending = False
+        self._turn_started_at = 0.0
+        self._turn_watchdog_seconds = _turn_watchdog_seconds()
+        # A tool has its own 90s timeout and always reports back - the
+        # watchdog would otherwise fire ON it, mistaking "still running"
+        # for "died silently".
+        self._tool_in_flight = False
 
         # Isolation for a DIRECT voice request (no task queue involved).
         # The voice model answers simple requests inline, so this cannot
@@ -1099,6 +1128,53 @@ class AlfredLiveSession:
     # Gemini → Alfred
     # ================================================================
 
+    def _turn_progress(self) -> None:
+        """Something happened this turn - the user is still talking,
+        or the model called a tool, or it produced text/audio. Marks
+        the turn as not-yet-done and pushes the watchdog's clock back
+        out, so it only ever fires on real, total silence."""
+        self._turn_pending = True
+        self._turn_started_at = time.monotonic()
+
+    async def _turn_watchdog(self, poll_seconds: float = 2.0) -> None:
+        """Background loop, alongside the brain and activation timer:
+        a turn that has made no progress at all for
+        ``_turn_watchdog_seconds`` gets a fallback response instead of
+        silence - see _turn_timed_out()."""
+        while True:
+            await asyncio.sleep(poll_seconds)
+            if not self._turn_pending or self._tool_in_flight:
+                continue
+            if time.monotonic() - self._turn_started_at < self._turn_watchdog_seconds:
+                continue
+            self._turn_pending = False  # fire once per dead turn
+            await self._turn_timed_out()
+
+    async def _turn_timed_out(self) -> None:
+        print(
+            f"[Alfred] no response arrived within "
+            f"{self._turn_watchdog_seconds:.0f}s of what you said - "
+            "that turn was likely dropped."
+        )
+
+        if self._activation is not None:
+            self._activation.note_activity()
+            self._activation.extend(20.0)
+
+        if self._local_voice_factory is None:
+            return
+        try:
+            local = self._local_voice_factory()
+            ok = await asyncio.to_thread(
+                local.speak_only,
+                "Sorry, I didn't catch a response through there - "
+                "could you say that again?",
+            )
+            if not ok:
+                print("[Alfred] fallback speech unavailable too.")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Alfred] turn-watchdog fallback speech failed: {exc}")
+
     async def _receive(self) -> None:
         if self.session is None:
             raise RuntimeError(
@@ -1125,9 +1201,15 @@ class AlfredLiveSession:
                         pass
 
                 if response.tool_call:
-                    await self._handle_tool_call(
-                        response.tool_call
-                    )
+                    self._turn_progress()
+                    self._tool_in_flight = True
+                    try:
+                        await self._handle_tool_call(
+                            response.tool_call
+                        )
+                    finally:
+                        self._tool_in_flight = False
+                        self._turn_progress()  # it reported back either way
 
                     continue
 
@@ -1154,11 +1236,13 @@ class AlfredLiveSession:
                                 audio_data,
                                 bytes,
                             ):
+                                self._turn_progress()
                                 self._queue_audio(
                                     audio_data
                                 )
 
                         if part.text:
+                            self._turn_progress()
                             transcript_parts.append(
                                 part.text
                             )
@@ -1169,6 +1253,7 @@ class AlfredLiveSession:
 
                 if input_transcription is not None:  # noqa: SIM102
                     if input_transcription.text:
+                        self._turn_progress()
                         print(
                             f"\nYou: "
                             f"{input_transcription.text}"
@@ -1202,6 +1287,7 @@ class AlfredLiveSession:
 
                 if output_transcription is not None:  # noqa: SIM102
                     if output_transcription.text:
+                        self._turn_progress()
                         transcript_parts.append(
                             output_transcription.text
                         )
@@ -1216,6 +1302,8 @@ class AlfredLiveSession:
                     )
 
                 if server_content.turn_complete:
+                    self._turn_pending = False
+
                     response_text = "".join(
                         transcript_parts
                     ).strip()
@@ -1567,6 +1655,10 @@ class AlfredLiveSession:
                     _supervise("activation", self._activation.run)
                 )
             )
+
+        background.add(
+            asyncio.create_task(_supervise("turn_watchdog", self._turn_watchdog))
+        )
 
         for i, factory in enumerate(self._background_factories):
             background.add(
